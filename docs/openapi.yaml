@@ -1,0 +1,203 @@
+openapi: 3.1.0
+info:
+  title: ForgePanel API
+  version: 0.1.0
+  description: >
+    REST API ForgePanela — API-first: UI je samo potrošač ovog API-ja.
+    Autentikacija: Bearer token (session token iz /auth/login ili API token sa scopovima).
+servers:
+  - url: https://{host}:8443/api/v1
+    variables:
+      host:
+        default: panel.example.com
+
+security:
+  - bearer: []
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  schemas:
+    Error:
+      type: object
+      properties:
+        ok: { type: boolean, const: false }
+        error: { type: string }
+    Ok:
+      type: object
+      properties:
+        ok: { type: boolean, const: true }
+        data: {}
+    Vhost:
+      type: object
+      properties:
+        id: { type: integer }
+        domain: { type: string }
+        subscription_id: { type: integer }
+        sys_user: { type: string }
+        php_version: { type: string, enum: ["8.1", "8.2", "8.3", "8.4"] }
+        web_backend: { type: string, enum: [nginx, nginx_apache] }
+        docroot: { type: string }
+        status: { type: string, enum: [active, suspended, creating, error] }
+    Task:
+      type: object
+      properties:
+        id: { type: integer }
+        op: { type: string }
+        status: { type: string, enum: [pending, running, done, failed, cancelled] }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        output: { type: string, nullable: true }
+        error: { type: string, nullable: true }
+
+paths:
+  /auth/login:
+    post:
+      security: []
+      summary: Prijava (e-mail + lozinka); može vratiti twofa_required
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200": { description: "status: ok | twofa_required + session token" }
+        "401": { description: Neispravni podaci }
+        "429": { description: Račun zaključan (rate limit) }
+  /auth/twofa:
+    post:
+      summary: Potvrda TOTP koda za session
+      responses:
+        "200": { description: OK }
+  /auth/webauthn/login/options:
+    post:
+      summary: WebAuthn login challenge za pending session (challenge, rp_id, allow lista credentiala)
+      responses:
+        "200": { description: OK }
+  /auth/webauthn/login:
+    post:
+      summary: Verifikacija WebAuthn assertiona — drugi faktor umjesto TOTP-a
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential_id, authenticator_data, client_data_json, signature]
+              properties:
+                credential_id: { type: string, description: base64url }
+                authenticator_data: { type: string, description: base64url }
+                client_data_json: { type: string, description: base64url }
+                signature: { type: string, description: base64url }
+      responses:
+        "200": { description: OK — session označen kao twofa_passed }
+        "401": { description: Assertion odbijen }
+  /auth/webauthn/register/options:
+    post:
+      summary: Challenge za registraciju novog sigurnosnog ključa (puna autentikacija)
+      responses:
+        "200": { description: "challenge, rp_id, user_id, exclude lista" }
+  /auth/webauthn/register:
+    post:
+      summary: Registracija sigurnosnog ključa (attestation 'none'; ES256/RS256/Ed25519)
+      responses:
+        "201": { description: Ključ spremljen }
+        "422": { description: Nevaljan credential ili istekao challenge }
+  /auth/webauthn/keys:
+    get:
+      summary: Popis registriranih sigurnosnih ključeva korisnika
+      responses:
+        "200": { description: OK }
+  /auth/webauthn/keys/{id}:
+    delete:
+      summary: Uklanjanje sigurnosnog ključa
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: OK }
+  /auth/me:
+    get:
+      summary: Podaci o prijavljenom korisniku
+      responses:
+        "200": { description: OK }
+  /vhosts:
+    get:
+      summary: Lista vhostova (filtrirano po vlasništvu)
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Kreiranje vhosta (task) + AutoSSL (task)
+      responses:
+        "202": { description: "vhost_id, task_id, ssl_task_id" }
+  /vhosts/{id}:
+    get:
+      summary: Detalji vhosta
+      responses: { "200": { description: OK }, "404": { description: Ne postoji / tuđi } }
+    delete:
+      summary: Brisanje vhosta (task)
+      responses: { "202": { description: task_id } }
+  /vhosts/{id}/php:
+    put:
+      summary: Promjena PHP verzije domene
+      responses: { "200": { description: OK } }
+  /vhosts/{id}/ssl/renew:
+    post:
+      summary: Ručna obnova certifikata (task)
+      responses: { "202": { description: task_id } }
+  /vhosts/{id}/files/list:
+    post:
+      summary: File manager — listanje (path relativan na vhost root)
+      responses: { "200": { description: OK } }
+  /databases:
+    get: { summary: Lista baza, responses: { "200": { description: OK } } }
+    post: { summary: Nova baza, responses: { "201": { description: OK } } }
+  /databases/{id}/users:
+    post: { summary: Novi DB user za bazu, responses: { "201": { description: OK } } }
+  /tasks/{id}:
+    get: { summary: Stanje taska, responses: { "200": { description: OK } } }
+  /tasks/{id}/stream:
+    get:
+      summary: SSE stream progressa taska
+      responses: { "200": { description: "text/event-stream" } }
+  /vhosts/{id}/backend:
+    put:
+      summary: "Web backend: nginx (direktno) ili nginx_apache (.htaccess) — task"
+      responses: { "202": { description: task_id } }
+  /vhosts/{id}/cron:
+    get: { summary: Cron poslovi vhosta, responses: { "200": { description: OK } } }
+    post: { summary: Novi cron job (izvršava se kao vhost user), responses: { "201": { description: OK } } }
+  /vhosts/{id}/ftp:
+    get: { summary: FTP useri vhosta, responses: { "200": { description: OK } } }
+    post: { summary: Novi FTP user (TLS obavezan, chroot u home), responses: { "201": { description: OK } } }
+  /vhosts/{id}/backups:
+    post: { summary: Backup vhosta (fileovi + baze, manifest + SHA-256) — task, responses: { "202": { description: backup_id + task_id } } }
+  /backups:
+    get: { summary: Lista backupa (filtrirano po vlasništvu), responses: { "200": { description: OK } } }
+  /backups/{id}/restore:
+    post: { summary: "Granularni restore: mode=files | mode=db&db_name=… — task", responses: { "202": { description: task_id } } }
+  /dns/zones:
+    get: { summary: DNS zone, responses: { "200": { description: OK } } }
+    post: { summary: Nova zona s auto-generiranim zapisima (A/www/MX/SPF/DMARC/CAA), responses: { "201": { description: OK } } }
+  /dns/zones/{id}/records:
+    get: { summary: Zapisi zone, responses: { "200": { description: OK } } }
+    post: { summary: Novi zapis (named-checkzone validira prije aktivacije), responses: { "201": { description: OK } } }
+  /mail/setup:
+    post: { summary: Jednokratna instalacija mail stacka (admin) — task, responses: { "202": { description: task_id } } }
+  /mail/domains:
+    get: { summary: Mail domene, responses: { "200": { description: OK } } }
+    post: { summary: Nova mail domena (DKIM ključ automatski + TXT u DNS zonu ako postoji), responses: { "201": { description: OK } } }
+  /mail/domains/{id}/mailboxes:
+    get: { summary: Mailboxi domene, responses: { "200": { description: OK } } }
+    post: { summary: "Novi mailbox (SHA512-CRYPT — Dovecot čita direktno iz baze)", responses: { "201": { description: OK } } }
+  /mail/domains/{id}/aliases:
+    get: { summary: Aliasi domene, responses: { "200": { description: OK } } }
+    post: { summary: Novi alias/forwarder, responses: { "201": { description: OK } } }
+  /monitoring/now:
+    get: { summary: Trenutne metrike servera, responses: { "200": { description: OK } } }
+  /tokens:
+    post: { summary: Novi API token sa scopovima, responses: { "201": { description: Token se prikazuje samo jednom } } }

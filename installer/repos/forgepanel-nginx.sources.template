@@ -1,0 +1,6 @@
+# nginx mainline — nginx.org
+Types: deb
+URIs: https://nginx.org/packages/mainline/ubuntu
+Suites: {SUITE}
+Components: nginx
+Signed-By: /etc/apt/keyrings/nginx.gpg

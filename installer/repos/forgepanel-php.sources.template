@@ -1,0 +1,7 @@
+# PHP 8.1–8.4 paralelno — ppa:ondrej/php
+# {SUITE} = resolute, ili noble dok PPA ne objavi resolute suite (fallback logika installera)
+Types: deb
+URIs: https://ppa.launchpadcontent.net/ondrej/php/ubuntu
+Suites: {SUITE}
+Components: main
+Signed-By: /etc/apt/keyrings/ondrej-php.gpg

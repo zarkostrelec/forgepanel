@@ -1,0 +1,33 @@
+[Unit]
+Description=ForgePanel privileged agent
+Documentation=https://github.com/zarkostrelec/forgepanel
+After=network.target mariadb.service mysql.service
+Wants=mariadb.service
+
+[Service]
+Type=notify
+ExecStart=/opt/forgepanel/agent/bin/forge-agentd /etc/forgepanel/agent.ini
+Restart=always
+RestartSec=3
+
+# Watchdog: daemon pinga svakih 10 s, systemd ubija i restarta ako stane
+WatchdogSec=30
+
+# Hardening — agent mora biti root za sistemske operacije, ali sve ostalo stežemo
+RuntimeDirectory=forgepanel
+RuntimeDirectoryMode=0755
+ProtectSystem=strict
+ReadWritePaths=/etc/nginx /etc/php /etc/forgepanel /etc/systemd/system /var/www /run /var/log /home /etc/passwd /etc/shadow /etc/group /etc/gshadow /etc/subuid /etc/subgid /var/backups
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=false
+RestrictSUIDSGID=false
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
