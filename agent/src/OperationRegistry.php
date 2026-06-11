@@ -40,6 +40,8 @@ final class OperationRegistry
         'quarantine.action' => Operations\QuarantineRestore::class,
         'firewall.action'   => Operations\FirewallAction::class,
         'config.history'    => Operations\ConfigHistory::class,
+        'deliverability.check' => Operations\DeliverabilityCheck::class,
+        'staging.clone'     => Operations\StagingClone::class,
         'db.create'         => Operations\DbCreate::class,
         'db.delete'         => Operations\DbDelete::class,
         'db.user_create'    => Operations\DbUserCreate::class,

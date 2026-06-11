@@ -74,6 +74,8 @@ final class App
             new Api\V1\UsersController($this),
             new Api\V1\BrandingController($this),
             new Api\V1\DelegationController($this),
+            new Api\V1\DeliverabilityController($this),
+            new Api\V1\StagingController($this),
             new Api\V1\TasksController($this),
             new Api\V1\MonitoringController($this),
             new Api\V1\SslController($this),

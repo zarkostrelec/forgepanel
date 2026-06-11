@@ -143,5 +143,16 @@
     "brand.accent": "Accent boja",
     "brand.host": "Panel domena",
     "brand.host_hint": "Vlastita domena s vlastitim SSL-om; klijenti ne vide ForgePanel brend.",
-    "brand.saved": "White-label spremljen"
+    "brand.saved": "White-label spremljen",
+    "staging.title": "Staging",
+    "staging.create": "Novi staging",
+    "staging.none": "Nema staging okruženja.",
+    "staging.prompt": "Subdomena za staging:",
+    "deliv.title": "E-mail deliverability",
+    "deliv.validate_domain": "Validiraj domenu (SPF/DKIM/DMARC)",
+    "deliv.check": "Provjeri",
+    "deliv.rbl_check": "RBL blacklist provjera",
+    "deliv.rbl_server": "Provjeri IP servera",
+    "deliv.listed": "Na listama",
+    "deliv.clean": "Čisto"
 }

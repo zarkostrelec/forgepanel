@@ -600,6 +600,11 @@ async function pageWebsiteDetail(id) {
     <div class="card mt">
         <div class="page-head"><h2>${t('git.title')}</h2></div>
         <div id="git"></div>
+    </div>
+    <div class="card mt">
+        <div class="page-head"><h2>${t('staging.title')}</h2><div class="spacer"></div>
+            <button class="btn" id="newstg">${icon('plus')}${t('staging.create')}</button></div>
+        <div id="staging"></div>
     </div>`;
 
     main().querySelector('#php').addEventListener('change', async (e) => {
@@ -640,6 +645,27 @@ async function pageWebsiteDetail(id) {
     cronSection(vhost, main().querySelector('#cron'));
     ftpSection(vhost, main().querySelector('#ftp'));
     gitSection(vhost, main().querySelector('#git'));
+    stagingSection(vhost, main().querySelector('#staging'));
+    main().querySelector('#newstg').addEventListener('click', async () => {
+        const sub = prompt(t('staging.prompt'), 'staging');
+        if (!sub) return;
+        try {
+            const r = await api(`/vhosts/${id}/staging`, { method: 'POST', body: { subdomain: sub } });
+            watchTask(r.task_id, `staging ${r.staging_domain}`);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+}
+
+async function stagingSection(vhost, container) {
+    try {
+        const envs = await api(`/vhosts/${vhost.id}/staging`);
+        container.innerHTML = envs.length ? `
+            <table class="data"><tbody>
+            ${envs.map((e) => `<tr>
+                <td class="mono"><a href="https://${esc(e.staging_domain)}" target="_blank">${esc(e.staging_domain)}</a></td>
+                <td class="hide-sm">${fmtDate(e.last_sync)}</td>
+            </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('staging.none')}</div>`;
+    } catch (err) { container.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
 }
 
 // ---------------------------------------------------------------- git deploy
@@ -1607,8 +1633,10 @@ async function pageSecurity() {
     <div class="page-head"><h1>${t('nav.security')}</h1></div>
     <div class="card"><h2>${t('security.scan_vhost')}</h2><div id="scanbox">${t('common.loading')}</div></div>
     <div class="card mt"><h2>${t('security.quarantine')}</h2><div id="quar">${t('common.loading')}</div></div>
+    <div class="card mt"><h2>${t('deliv.title')}</h2><div id="deliv"></div></div>
     <div class="card mt"><h2>${t('security.history')}</h2><div id="scans">${t('common.loading')}</div></div>`;
 
+    deliverabilityPanel(document.getElementById('deliv'));
     const vhosts = await api('/vhosts');
     document.getElementById('scanbox').innerHTML = `
         <div class="field" style="max-width:480px">
@@ -1657,6 +1685,41 @@ async function pageSecurity() {
         try { await api(`/security/quarantine/${b.dataset.purge}/delete`, { method: 'POST' }); pageSecurity(); }
         catch (err) { toast(err.message, 'err'); }
     }));
+}
+
+// ---------------------------------------------------------------- deliverability
+async function deliverabilityPanel(container) {
+    container.innerHTML = `
+    <div class="grid cols-2">
+        <div class="field"><label>${t('deliv.validate_domain')}</label>
+            <div style="display:flex;gap:8px"><input id="dvd" class="mono" placeholder="example.com">
+                <button class="btn" id="dvb">${t('deliv.check')}</button></div></div>
+        <div class="field"><label>${t('deliv.rbl_check')}</label>
+            <button class="btn" id="drb">${t('deliv.rbl_server')}</button></div>
+    </div>
+    <div id="dresult"></div>`;
+
+    container.querySelector('#dvb').addEventListener('click', async () => {
+        const domain = container.querySelector('#dvd').value.trim();
+        if (!domain) return;
+        try {
+            const r = await api('/deliverability/validate', { method: 'POST', body: { domain } });
+            const v = r.validation;
+            container.querySelector('#dresult').innerHTML = `
+                <table class="data mt"><tbody>
+                    <tr><td>SPF</td><td><span class="badge ${v.spf.found ? (v.spf.issue ? 'warn' : 'ok') : 'err'}">${v.spf.found ? (v.spf.issue ?? 'OK') : 'nema'}</span></td><td class="mono">${esc(v.spf.record ?? '')}</td></tr>
+                    <tr><td>DKIM</td><td><span class="badge ${v.dkim.found ? 'ok' : 'err'}">${v.dkim.found ? 'OK' : 'nema'}</span></td><td></td></tr>
+                    <tr><td>DMARC</td><td><span class="badge ${v.dmarc.found ? 'ok' : 'err'}">${v.dmarc.found ? 'p=' + esc(v.dmarc.policy) : 'nema'}</span></td><td class="mono">${esc(v.dmarc.record ?? '')}</td></tr>
+                </tbody></table>`;
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    container.querySelector('#drb').addEventListener('click', async () => {
+        try {
+            const r = await api('/deliverability/rbl');
+            container.querySelector('#dresult').innerHTML = `<div class="alert ${r.listed_on.length ? 'err' : 'ok'} mt">
+                ${r.ip}: ${r.listed_on.length ? t('deliv.listed') + ': ' + r.listed_on.join(', ') : t('deliv.clean') + ' (' + r.checked + ' lista)'}</div>`;
+        } catch (err) { toast(err.message, 'err'); }
+    });
 }
 
 // ---------------------------------------------------------------- firewall (admin)
