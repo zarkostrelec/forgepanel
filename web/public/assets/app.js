@@ -17,6 +17,18 @@ async function loadLang() {
     const res = await fetch(`/lang/${state.langCode}.json`);
     state.lang = res.ok ? await res.json() : {};
 }
+
+// White-label: branding po hostu (reseller domena dobiva svoj naziv/accent/logo)
+async function loadBranding() {
+    try {
+        const res = await fetch('/api/v1/branding');
+        const b = (await res.json()).data ?? {};
+        state.branding = b;
+        if (b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+        if (b.panel_name) document.title = b.panel_name;
+    } catch { state.branding = { panel_name: 'ForgePanel' }; }
+}
+const brandName = () => state.branding?.panel_name ?? 'ForgePanel';
 const t = (key) => state.lang[key] ?? key;
 
 const fmtDate = (s) => {
@@ -62,6 +74,7 @@ const ICONS = {
     shield: '<path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z"/><path d="m9 12 2 2 4-4"/>',
     wall: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M8 4v5M16 9v5M8 14v6"/>',
     history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/>',
+    users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c1-3.3 3.2-5 6-5s5 1.7 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.8M18 20c-.3-2-1-3.5-2-4.5"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 
@@ -253,7 +266,9 @@ const trayHtml = () => [...state.activeTasks.values()].reverse().map((task) => `
 function renderLogin(step = 'login', preToken = null) {
     $app.innerHTML = `
     <div class="login-wrap"><div class="card login-card">
-        <div class="brand"><div class="brand-mark">F</div><div class="brand-name">ForgePanel</div></div>
+        <div class="brand">${state.branding?.logo_url
+            ? `<img src="${esc(state.branding.logo_url)}" alt="" style="height:26px">`
+            : `<div class="brand-mark">${esc(brandName()[0])}</div>`}<div class="brand-name">${esc(brandName())}</div></div>
         <div class="alert err" hidden></div>
         ${step === 'login' ? `
             <form id="f">
@@ -320,15 +335,20 @@ const NAV = [
     ['firewall', 'wall', 'nav.firewall', 'admin'],
     ['config', 'history', 'nav.config', 'admin'],
     ['updates', 'refresh', 'nav.updates', 'admin'],
+    ['users', 'users', 'nav.users'],
 ];
+
+const NAV_ROLES = { users: ['admin', 'reseller'] };
 
 function renderShell() {
     $app.innerHTML = `
     <div class="shell">
         <aside class="sidebar">
-            <div class="brand"><div class="brand-mark">F</div><div class="brand-name">ForgePanel</div></div>
+            <div class="brand">${state.branding?.logo_url
+                ? `<img src="${esc(state.branding.logo_url)}" alt="" style="height:26px;border-radius:6px">`
+                : `<div class="brand-mark">${esc(brandName()[0])}</div>`}<div class="brand-name">${esc(brandName())}</div></div>
             <nav class="nav">
-                ${NAV.filter(([, , , role]) => !role || role === state.me.role).map(([page, ic, key]) =>
+                ${NAV.filter(([page, , , role]) => (!role || role === state.me.role) && (!NAV_ROLES[page] || NAV_ROLES[page].includes(state.me.role))).map(([page, ic, key]) =>
                     `<a href="#/${page}" data-page="${page}">${icon(ic)}<span class="nav-label">${t(key)}</span></a>`).join('')}
             </nav>
             <div class="sidebar-foot mono">${esc(state.me.email)}<br>${esc(state.me.role)}</div>
@@ -1421,6 +1441,134 @@ async function pageDocker() {
     }));
 }
 
+// ---------------------------------------------------------------- users (admin/reseller) + white-label
+async function pageUsers() {
+    setActive('users');
+    main().innerHTML = `
+    <div class="page-head"><h1>${t('nav.users')}</h1><div class="spacer"></div>
+        <button class="btn" id="brand">${t('users.branding')}</button>
+        <button class="btn primary" id="newu">${icon('plus')}${t('users.new')}</button></div>
+    <div class="card" id="list">${t('common.loading')}</div>
+    <div class="card mt"><h2>${t('users.plans')}</h2><div id="plans">${t('common.loading')}</div></div>`;
+
+    document.getElementById('newu').addEventListener('click', () => userModal());
+    document.getElementById('brand').addEventListener('click', brandingModal);
+
+    const [users, plans] = await Promise.all([api('/users'), api('/plans')]);
+    document.getElementById('list').innerHTML = users.length ? `
+        <table class="data"><thead><tr><th>${t('auth.email')}</th><th>Rola</th><th>Status</th><th class="hide-sm">Zadnja prijava</th><th></th></tr></thead><tbody>
+        ${users.map((u) => `<tr>
+            <td class="mono">${esc(u.email)}</td>
+            <td><span class="badge ${u.role === 'admin' ? 'err' : u.role === 'reseller' ? 'warn' : ''}">${esc(u.role)}</span></td>
+            <td>${statusBadge(u.status === 'active' ? 'active' : 'suspended')}</td>
+            <td class="hide-sm">${fmtDate(u.last_login_at)}</td>
+            <td class="num">
+                <button class="btn ghost" data-toggle="${u.id}" data-status="${u.status}">${u.status === 'active' ? t('bulk.suspend') : t('bulk.unsuspend')}</button>
+                <button class="btn danger" data-del="${u.id}">${t('common.delete')}</button>
+            </td></tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`;
+
+    document.getElementById('plans').innerHTML = `
+        <table class="data"><tbody>
+        ${plans.map((p) => `<tr>
+            <td class="mono">${esc(p.name)}</td>
+            <td class="mono">${fmtBytes(p.disk_bytes)} · ${p.max_domains} domena · ${p.max_mailboxes} mail · ${p.max_databases} baza</td>
+            <td class="mono">${(JSON.parse(p.php_versions || '[]')).join(', ')}</td>
+        </tr>`).join('') || `<tr><td><div class="empty">0</div></td></tr>`}
+        </tbody></table>
+        <button class="btn mt" id="newplan">${icon('plus')}${t('users.new_plan')}</button>`;
+    document.getElementById('newplan').addEventListener('click', () => planModal());
+
+    main().querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api(`/users/${b.dataset.toggle}/status`, { method: 'PUT', body: { status: b.dataset.status === 'active' ? 'suspended' : 'active' } }); pageUsers(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/users/${b.dataset.del}`, { method: 'DELETE' }); pageUsers(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+}
+
+function userModal() {
+    const isAdmin = state.me.role === 'admin';
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('users.new')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="uf">
+            <div class="field"><label>${t('auth.email')}</label><input name="email" type="email" required class="mono"></div>
+            <div class="field"><label>${t('auth.password')}</label><input name="password" type="password" required minlength="12"></div>
+            <div class="field"><label>Rola</label><select name="role">
+                <option value="client">client</option>
+                ${isAdmin ? '<option value="reseller">reseller</option><option value="admin">admin</option>' : ''}
+            </select></div>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('common.create')}</button></div>
+        </form>`);
+    modal.querySelector('#uf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try { await api('/users', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); modal.close(); pageUsers(); }
+        catch (err) { toast(err.message, 'err'); }
+    });
+}
+
+function planModal() {
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('users.new_plan')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="pf">
+            <div class="field"><label>Naziv</label><input name="name" required></div>
+            <div class="grid cols-2">
+                <div class="field"><label>Disk (GB)</label><input name="disk_gb" type="number" value="10" class="mono"></div>
+                <div class="field"><label>Max domena</label><input name="max_domains" type="number" value="5" class="mono"></div>
+                <div class="field"><label>Max mailboxa</label><input name="max_mailboxes" type="number" value="10" class="mono"></div>
+                <div class="field"><label>Max baza</label><input name="max_databases" type="number" value="5" class="mono"></div>
+            </div>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('common.create')}</button></div>
+        </form>`);
+    modal.querySelector('#pf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = Object.fromEntries(new FormData(e.target));
+        try {
+            await api('/plans', { method: 'POST', body: {
+                name: f.name,
+                disk_bytes: Number(f.disk_gb) * 1073741824,
+                max_domains: Number(f.max_domains),
+                max_mailboxes: Number(f.max_mailboxes),
+                max_databases: Number(f.max_databases),
+                php_versions: ['8.4', '8.3'],
+            } });
+            modal.close(); pageUsers();
+        } catch (err) { toast(err.message, 'err'); }
+    });
+}
+
+function brandingModal() {
+    const b = state.branding ?? {};
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('users.branding')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="bf">
+            <div class="field"><label>${t('brand.name')}</label><input name="panel_name" value="${esc(b.panel_name ?? 'ForgePanel')}"></div>
+            <div class="field"><label>${t('brand.accent')}</label><input name="accent" type="color" value="${esc(b.accent ?? '#f59e0b')}" style="height:38px"></div>
+            <div class="field"><label>${t('brand.host')}</label><input name="panel_host" class="mono" placeholder="panel.mojadomena.hr" value="${esc(b.panel_host ?? '')}">
+                <span class="hint">${t('brand.host_hint')}</span></div>
+            <div class="field"><label>Logo URL (https)</label><input name="logo_url" class="mono" value="${esc(b.logo_url ?? '')}"></div>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('common.save')}</button></div>
+        </form>`);
+    modal.querySelector('#bf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = Object.fromEntries(new FormData(e.target));
+        if (!f.logo_url) delete f.logo_url;
+        if (!f.panel_host) delete f.panel_host;
+        try {
+            const r = await api('/branding', { method: 'PUT', body: f });
+            state.branding = r;
+            document.documentElement.style.setProperty('--accent', r.accent);
+            modal.close();
+            toast(t('brand.saved'));
+        } catch (err) { toast(err.message, 'err'); }
+    });
+}
+
 // ---------------------------------------------------------------- config time-machine (admin)
 async function pageConfig() {
     setActive('config');
@@ -1635,6 +1783,7 @@ const ROUTES = [
     [/^#\/security$/, pageSecurity],
     [/^#\/firewall$/, pageFirewall],
     [/^#\/config$/, pageConfig],
+    [/^#\/users$/, pageUsers],
 ];
 
 async function route() {
@@ -1662,6 +1811,7 @@ async function enter() {
 
 document.documentElement.dataset.theme = state.theme;
 await loadLang();
+await loadBranding();
 if (state.token) {
     try { await enter(); } catch { logoutLocal(); }
 } else {

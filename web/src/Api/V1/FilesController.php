@@ -119,7 +119,8 @@ final class FilesController extends Controller
     private function resolve(Request $request, string $scope, ?string $path_override = null): array
     {
         $ctx = $this->ctx($request, $scope);
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        // Delegirani developer s 'files' permisijom dolazi do file managera
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'files');
 
         $relative = $path_override ?? (string) ($request->str('path') ?? '/');
         if (str_contains($relative, "\0")) {

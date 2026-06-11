@@ -51,13 +51,24 @@ final class VhostsController extends Controller
         if ($ctx->isAdmin()) {
             Response::ok($this->app->db->all('SELECT * FROM vhosts ORDER BY domain'));
         }
-        if ($ctx->subscription_ids === []) {
+        // Vlastiti (po subscription) + delegirani vhostovi
+        $delegated = $ctx->delegatedVhostIds();
+        $conditions = [];
+        $args = [];
+        if ($ctx->subscription_ids !== []) {
+            $conditions[] = 'subscription_id IN (' . implode(',', array_fill(0, count($ctx->subscription_ids), '?')) . ')';
+            $args = $ctx->subscription_ids;
+        }
+        if ($delegated !== []) {
+            $conditions[] = 'id IN (' . implode(',', array_fill(0, count($delegated), '?')) . ')';
+            $args = [...$args, ...$delegated];
+        }
+        if ($conditions === []) {
             Response::ok([]);
         }
-        $placeholders = implode(',', array_fill(0, count($ctx->subscription_ids), '?'));
         Response::ok($this->app->db->all(
-            "SELECT * FROM vhosts WHERE subscription_id IN ($placeholders) ORDER BY domain",
-            $ctx->subscription_ids
+            'SELECT * FROM vhosts WHERE ' . implode(' OR ', $conditions) . ' ORDER BY domain',
+            $args
         ));
     }
 

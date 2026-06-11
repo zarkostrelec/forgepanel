@@ -133,5 +133,15 @@
     "config.restore": "Vrati",
     "config.empty": "Još nema zabilježenih promjena.",
     "config.confirm_restore": "Vraćanje cijele config povijesti na ovu točku. Trenutno stanje se prvo snapshota. Nastaviti?",
-    "config.restored": "Config vraćen"
+    "config.restored": "Config vraćen",
+    "nav.users": "Korisnici",
+    "users.new": "Novi korisnik",
+    "users.branding": "White-label",
+    "users.plans": "Planovi",
+    "users.new_plan": "Novi plan",
+    "brand.name": "Naziv panela",
+    "brand.accent": "Accent boja",
+    "brand.host": "Panel domena",
+    "brand.host_hint": "Vlastita domena s vlastitim SSL-om; klijenti ne vide ForgePanel brend.",
+    "brand.saved": "White-label spremljen"
 }
