@@ -30,7 +30,8 @@ final class Response
         header('X-Content-Type-Options: nosniff');
         header('X-Frame-Options: DENY');
         header('Referrer-Policy: same-origin');
-        header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
+        // style-src 'unsafe-inline': UI koristi inline style atribute (progress width); script-src ostaje strogo 'self'
+        header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
         header('Strict-Transport-Security: max-age=63072000');
         header('Cross-Origin-Opener-Policy: same-origin');
         header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
