@@ -29,6 +29,8 @@ final class OperationRegistry
         'backup.vhost_create' => Operations\BackupVhostCreate::class,
         'backup.restore'    => Operations\BackupRestore::class,
         'backup.delete'     => Operations\BackupDelete::class,
+        'git.keygen'        => Operations\GitKeygen::class,
+        'git.deploy'        => Operations\GitDeploy::class,
         'db.create'         => Operations\DbCreate::class,
         'db.delete'         => Operations\DbDelete::class,
         'db.user_create'    => Operations\DbUserCreate::class,

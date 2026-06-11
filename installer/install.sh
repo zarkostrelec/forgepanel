@@ -337,6 +337,8 @@ install_panel_stack() {
     apt-get install -y -q php8.4-cli php8.4-fpm php8.4-mysql php8.4-curl \
         php8.4-mbstring php8.4-xml php8.4-zip php8.4-intl
     apt-get install -y -q nginx
+    # Git deploy modul treba git + ssh klijent
+    apt-get install -y -q git openssh-client
 
     # Neprivilegirani panel user
     id fpanel &>/dev/null || useradd --system --shell /usr/sbin/nologin --home-dir "$FP_HOME" fpanel

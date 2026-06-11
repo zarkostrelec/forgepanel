@@ -514,6 +514,10 @@ async function pageWebsiteDetail(id) {
             <div class="page-head"><h2>${t('ftp.title')}</h2></div>
             <div id="ftp"></div>
         </div>
+    </div>
+    <div class="card mt">
+        <div class="page-head"><h2>${t('git.title')}</h2></div>
+        <div id="git"></div>
     </div>`;
 
     main().querySelector('#php').addEventListener('change', async (e) => {
@@ -553,6 +557,62 @@ async function pageWebsiteDetail(id) {
     fileManager(vhost, main().querySelector('#fm'), '/httpdocs');
     cronSection(vhost, main().querySelector('#cron'));
     ftpSection(vhost, main().querySelector('#ftp'));
+    gitSection(vhost, main().querySelector('#git'));
+}
+
+// ---------------------------------------------------------------- git deploy
+async function gitSection(vhost, container) {
+    let repo;
+    try { repo = await api(`/vhosts/${vhost.id}/git`); }
+    catch (err) { container.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; return; }
+
+    container.innerHTML = `
+    ${repo ? `
+    <table class="data"><tbody>
+        <tr><td>Repo</td><td class="mono" style="word-break:break-all">${esc(repo.repo_url)} <span class="badge">${esc(repo.branch)}</span></td></tr>
+        <tr><td>${t('git.last_deploy')}</td><td class="mono">${repo.last_commit ? esc(repo.last_commit.slice(0, 10)) + ' · ' + fmtDate(repo.last_deploy_at) : '—'}</td></tr>
+        <tr><td>Deploy key</td><td><div class="task-output" style="max-height:80px">${esc(repo.deploy_key ?? '')}</div></td></tr>
+        <tr><td>Webhook</td><td class="mono" style="word-break:break-all">/api/v1/git/webhook/${esc(repo.webhook_secret)}</td></tr>
+    </tbody></table>
+    <div class="dialog-foot" style="justify-content:flex-start">
+        <button class="btn primary" id="gdeploy">${icon('refresh')}${t('git.deploy_now')}</button>
+        <button class="btn danger" id="gremove">${t('common.delete')}</button>
+    </div>` : ''}
+    <form id="gf" class="mt">
+        <div class="grid cols-2">
+            <div class="field"><label>${t('git.repo_url')}</label>
+                <input name="repo_url" required class="mono" placeholder="git@github.com:user/repo.git"
+                    value="${esc(repo?.repo_url ?? '')}"></div>
+            <div class="field"><label>Branch</label>
+                <input name="branch" class="mono" value="${esc(repo?.branch ?? 'main')}"></div>
+        </div>
+        <button class="btn primary">${repo ? t('common.save') : t('git.connect')}</button>
+    </form>`;
+
+    container.querySelector('#gf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            const r = await api(`/vhosts/${vhost.id}/git`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+            openModal(`
+                <div class="dialog-head"><h1>${t('git.connected')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+                <div class="field"><label>Deploy key (dodaj u repo kao read-only key)</label>
+                    <div class="task-output">${esc(r.public_key)}</div></div>
+                <div class="field"><label>Webhook URL (auto-deploy na push)</label>
+                    <div class="task-output">${esc(r.webhook_url)}</div></div>`, { wide: true });
+            gitSection(vhost, container);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    container.querySelector('#gdeploy')?.addEventListener('click', async () => {
+        try {
+            const r = await api(`/vhosts/${vhost.id}/git/deploy`, { method: 'POST' });
+            watchTask(r.task_id, `git.deploy ${vhost.domain}`);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    container.querySelector('#gremove')?.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/vhosts/${vhost.id}/git`, { method: 'DELETE' }); gitSection(vhost, container); }
+        catch (err) { toast(err.message, 'err'); }
+    });
 }
 
 // ---------------------------------------------------------------- FTP

@@ -77,5 +77,11 @@
     "mail.local_part": "Address (before @)",
     "mail.alias_source": "Alias (before @)",
     "mail.alias_destination": "Destination",
-    "mail.confirm_delete_domain": "Deleting a mail domain deletes ALL its mailboxes and messages. Continue?"
+    "mail.confirm_delete_domain": "Deleting a mail domain deletes ALL its mailboxes and messages. Continue?",
+    "git.title": "Git deploy",
+    "git.repo_url": "Repo URL",
+    "git.connect": "Connect repo",
+    "git.connected": "Repo connected",
+    "git.deploy_now": "Deploy now",
+    "git.last_deploy": "Last deploy"
 }

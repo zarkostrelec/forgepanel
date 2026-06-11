@@ -53,6 +53,7 @@ final class ApacheConf
             ServerName {$domain}
             ServerAlias www.{$domain}
             DocumentRoot {$docroot}
+            DirectoryIndex index.php index.html
 
             <Directory {$docroot}>
                 AllowOverride All

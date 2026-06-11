@@ -77,5 +77,11 @@
     "mail.local_part": "Adresa (dio prije @)",
     "mail.alias_source": "Alias (dio prije @)",
     "mail.alias_destination": "Odredište",
-    "mail.confirm_delete_domain": "Brisanje mail domene briše i SVE njene mailboxe i poruke. Nastaviti?"
+    "mail.confirm_delete_domain": "Brisanje mail domene briše i SVE njene mailboxe i poruke. Nastaviti?",
+    "git.title": "Git deploy",
+    "git.repo_url": "Repo URL",
+    "git.connect": "Poveži repo",
+    "git.connected": "Repo povezan",
+    "git.deploy_now": "Deploy sada",
+    "git.last_deploy": "Zadnji deploy"
 }
