@@ -610,7 +610,8 @@ async function pageWebsiteDetail(id) {
             <button class="btn" id="newstg">${icon('plus')}${t('staging.create')}</button></div>
         <div id="staging"></div>
     </div>
-    <div class="card mt"><div class="page-head"><h2>${t('apps.title')}</h2></div><div id="apps"></div></div>`;
+    <div class="card mt"><div class="page-head"><h2>${t('apps.title')}</h2></div><div id="apps"></div></div>
+    ${state.me.role === 'admin' ? `<div class="card mt"><div class="page-head"><h2>${t('term.title')}</h2></div><div id="term"></div></div>` : ''}`;
 
     main().querySelector('#php').addEventListener('change', async (e) => {
         try {
@@ -660,6 +661,7 @@ async function pageWebsiteDetail(id) {
     gitSection(vhost, main().querySelector('#git'));
     stagingSection(vhost, main().querySelector('#staging'));
     appsSection(vhost, main().querySelector('#apps'));
+    if (state.me.role === 'admin') terminalSection(vhost, main().querySelector('#term'));
     main().querySelector('#newstg').addEventListener('click', async () => {
         const sub = prompt(t('staging.prompt'), 'staging');
         if (!sub) return;
@@ -668,6 +670,28 @@ async function pageWebsiteDetail(id) {
             watchTask(r.task_id, `staging ${r.staging_domain}`);
         } catch (err) { toast(err.message, 'err'); }
     });
+}
+
+function terminalSection(vhost, container) {
+    container.innerHTML = `
+        <div class="hint mb">${t('term.sandbox_note')}</div>
+        <div style="display:flex;gap:8px">
+            <input id="tcmd" class="mono" style="flex:1" placeholder="ls -la" autocomplete="off">
+            <button class="btn primary" id="trun">${t('term.run')}</button>
+        </div>
+        <div class="task-output mt" id="tout" style="min-height:60px"></div>`;
+    const run = async () => {
+        const command = container.querySelector('#tcmd').value.trim();
+        if (!command) return;
+        const out = container.querySelector('#tout');
+        out.textContent = '…';
+        try {
+            const r = await api(`/vhosts/${vhost.id}/terminal`, { method: 'POST', body: { command } });
+            out.textContent = `$ ${command}\n${r.output || ''}\n[exit ${r.exit_code}]`;
+        } catch (err) { out.textContent = '✕ ' + err.message; }
+    };
+    container.querySelector('#trun').addEventListener('click', run);
+    container.querySelector('#tcmd').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
 }
 
 function appsSection(vhost, container) {

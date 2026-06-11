@@ -477,6 +477,16 @@ CREATE TABLE delegated_access (
     FOREIGN KEY (vhost_id) REFERENCES vhosts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE servers (
+    id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    name            VARCHAR(64) NOT NULL UNIQUE,
+    hostname        VARCHAR(255) NOT NULL,
+    enroll_token    TEXT NULL,                              -- enkriptiran mTLS bootstrap token
+    status          ENUM('online','offline','pending','error') NOT NULL DEFAULT 'pending',
+    last_seen_at    DATETIME NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE staging_envs (
     id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     source_vhost_id INT UNSIGNED NOT NULL,

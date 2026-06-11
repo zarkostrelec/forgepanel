@@ -176,5 +176,8 @@
     "assistant.send": "Pitaj asistenta",
     "assistant.thinking": "Asistent razmišlja…",
     "assistant.diagnose": "Dijagnostika",
-    "assistant.disclaimer": "Asistent samo čita i predlaže. Sve izmjene potvrđuješ i izvodiš sam kroz panel."
+    "assistant.disclaimer": "Asistent samo čita i predlaže. Sve izmjene potvrđuješ i izvodiš sam kroz panel.",
+    "term.title": "Sandboxirani terminal",
+    "term.run": "Izvrši",
+    "term.sandbox_note": "Izolirani container — mountiran SAMO vhost direktorij, bez mreže, kao vhost user."
 }

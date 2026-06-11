@@ -366,7 +366,7 @@ pm.process_idle_timeout = 60s
 env[FORGEPANEL_CONFIG] = /etc/forgepanel/web.ini
 php_admin_value[upload_max_filesize] = 64M
 php_admin_value[post_max_size] = 68M
-php_admin_value[open_basedir] = /opt/forgepanel/web:/etc/forgepanel/web.ini:/tmp
+php_admin_value[open_basedir] = /opt/forgepanel/web:/opt/forgepanel/modules:/etc/forgepanel/web.ini:/tmp
 php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,pcntl_exec
 EOF
     php-fpm8.4 -t

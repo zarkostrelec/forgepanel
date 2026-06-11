@@ -44,6 +44,7 @@ final class OperationRegistry
         'waf.toggle'        => Operations\WafToggle::class,
         'country.block'     => Operations\CountryBlock::class,
         'node.app'          => Operations\NodeApp::class,
+        'terminal.exec'     => Operations\TerminalExec::class,
         'deliverability.check' => Operations\DeliverabilityCheck::class,
         'staging.clone'     => Operations\StagingClone::class,
         'apps.wp_install'   => Operations\WpInstall::class,

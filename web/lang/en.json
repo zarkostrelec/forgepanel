@@ -176,5 +176,8 @@
     "assistant.send": "Ask the assistant",
     "assistant.thinking": "Assistant is thinking…",
     "assistant.diagnose": "Diagnose",
-    "assistant.disclaimer": "The assistant only reads and suggests. You confirm and apply every change yourself through the panel."
+    "assistant.disclaimer": "The assistant only reads and suggests. You confirm and apply every change yourself through the panel.",
+    "term.title": "Sandboxed terminal",
+    "term.run": "Run",
+    "term.sandbox_note": "Isolated container — only the vhost directory mounted, no network, as the vhost user."
 }

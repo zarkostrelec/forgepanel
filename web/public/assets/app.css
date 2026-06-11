@@ -323,3 +323,4 @@ td.num { text-align: right; }
 @media (min-width: 721px) {
     .menu-btn { display: none; }
 }
+.mb { margin-bottom: 10px; }
