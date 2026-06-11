@@ -65,5 +65,17 @@
     "backup.mode_files": "Fileovi (cijeli vhost)",
     "backup.mode_db": "Baza",
     "backup.restore_warning": "Restore prepisuje postojeće podatke. Checksumovi se verificiraju prije vraćanja.",
-    "ftp.username": "FTP korisničko ime"
+    "ftp.username": "FTP korisničko ime",
+    "nav.mail": "E-mail",
+    "mail.not_installed": "Mail stack (Postfix + Dovecot + Rspamd) još nije instaliran.",
+    "mail.install": "Instaliraj mail stack",
+    "mail.installing": "Instalacija mail stacka pokrenuta (task)",
+    "mail.new_domain": "Nova mail domena",
+    "mail.dkim_auto": "DKIM ključ se generira automatski (selector forge).",
+    "mail.mailboxes": "Mailboxi",
+    "mail.aliases": "Aliasi",
+    "mail.local_part": "Adresa (dio prije @)",
+    "mail.alias_source": "Alias (dio prije @)",
+    "mail.alias_destination": "Odredište",
+    "mail.confirm_delete_domain": "Brisanje mail domene briše i SVE njene mailboxe i poruke. Nastaviti?"
 }

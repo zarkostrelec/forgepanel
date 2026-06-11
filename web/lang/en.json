@@ -65,5 +65,17 @@
     "backup.mode_files": "Files (entire vhost)",
     "backup.mode_db": "Database",
     "backup.restore_warning": "Restore overwrites existing data. Checksums are verified before restoring.",
-    "ftp.username": "FTP username"
+    "ftp.username": "FTP username",
+    "nav.mail": "E-mail",
+    "mail.not_installed": "Mail stack (Postfix + Dovecot + Rspamd) is not installed yet.",
+    "mail.install": "Install mail stack",
+    "mail.installing": "Mail stack installation started (task)",
+    "mail.new_domain": "New mail domain",
+    "mail.dkim_auto": "DKIM key is generated automatically (selector forge).",
+    "mail.mailboxes": "Mailboxes",
+    "mail.aliases": "Aliases",
+    "mail.local_part": "Address (before @)",
+    "mail.alias_source": "Alias (before @)",
+    "mail.alias_destination": "Destination",
+    "mail.confirm_delete_domain": "Deleting a mail domain deletes ALL its mailboxes and messages. Continue?"
 }

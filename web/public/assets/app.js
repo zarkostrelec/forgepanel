@@ -57,6 +57,7 @@ const ICONS = {
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
     dns: '<circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M12 7.2V12m0 0-5.2 5M12 12l5.2 5"/>',
     archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
+    mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 
@@ -304,6 +305,7 @@ const NAV = [
     ['dashboard', 'home', 'nav.dashboard'],
     ['websites', 'globe', 'nav.websites'],
     ['databases', 'db', 'nav.databases'],
+    ['mail', 'mail', 'nav.mail'],
     ['dns', 'dns', 'nav.dns'],
     ['ssl', 'lock', 'nav.ssl'],
     ['backups', 'archive', 'nav.backups'],
@@ -1022,6 +1024,151 @@ async function dnsRecords(zoneId, domain) {
     }));
 }
 
+// ---------------------------------------------------------------- mail
+async function pageMail() {
+    setActive('mail');
+    main().innerHTML = `<div class="page-head"><h1>${t('nav.mail')}</h1></div><div class="empty">${t('common.loading')}</div>`;
+
+    const status = await api('/mail/status');
+    if (!status.installed) {
+        main().innerHTML = `
+        <div class="page-head"><h1>${t('nav.mail')}</h1></div>
+        <div class="card"><div class="empty">
+            <p>${t('mail.not_installed')}</p>
+            ${state.me.role === 'admin' ? `<button class="btn primary" id="setup">${t('mail.install')}</button>` : ''}
+        </div></div>`;
+        document.getElementById('setup')?.addEventListener('click', async () => {
+            try {
+                const r = await api('/mail/setup', { method: 'POST' });
+                watchTask(r.task_id, 'mail.setup');
+                toast(t('mail.installing'));
+            } catch (err) { toast(err.message, 'err'); }
+        });
+        return;
+    }
+
+    main().innerHTML = `
+    <div class="page-head"><h1>${t('nav.mail')}</h1><div class="spacer"></div>
+        <button class="btn primary" id="newdom">${icon('plus')}${t('mail.new_domain')}</button></div>
+    <div class="card" id="domains">${t('common.loading')}</div>
+    <div id="detail"></div>`;
+
+    document.getElementById('newdom').addEventListener('click', () => {
+        const modal = openModal(`
+            <div class="dialog-head"><h1>${t('mail.new_domain')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+            <form id="mf">
+                <div class="field"><label>${t('vhost.domain')}</label>
+                    <input name="domain" required placeholder="example.com" class="mono">
+                    <span class="hint">${t('mail.dkim_auto')}</span></div>
+                <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                    <button class="btn primary">${t('common.create')}</button></div>
+            </form>`);
+        modal.querySelector('#mf').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await api('/mail/domains', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+                modal.close();
+                pageMail();
+            } catch (err) { toast(err.message, 'err'); }
+        });
+    });
+
+    const domains = await api('/mail/domains');
+    document.getElementById('domains').innerHTML = domains.length ? `
+        <table class="data"><thead><tr><th>${t('vhost.domain')}</th><th class="hide-sm">DKIM</th><th></th></tr></thead><tbody>
+        ${domains.map((d) => `<tr class="row-link" data-dom="${d.id}" data-name="${esc(d.domain)}">
+            <td class="mono">${esc(d.domain)}</td>
+            <td class="hide-sm"><span class="badge ${d.dkim_txt ? 'ok' : 'warn'}">${d.dkim_txt ? esc(d.dkim_selector) : '—'}</span></td>
+            <td class="num"><button class="btn danger" data-deldom="${d.id}">${t('common.delete')}</button></td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('nav.mail')}: 0</div>`;
+
+    main().querySelectorAll('[data-deldom]').forEach((b) => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm(t('mail.confirm_delete_domain'))) return;
+        try { await api(`/mail/domains/${b.dataset.deldom}`, { method: 'DELETE' }); pageMail(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    main().querySelectorAll('[data-dom]').forEach((tr) => tr.addEventListener('click', () =>
+        mailDomainDetail(Number(tr.dataset.dom), tr.dataset.name, domains.find((d) => d.id == tr.dataset.dom))));
+}
+
+async function mailDomainDetail(domainId, domainName, domain) {
+    const container = document.getElementById('detail');
+    container.innerHTML = `<div class="card mt">${t('common.loading')}</div>`;
+    const [mailboxes, aliases] = await Promise.all([
+        api(`/mail/domains/${domainId}/mailboxes`),
+        api(`/mail/domains/${domainId}/aliases`),
+    ]);
+
+    container.innerHTML = `
+    <div class="grid cols-2 mt">
+        <div class="card">
+            <h2>${t('mail.mailboxes')} — <span class="mono">${esc(domainName)}</span></h2>
+            ${mailboxes.length ? `<table class="data"><tbody>
+                ${mailboxes.map((m) => `<tr>
+                    <td class="mono">${esc(m.local_part)}@${esc(domainName)}</td>
+                    <td class="mono num">${fmtBytes(m.quota_bytes)}</td>
+                    <td class="num"><button class="btn danger" data-delmb="${m.id}">${t('common.delete')}</button></td>
+                </tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`}
+            <form id="mbf" class="mt">
+                <div class="grid cols-2">
+                    <div class="field"><label>${t('mail.local_part')}</label>
+                        <input name="local_part" required pattern="[a-z0-9][a-z0-9._\\-]{0,63}" class="mono"></div>
+                    <div class="field"><label>${t('auth.password')}</label>
+                        <input name="password" type="password" required minlength="10"></div>
+                </div>
+                <button class="btn primary">${icon('plus')}${t('common.create')}</button>
+            </form>
+        </div>
+        <div class="card">
+            <h2>${t('mail.aliases')}</h2>
+            ${aliases.length ? `<table class="data"><tbody>
+                ${aliases.map((a) => `<tr>
+                    <td class="mono">${esc(a.source)}</td>
+                    <td class="mono">→ ${esc(a.destination)}</td>
+                    <td class="num"><button class="btn danger" data-delal="${a.id}">${t('common.delete')}</button></td>
+                </tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`}
+            <form id="alf" class="mt">
+                <div class="grid cols-2">
+                    <div class="field"><label>${t('mail.alias_source')}</label>
+                        <input name="source" required pattern="[a-z0-9][a-z0-9._\\-]{0,63}" class="mono" placeholder="info"></div>
+                    <div class="field"><label>${t('mail.alias_destination')}</label>
+                        <input name="destination" type="email" required class="mono"></div>
+                </div>
+                <button class="btn primary">${icon('plus')}${t('common.create')}</button>
+            </form>
+            ${domain?.dkim_txt ? `
+            <h2 class="mt">DKIM (${esc(domain.dkim_selector)}._domainkey TXT)</h2>
+            <div class="task-output">${esc(domain.dkim_txt)}</div>` : ''}
+        </div>
+    </div>`;
+
+    container.querySelector('#mbf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            await api(`/mail/domains/${domainId}/mailboxes`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+            mailDomainDetail(domainId, domainName, domain);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    container.querySelector('#alf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            await api(`/mail/domains/${domainId}/aliases`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+            mailDomainDetail(domainId, domainName, domain);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    container.querySelectorAll('[data-delmb]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/mail/domains/${domainId}/mailboxes/${b.dataset.delmb}`, { method: 'DELETE' }); mailDomainDetail(domainId, domainName, domain); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    container.querySelectorAll('[data-delal]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/mail/domains/${domainId}/aliases/${b.dataset.delal}`, { method: 'DELETE' }); mailDomainDetail(domainId, domainName, domain); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+}
+
 // ---------------------------------------------------------------- backups
 async function pageBackups() {
     setActive('backups');
@@ -1081,6 +1228,7 @@ const ROUTES = [
     [/^#\/websites$/, pageWebsites],
     [/^#\/websites\/(\d+)$/, (m) => pageWebsiteDetail(Number(m[1]))],
     [/^#\/databases$/, pageDatabases],
+    [/^#\/mail$/, pageMail],
     [/^#\/dns$/, pageDns],
     [/^#\/backups$/, pageBackups],
     [/^#\/ssl$/, pageSsl],

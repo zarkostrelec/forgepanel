@@ -465,6 +465,13 @@ optional_components() {
         ufw allow 53/tcp 2>/dev/null || true
         ufw allow 53/udp 2>/dev/null || true
     fi
+    if [[ ",$COMPONENTS," == *",mail,"* ]]; then
+        log "  komponenta: mail (Postfix + Dovecot + Rspamd — instalira agent kroz task)"
+        sql forgepanel -e "INSERT INTO tasks (op, params) VALUES ('mail.setup', '{}');"
+        for port in 25 143 465 587 993 995 110; do
+            ufw allow "${port}/tcp" 2>/dev/null || true
+        done
+    fi
     if [[ ",$COMPONENTS," == *",ftp,"* ]]; then
         log "  komponenta: ftp (ProFTPD, TLS obavezan)"
         apt-get install -y -q proftpd-basic

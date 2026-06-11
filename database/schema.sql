@@ -114,7 +114,7 @@ CREATE TABLE mail_domains (
     domain          VARCHAR(255) NOT NULL UNIQUE,
     subscription_id INT UNSIGNED NOT NULL,
     dkim_selector   VARCHAR(32) NOT NULL DEFAULT 'forge',
-    dkim_private    TEXT NULL,
+    dkim_txt        TEXT NULL,                              -- javni DKIM TXT zapis (privatni ključ drži rspamd)
     catchall_target VARCHAR(255) NULL,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

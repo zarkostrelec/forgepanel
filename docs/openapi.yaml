@@ -141,6 +141,17 @@ paths:
   /dns/zones/{id}/records:
     get: { summary: Zapisi zone, responses: { "200": { description: OK } } }
     post: { summary: Novi zapis (named-checkzone validira prije aktivacije), responses: { "201": { description: OK } } }
+  /mail/setup:
+    post: { summary: Jednokratna instalacija mail stacka (admin) — task, responses: { "202": { description: task_id } } }
+  /mail/domains:
+    get: { summary: Mail domene, responses: { "200": { description: OK } } }
+    post: { summary: Nova mail domena (DKIM ključ automatski + TXT u DNS zonu ako postoji), responses: { "201": { description: OK } } }
+  /mail/domains/{id}/mailboxes:
+    get: { summary: Mailboxi domene, responses: { "200": { description: OK } } }
+    post: { summary: "Novi mailbox (SHA512-CRYPT — Dovecot čita direktno iz baze)", responses: { "201": { description: OK } } }
+  /mail/domains/{id}/aliases:
+    get: { summary: Aliasi domene, responses: { "200": { description: OK } } }
+    post: { summary: Novi alias/forwarder, responses: { "201": { description: OK } } }
   /monitoring/now:
     get: { summary: Trenutne metrike servera, responses: { "200": { description: OK } } }
   /tokens:
