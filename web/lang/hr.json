@@ -201,5 +201,12 @@
     "profile.no_keys": "Nema registriranih ključeva.",
     "profile.created": "Dodan",
     "profile.last_used": "Zadnje korišten",
-    "profile.confirm_delete_key": "Ukloniti ovaj sigurnosni ključ?"
+    "profile.confirm_delete_key": "Ukloniti ovaj sigurnosni ključ?",
+    "db.pma": "phpMyAdmin",
+    "db.pma_pma_not_installed": "phpMyAdmin nije instaliran na serveru.",
+    "db.pma_no_db_user_with_stored_password": "Baza nema DB usera kreiranog kroz panel — dodaj usera pa pokušaj ponovno.",
+    "mail.webmail": "Webmail",
+    "mail.webmail_install": "Instaliraj webmail",
+    "mail.webmail_installing": "Instalacija webmaila (Roundcube) je pokrenuta — prati task.",
+    "mail.webmail_hostname": "Hostname webmaila (DNS A zapis mora pokazivati na ovaj server):"
 }

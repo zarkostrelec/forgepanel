@@ -201,5 +201,12 @@
     "profile.no_keys": "No registered keys.",
     "profile.created": "Added",
     "profile.last_used": "Last used",
-    "profile.confirm_delete_key": "Remove this security key?"
+    "profile.confirm_delete_key": "Remove this security key?",
+    "db.pma": "phpMyAdmin",
+    "db.pma_pma_not_installed": "phpMyAdmin is not installed on the server.",
+    "db.pma_no_db_user_with_stored_password": "This database has no panel-created DB user — add a user and try again.",
+    "mail.webmail": "Webmail",
+    "mail.webmail_install": "Install webmail",
+    "mail.webmail_installing": "Webmail (Roundcube) installation started — watch the task.",
+    "mail.webmail_hostname": "Webmail hostname (DNS A record must point to this server):"
 }

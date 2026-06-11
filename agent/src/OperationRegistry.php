@@ -24,6 +24,7 @@ final class OperationRegistry
         'dns.zone_delete'   => Operations\DnsZoneDelete::class,
         'ftp.sync'          => Operations\FtpSync::class,
         'mail.setup'        => Operations\MailSetup::class,
+        'mail.webmail_setup' => Operations\WebmailSetup::class,
         'mail.domain_add'   => Operations\MailDomainAdd::class,
         'mail.domain_delete' => Operations\MailDomainDelete::class,
         'backup.vhost_create' => Operations\BackupVhostCreate::class,

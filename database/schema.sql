@@ -153,6 +153,7 @@ CREATE TABLE db_users (
     username        VARCHAR(64) NOT NULL UNIQUE,
     database_id     INT UNSIGNED NULL,
     remote_access   TINYINT(1) NOT NULL DEFAULT 0,
+    password_enc    TEXT NULL,                              -- sodium secretbox (Crypto) — za phpMyAdmin auto-login
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id),
     FOREIGN KEY (database_id) REFERENCES db_databases(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

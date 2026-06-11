@@ -17,6 +17,7 @@ final class MailController extends Controller
     {
         $router->add('GET', '/api/v1/mail/status', $this->status(...));
         $router->add('POST', '/api/v1/mail/setup', $this->setup(...));
+        $router->add('POST', '/api/v1/mail/webmail', $this->webmailSetup(...));
         $router->add('GET', '/api/v1/mail/domains', $this->domains(...));
         $router->add('POST', '/api/v1/mail/domains', $this->createDomain(...));
         $router->add('DELETE', '/api/v1/mail/domains/{id}', $this->deleteDomain(...));
@@ -32,7 +33,11 @@ final class MailController extends Controller
     private function status(Request $request): never
     {
         $this->ctx($request, 'mail:read');
-        Response::ok(['installed' => $this->mailInstalled()]);
+        $webmail = $this->app->db->one("SELECT value FROM settings WHERE `key` = 'webmail'");
+        Response::ok([
+            'installed' => $this->mailInstalled(),
+            'webmail' => $webmail === null ? null : json_decode((string) $webmail['value'], true),
+        ]);
     }
 
     /** Jednokratna instalacija mail stacka — samo admin, ide kao task. */
@@ -46,6 +51,30 @@ final class MailController extends Controller
         $task_id = $this->app->tasks->enqueue('mail.setup', [], $ctx->user_id);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.setup', null, $request->ip);
         Response::ok(['task_id' => $task_id], 202);
+    }
+
+    /** Roundcube webmail na zasebnom vhostu — admin, task + AutoSSL task. */
+    private function webmailSetup(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'mail:write');
+        $ctx->requireRole('admin');
+        if (!$this->mailInstalled()) {
+            throw new HttpException(409, 'mail_not_installed');
+        }
+
+        $panel_fqdn = $this->app->config->get('panel_fqdn', (string) gethostname());
+        $hostname = strtolower(trim($request->str('hostname') ?? "webmail.$panel_fqdn"));
+        if (!filter_var($hostname, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) || !str_contains($hostname, '.')) {
+            throw new HttpException(422, 'invalid_hostname');
+        }
+
+        $task_id = $this->app->tasks->enqueue('mail.webmail_setup', ['hostname' => $hostname], $ctx->user_id);
+        $ssl_task_id = $this->app->tasks->enqueue('ssl.issue', [
+            'hostnames' => [$hostname],
+            'contact_email' => $this->app->config->get('acme_email', $ctx->email),
+        ], $ctx->user_id);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.webmail_setup', ['hostname' => $hostname], $request->ip);
+        Response::ok(['task_id' => $task_id, 'ssl_task_id' => $ssl_task_id, 'hostname' => $hostname], 202);
     }
 
     private function domains(Request $request): never

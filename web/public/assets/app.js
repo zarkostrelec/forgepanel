@@ -1051,7 +1051,8 @@ async function pageDatabases() {
             <td class="mono">${esc(d.name)}</td>
             <td class="mono hide-sm">${fmtBytes(d.size_bytes)}</td>
             <td class="hide-sm">${fmtDate(d.created_at)}</td>
-            <td class="num"><button class="btn ghost" data-user="${d.id}">+ ${t('db.user')}</button>
+            <td class="num"><button class="btn ghost" data-pma="${d.id}">${t('db.pma')}</button>
+                <button class="btn ghost" data-user="${d.id}">+ ${t('db.user')}</button>
                 <button class="btn danger" data-del="${d.id}" data-name="${esc(d.name)}">${t('common.delete')}</button></td>
         </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('nav.databases')}: 0</div>`;
 
@@ -1061,6 +1062,13 @@ async function pageDatabases() {
         catch (err) { toast(err.message, 'err'); }
     }));
     main().querySelectorAll('[data-user]').forEach((b) => b.addEventListener('click', () => createDbUserModal(b.dataset.user)));
+    // phpMyAdmin auto-login: jednokratan signed token → nova kartica
+    main().querySelectorAll('[data-pma]').forEach((b) => b.addEventListener('click', async () => {
+        try {
+            const r = await api(`/databases/${b.dataset.pma}/pma`, { method: 'POST' });
+            window.open(r.url, '_blank', 'noopener');
+        } catch (err) { toast(t('db.pma_' + err.message) !== 'db.pma_' + err.message ? t('db.pma_' + err.message) : err.message, 'err'); }
+    }));
 }
 
 function createDbModal() {
@@ -1312,11 +1320,25 @@ async function pageMail() {
         return;
     }
 
+    const wm = status.webmail;
     main().innerHTML = `
     <div class="page-head"><h1>${t('nav.mail')}</h1><div class="spacer"></div>
+        ${wm?.hostname
+            ? `<a class="btn" href="https://${esc(wm.hostname)}" target="_blank" rel="noopener">${icon('mail')}${t('mail.webmail')}</a>`
+            : state.me.role === 'admin' ? `<button class="btn" id="wmsetup">${icon('mail')}${t('mail.webmail_install')}</button>` : ''}
         <button class="btn primary" id="newdom">${icon('plus')}${t('mail.new_domain')}</button></div>
     <div class="card" id="domains">${t('common.loading')}</div>
     <div id="detail"></div>`;
+
+    document.getElementById('wmsetup')?.addEventListener('click', async () => {
+        const hostname = prompt(t('mail.webmail_hostname'), `webmail.${location.hostname}`);
+        if (!hostname) return;
+        try {
+            const r = await api('/mail/webmail', { method: 'POST', body: { hostname } });
+            watchTask(r.task_id, 'mail.webmail_setup');
+            toast(t('mail.webmail_installing'));
+        } catch (err) { toast(err.message, 'err'); }
+    });
 
     document.getElementById('newdom').addEventListener('click', () => {
         const modal = openModal(`

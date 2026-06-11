@@ -158,6 +158,13 @@ paths:
     post: { summary: Nova baza, responses: { "201": { description: OK } } }
   /databases/{id}/users:
     post: { summary: Novi DB user za bazu, responses: { "201": { description: OK } } }
+  /databases/{id}/pma:
+    post:
+      summary: phpMyAdmin auto-login — signed one-time token (TTL 60 s), vraća /pma-signon.php URL
+      responses:
+        "200": { description: url }
+        "422": { description: Baza nema panel-kreiranog DB usera }
+        "503": { description: phpMyAdmin nije instaliran }
   /tasks/{id}:
     get: { summary: Stanje taska, responses: { "200": { description: OK } } }
   /tasks/{id}/stream:
@@ -188,6 +195,8 @@ paths:
     post: { summary: Novi zapis (named-checkzone validira prije aktivacije), responses: { "201": { description: OK } } }
   /mail/setup:
     post: { summary: Jednokratna instalacija mail stacka (admin) — task, responses: { "202": { description: task_id } } }
+  /mail/webmail:
+    post: { summary: Roundcube webmail na zasebnom vhostu (admin) — task + AutoSSL task, responses: { "202": { description: task_id + ssl_task_id } } }
   /mail/domains:
     get: { summary: Mail domene, responses: { "200": { description: OK } } }
     post: { summary: Nova mail domena (DKIM ključ automatski + TXT u DNS zonu ako postoji), responses: { "201": { description: OK } } }
