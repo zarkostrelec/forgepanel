@@ -188,6 +188,17 @@ final class VhostsController extends Controller
         if (!in_array($new_version, self::PHP_VERSIONS, true)) {
             throw new HttpException(422, 'invalid_php_version');
         }
+        // Ista granica plana kao kod kreiranja — promjena verzije ne smije zaobići plan
+        if (!$ctx->isAdmin()) {
+            $plan = $this->app->db->one(
+                'SELECT p.php_versions FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.id = ?',
+                [$vhost['subscription_id']]
+            );
+            $allowed_php = json_decode((string) ($plan['php_versions'] ?? '[]'), true) ?: [];
+            if (!in_array($new_version, $allowed_php, true)) {
+                throw new HttpException(422, 'php_version_not_in_plan');
+            }
+        }
 
         $this->app->agent->call('vhost.php_set', [
             'vhost_id' => (int) $vhost['id'],

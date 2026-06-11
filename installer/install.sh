@@ -424,6 +424,23 @@ ${LISTEN_V6}
         fastcgi_buffering off;     # SSE
         fastcgi_read_timeout 3600; # SSE stream
     }
+    # phpMyAdmin auto-login most (signed one-time token) — stvarni file, izvan SPA front controllera
+    location = /pma-signon.php {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_pass unix:/run/php/fpm-forgepanel.sock;
+    }
+    # phpMyAdmin (auth_type=signon) — servira ga panelov izolirani stack
+    location ^~ /pma/ {
+        alias /opt/forgepanel/phpmyadmin/;
+        index index.php;
+        location ~ \.php$ {
+            include fastcgi_params;
+            fastcgi_param SCRIPT_FILENAME \$request_filename;
+            fastcgi_pass unix:/run/php/fpm-forgepanel.sock;
+        }
+        location ~* \.(js|css|png|gif|svg|ico|woff2?)$ { expires 7d; }
+    }
     location ~ \.php$ { return 404; }
 }
 # Include hostanih vhostova
@@ -438,6 +455,48 @@ install_agent() {
     cp "$FP_HOME/agent/systemd/forge-agentd.service" /etc/systemd/system/forge-agentd.service
     systemctl daemon-reload 2>/dev/null || true
     systemctl enable --now forge-agentd 2>/dev/null || true
+}
+
+install_phpmyadmin() {
+    # phpMyAdmin u panelovom izoliranom stacku (/pma/ na :8443), auth_type=signon —
+    # login ISKLJUČIVO kroz panelov signed one-time token, nikad ručni unos credentialsa.
+    local pma_dir="/opt/forgepanel/phpmyadmin" tarball="/tmp/forgepanel-pma.tar.gz"
+    if [[ ! -f "$pma_dir/index.php" ]]; then
+        log "  preuzimam phpMyAdmin (latest, phpmyadmin.net)"
+        if ! curl -fsSL --retry 3 -o "$tarball" \
+            "https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.tar.gz"; then
+            log "UPOZORENJE: phpMyAdmin download nije uspio — panel radi bez njega, ponovi installer kasnije (repair mod)."
+            return 0
+        fi
+        install -d /opt/forgepanel
+        local tmp_dir; tmp_dir=$(mktemp -d)
+        tar -xzf "$tarball" -C "$tmp_dir"
+        rm -rf "$pma_dir"
+        mv "$tmp_dir"/phpMyAdmin-* "$pma_dir"
+        rm -rf "$tmp_dir" "$tarball"
+    fi
+
+    local blowfish; blowfish=$(openssl rand -base64 32 | head -c 32)
+    cat > "$pma_dir/config.inc.php" <<EOF
+<?php
+/* ForgePanel — phpMyAdmin signon konfiguracija (NE uređivati ručno) */
+declare(strict_types=1);
+\$cfg['blowfish_secret'] = '${blowfish}';
+\$cfg['Servers'][1]['auth_type'] = 'signon';
+\$cfg['Servers'][1]['SignonSession'] = 'FPpmaSignon';
+\$cfg['Servers'][1]['SignonURL'] = '/pma-signon.php';
+\$cfg['Servers'][1]['host'] = 'localhost';
+\$cfg['Servers'][1]['AllowNoPassword'] = false;
+\$cfg['AllowArbitraryServer'] = false;
+\$cfg['PmaAbsoluteUri'] = '/pma/';
+\$cfg['TempDir'] = '${pma_dir}/tmp';
+\$cfg['ShowPhpInfo'] = false;
+\$cfg['VersionCheck'] = false;
+EOF
+    install -d -o fpanel -g fpanel -m 700 "$pma_dir/tmp"
+    chown root:fpanel "$pma_dir/config.inc.php"
+    chmod 640 "$pma_dir/config.inc.php"
+    log "  phpMyAdmin spreman na https://${PANEL_FQDN}:8443/pma/ (auto-login iz panela)"
 }
 
 create_admin() {
@@ -574,6 +633,7 @@ main() {
     step "install_panel_stack" install_panel_stack
     step "setup_panel_db"      setup_panel_db
     step "install_agent"       install_agent
+    step "install_phpmyadmin"  install_phpmyadmin
     step "create_admin"        create_admin
     step "optional_components" optional_components
     step "hardening"           hardening

@@ -4,19 +4,24 @@ declare(strict_types=1);
 
 namespace ForgePanel\Web\Api\V1;
 
+use ForgePanel\Web\Core\Crypto;
 use ForgePanel\Web\Core\HttpException;
 use ForgePanel\Web\Core\Request;
 use ForgePanel\Web\Core\Response;
 use ForgePanel\Web\Core\Router;
+use ForgePanel\Web\Core\SignedToken;
 
 final class DatabasesController extends Controller
 {
+    private const PMA_TOKEN_TTL_S = 60;
+
     public function register(Router $router): void
     {
         $router->add('GET', '/api/v1/databases', $this->index(...));
         $router->add('POST', '/api/v1/databases', $this->create(...));
         $router->add('DELETE', '/api/v1/databases/{id}', $this->delete(...));
         $router->add('POST', '/api/v1/databases/{id}/users', $this->createUser(...));
+        $router->add('POST', '/api/v1/databases/{id}/pma', $this->pmaLogin(...));
     }
 
     private function index(Request $request): never
@@ -104,11 +109,46 @@ final class DatabasesController extends Controller
             'remote_access' => $request->body['remote_access'] ?? false,
         ]);
         $this->app->db->run(
-            'INSERT INTO db_users (subscription_id, username, database_id, remote_access) VALUES (?, ?, ?, ?)',
-            [$database['subscription_id'], $username, $database['id'], (int) (bool) ($request->body['remote_access'] ?? false)]
+            'INSERT INTO db_users (subscription_id, username, database_id, remote_access, password_enc) VALUES (?, ?, ?, ?, ?)',
+            [
+                $database['subscription_id'],
+                $username,
+                $database['id'],
+                (int) (bool) ($request->body['remote_access'] ?? false),
+                (new Crypto($this->app->config))->encrypt($password), // phpMyAdmin auto-login
+            ]
         );
         $this->app->audit->log($ctx->user_id, $ctx->email, 'db.user_create', ['username' => $username], $request->ip);
         Response::ok(['username' => $username], 201);
+    }
+
+    /** phpMyAdmin auto-login: signed one-time token → /pma-signon.php otvara PMA session. */
+    private function pmaLogin(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'databases:read');
+        $database = $this->databaseOr404($ctx, (int) $request->param('id'));
+
+        if (!is_dir('/opt/forgepanel/phpmyadmin')) {
+            throw new HttpException(503, 'pma_not_installed');
+        }
+        $db_user = $this->app->db->one(
+            'SELECT id FROM db_users WHERE database_id = ? AND password_enc IS NOT NULL ORDER BY id LIMIT 1',
+            [$database['id']]
+        ) ?? throw new HttpException(422, 'no_db_user_with_stored_password');
+
+        $token = SignedToken::create(
+            ['db_user_id' => (int) $db_user['id'], 'db' => $database['name']],
+            $this->app->config->get('app_secret', ''),
+            self::PMA_TOKEN_TTL_S
+        );
+        // Jednokratnost: jti se upisuje, signon ga troši
+        $payload = SignedToken::verify($token, $this->app->config->get('app_secret', ''));
+        $this->app->db->run(
+            'INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
+            ['pma_jti_' . $payload['jti'], json_encode(['ts' => time()])]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'db.pma_login', ['database' => $database['name']], $request->ip);
+        Response::ok(['url' => '/pma-signon.php?token=' . rawurlencode($token)]);
     }
 
     /** @return array<string, mixed> */
