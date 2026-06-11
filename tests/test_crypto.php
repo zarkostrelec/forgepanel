@@ -26,5 +26,21 @@ $other = new Crypto(Config::load($ini2));
 T::assertThrows(\RuntimeException::class, fn () => $other->decrypt($enc), 'krivi ključ baca iznimku');
 T::assertThrows(\RuntimeException::class, fn () => $crypto->decrypt('nije!validan!base64!!!'), 'oštećeni ciphertext baca iznimku');
 
+// Sigurnosno: prazan / default / prekratak app_secret se ODBIJA (nema tihog pada na poznati ključ)
+$ini_empty = tempnam(sys_get_temp_dir(), 'fpcfg');
+file_put_contents($ini_empty, "app_secret = \"\"\n");
+T::assertThrows(\RuntimeException::class, fn () => (new Crypto(Config::load($ini_empty)))->encrypt('x'), 'prazan app_secret odbijen');
+
+$ini_default = tempnam(sys_get_temp_dir(), 'fpcfg');
+file_put_contents($ini_default, "app_secret = \"forgepanel-dev-secret-change-me\"\n");
+T::assertThrows(\RuntimeException::class, fn () => (new Crypto(Config::load($ini_default)))->encrypt('x'), 'default app_secret odbijen');
+
+$ini_short = tempnam(sys_get_temp_dir(), 'fpcfg');
+file_put_contents($ini_short, "app_secret = \"kratko\"\n");
+T::assertThrows(\RuntimeException::class, fn () => (new Crypto(Config::load($ini_short)))->encrypt('x'), 'prekratak app_secret odbijen');
+
 unlink($ini);
 unlink($ini2);
+unlink($ini_empty);
+unlink($ini_default);
+unlink($ini_short);

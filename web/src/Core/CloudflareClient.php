@@ -61,7 +61,7 @@ final class CloudflareClient
     public static function ipRanges(): array
     {
         $ch = curl_init(self::BASE . '/ips');
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15]);
+        HttpClient::apply($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15]);
         $body = curl_exec($ch);
         curl_close($ch);
         $data = is_string($body) ? json_decode($body, true) : null;
@@ -72,7 +72,7 @@ final class CloudflareClient
     private function request(string $method, string $path, ?array $body = null): array
     {
         $ch = curl_init(self::BASE . $path);
-        curl_setopt_array($ch, [
+        HttpClient::apply($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_TIMEOUT => 30,
