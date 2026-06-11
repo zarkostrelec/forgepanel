@@ -237,6 +237,10 @@ bootstrap_repos() {
         "https://ppa.launchpadcontent.net/ondrej/php/ubuntu" \
         "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x71daeaab4ad4cab6" \
         "main"
+    add_repo "ondrej-apache2" \
+        "https://ppa.launchpadcontent.net/ondrej/apache2/ubuntu" \
+        "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x71daeaab4ad4cab6" \
+        "main"
     add_repo "nginx" \
         "https://nginx.org/packages/mainline/ubuntu" \
         "https://nginx.org/keys/nginx_signing.key" \
@@ -302,6 +306,7 @@ db_user = "forgepanel"
 db_pass = "${db_pass}"
 socket_group = "fpanel"
 acme_email = "${ADMIN_EMAIL}"
+panel_fqdn = "${PANEL_FQDN}"
 EOF
     chmod 600 "$FP_ETC/agent.ini"
 
@@ -310,9 +315,20 @@ db_dsn = "mysql:host=localhost;dbname=forgepanel;charset=utf8mb4"
 db_user = "forgepanel"
 db_pass = "${db_pass}"
 acme_email = "${ADMIN_EMAIL}"
+panel_fqdn = "${PANEL_FQDN}"
 EOF
     chown root:fpanel "$FP_ETC/web.ini"
     chmod 640 "$FP_ETC/web.ini"
+
+    # Javna IPv4 servera — koristi se za auto-generiranje DNS zona
+    local server_ip
+    server_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
+    if [[ -n "$server_ip" ]]; then
+        sql forgepanel <<SQL
+INSERT INTO settings (\`key\`, value) VALUES ('server_ipv4', '"${server_ip}"')
+ON DUPLICATE KEY UPDATE value = '"${server_ip}"';
+SQL
+    fi
 }
 
 install_panel_stack() {
@@ -436,6 +452,28 @@ EOF
     ADMIN_PASS_OUT="$admin_pass"
 }
 
+# ---------------------------------------------------------------- 5. opcionalne komponente
+# --components=web,dns,ftp — mail/DNS/FTP su opcionalni, mogu se dodati i naknadno
+optional_components() {
+    export DEBIAN_FRONTEND=noninteractive
+    if [[ ",$COMPONENTS," == *",dns,"* ]]; then
+        log "  komponenta: dns (BIND9)"
+        apt-get install -y -q bind9 bind9utils
+        install -d /etc/bind/forgepanel
+        systemctl enable --now named 2>/dev/null || true
+        sql forgepanel -e "INSERT INTO components (name, status, packages) VALUES ('bind9', 'installed', '[\"bind9\"]') ON DUPLICATE KEY UPDATE status='installed';"
+        ufw allow 53/tcp 2>/dev/null || true
+        ufw allow 53/udp 2>/dev/null || true
+    fi
+    if [[ ",$COMPONENTS," == *",ftp,"* ]]; then
+        log "  komponenta: ftp (ProFTPD, TLS obavezan)"
+        apt-get install -y -q proftpd-basic
+        sql forgepanel -e "INSERT INTO components (name, status, packages) VALUES ('proftpd', 'installed', '[\"proftpd-basic\"]') ON DUPLICATE KEY UPDATE status='installed';"
+        ufw allow 21/tcp 2>/dev/null || true
+        ufw allow 49152:50192/tcp 2>/dev/null || true
+    fi
+}
+
 # ---------------------------------------------------------------- 6. hardening
 hardening() {
     export DEBIAN_FRONTEND=noninteractive
@@ -512,6 +550,7 @@ main() {
     step "setup_panel_db"      setup_panel_db
     step "install_agent"       install_agent
     step "create_admin"        create_admin
+    step "optional_components" optional_components
     step "hardening"           hardening
     step "register_components" register_components
     verify_install

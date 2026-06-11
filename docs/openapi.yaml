@@ -119,6 +119,28 @@ paths:
     get:
       summary: SSE stream progressa taska
       responses: { "200": { description: "text/event-stream" } }
+  /vhosts/{id}/backend:
+    put:
+      summary: "Web backend: nginx (direktno) ili nginx_apache (.htaccess) — task"
+      responses: { "202": { description: task_id } }
+  /vhosts/{id}/cron:
+    get: { summary: Cron poslovi vhosta, responses: { "200": { description: OK } } }
+    post: { summary: Novi cron job (izvršava se kao vhost user), responses: { "201": { description: OK } } }
+  /vhosts/{id}/ftp:
+    get: { summary: FTP useri vhosta, responses: { "200": { description: OK } } }
+    post: { summary: Novi FTP user (TLS obavezan, chroot u home), responses: { "201": { description: OK } } }
+  /vhosts/{id}/backups:
+    post: { summary: Backup vhosta (fileovi + baze, manifest + SHA-256) — task, responses: { "202": { description: backup_id + task_id } } }
+  /backups:
+    get: { summary: Lista backupa (filtrirano po vlasništvu), responses: { "200": { description: OK } } }
+  /backups/{id}/restore:
+    post: { summary: "Granularni restore: mode=files | mode=db&db_name=… — task", responses: { "202": { description: task_id } } }
+  /dns/zones:
+    get: { summary: DNS zone, responses: { "200": { description: OK } } }
+    post: { summary: Nova zona s auto-generiranim zapisima (A/www/MX/SPF/DMARC/CAA), responses: { "201": { description: OK } } }
+  /dns/zones/{id}/records:
+    get: { summary: Zapisi zone, responses: { "200": { description: OK } } }
+    post: { summary: Novi zapis (named-checkzone validira prije aktivacije), responses: { "201": { description: OK } } }
   /monitoring/now:
     get: { summary: Trenutne metrike servera, responses: { "200": { description: OK } } }
   /tokens:

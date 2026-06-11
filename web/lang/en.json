@@ -48,5 +48,22 @@
     "files.upload": "Upload",
     "files.download": "Download",
     "files.mkdir": "New directory",
-    "files.uploaded": "uploaded"
+    "files.uploaded": "uploaded",
+    "nav.dns": "DNS",
+    "nav.backups": "Backups",
+    "dns.new_zone": "New DNS zone",
+    "dns.zone": "Zone",
+    "dns.name": "Name",
+    "dns.content": "Content",
+    "dns.auto_records": "A/www/MX/SPF/DMARC/CAA records are generated automatically.",
+    "ftp.title": "FTP users",
+    "ftp.created": "FTP user created",
+    "backup.create": "Backup",
+    "backup.size": "Size",
+    "backup.restore": "Restore",
+    "backup.mode": "What to restore",
+    "backup.mode_files": "Files (entire vhost)",
+    "backup.mode_db": "Database",
+    "backup.restore_warning": "Restore overwrites existing data. Checksums are verified before restoring.",
+    "ftp.username": "FTP username"
 }

@@ -48,5 +48,22 @@
     "files.upload": "Upload",
     "files.download": "Preuzmi",
     "files.mkdir": "Novi direktorij",
-    "files.uploaded": "uploadano"
+    "files.uploaded": "uploadano",
+    "nav.dns": "DNS",
+    "nav.backups": "Backupi",
+    "dns.new_zone": "Nova DNS zona",
+    "dns.zone": "Zona",
+    "dns.name": "Ime",
+    "dns.content": "Sadržaj",
+    "dns.auto_records": "Automatski se generiraju A/www/MX/SPF/DMARC/CAA zapisi.",
+    "ftp.title": "FTP useri",
+    "ftp.created": "FTP user kreiran",
+    "backup.create": "Backup",
+    "backup.size": "Veličina",
+    "backup.restore": "Restore",
+    "backup.mode": "Što vratiti",
+    "backup.mode_files": "Fileovi (cijeli vhost)",
+    "backup.mode_db": "Baza",
+    "backup.restore_warning": "Restore prepisuje postojeće podatke. Checksumovi se verificiraju prije vraćanja.",
+    "ftp.username": "FTP korisničko ime"
 }

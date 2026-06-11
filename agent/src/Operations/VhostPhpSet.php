@@ -28,10 +28,13 @@ final class VhostPhpSet extends Operation
         $new = Validator::phpVersion($params['new_version']);
         $vhost_root = Validator::VHOST_ROOT . '/' . $domain;
 
+        $row = $this->db->one('SELECT web_backend FROM vhosts WHERE id = ?', [(int) $params['vhost_id']]);
+        $backend = (string) ($row['web_backend'] ?? 'nginx');
+
         PhpFpm::writePool($new, $sys_user, $vhost_root);
         NginxConf::writeAndReload(
             NginxConf::VHOST_CONF_DIR . "/$domain.conf",
-            NginxConf::vhostTemplate($domain, $vhost_root . '/httpdocs', $new, $sys_user)
+            NginxConf::templateFor($backend, $domain, $vhost_root . '/httpdocs', $new, $sys_user)
         );
         if ($old !== $new) {
             PhpFpm::removePool($old, $sys_user);

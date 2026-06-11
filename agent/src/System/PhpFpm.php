@@ -25,8 +25,9 @@ final class PhpFpm
         user = {$sys_user}
         group = {$sys_user}
         listen = /run/php/fpm-{$sys_user}.sock
+        ; owner = nginx (direktni mod), group = www-data (Apache proxy_fcgi mod)
         listen.owner = nginx
-        listen.group = nginx
+        listen.group = www-data
         listen.mode = 0660
 
         pm = ondemand

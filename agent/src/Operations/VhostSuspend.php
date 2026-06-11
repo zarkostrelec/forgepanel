@@ -36,9 +36,16 @@ final class VhostSuspend extends Operation
             NGINX;
             NginxConf::writeAndReload($conf_path, $conf);
         } else {
+            $row = $this->db->one('SELECT web_backend FROM vhosts WHERE id = ?', [(int) $params['vhost_id']]);
             NginxConf::writeAndReload(
                 $conf_path,
-                NginxConf::vhostTemplate($domain, $docroot, Validator::phpVersion($params['php_version']), $sys_user)
+                NginxConf::templateFor(
+                    (string) ($row['web_backend'] ?? 'nginx'),
+                    $domain,
+                    $docroot,
+                    Validator::phpVersion($params['php_version']),
+                    $sys_user
+                )
             );
         }
 

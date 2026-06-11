@@ -36,4 +36,17 @@ final class Db
         $stmt->execute($params);
         return $stmt;
     }
+
+    /** @param list<mixed> $params @return array<string, mixed>|null */
+    public function one(string $sql, array $params = []): ?array
+    {
+        $row = $this->run($sql, $params)->fetch();
+        return $row === false ? null : $row;
+    }
+
+    /** @param list<mixed> $params @return list<array<string, mixed>> */
+    public function all(string $sql, array $params = []): array
+    {
+        return $this->run($sql, $params)->fetchAll();
+    }
 }

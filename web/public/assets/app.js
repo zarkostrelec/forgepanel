@@ -55,6 +55,8 @@ const ICONS = {
     upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/>',
     download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 20h16"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+    dns: '<circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M12 7.2V12m0 0-5.2 5M12 12l5.2 5"/>',
+    archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 
@@ -302,7 +304,9 @@ const NAV = [
     ['dashboard', 'home', 'nav.dashboard'],
     ['websites', 'globe', 'nav.websites'],
     ['databases', 'db', 'nav.databases'],
+    ['dns', 'dns', 'nav.dns'],
     ['ssl', 'lock', 'nav.ssl'],
+    ['backups', 'archive', 'nav.backups'],
     ['tasks', 'tasks', 'nav.tasks'],
     ['monitoring', 'chart', 'nav.monitoring'],
 ];
@@ -463,10 +467,17 @@ async function pageWebsiteDetail(id) {
     main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
     const vhost = await api(`/vhosts/${id}`);
 
+    const uptime = vhost.uptime;
+    const uptimeBadge = uptime
+        ? `<span class="badge ${uptime.last_status === 'up' ? 'ok' : uptime.last_status === 'down' ? 'err' : ''}">
+            ${uptime.last_status}${uptime.response_ms ? ` · ${uptime.response_ms} ms` : ''}</span>`
+        : '';
+
     main().innerHTML = `
     <div class="page-head">
-        <h1 class="mono">${esc(vhost.domain)}</h1>${statusBadge(vhost.status)}
+        <h1 class="mono">${esc(vhost.domain)}</h1>${statusBadge(vhost.status)}${uptimeBadge}
         <div class="spacer"></div>
+        <button class="btn" id="bkp">${icon('archive')}${t('backup.create')}</button>
         <button class="btn" id="renew">${icon('refresh')}SSL renew</button>
         <button class="btn danger" id="del">${t('common.delete')}</button>
     </div>
@@ -477,7 +488,11 @@ async function pageWebsiteDetail(id) {
                 <tr><td>${t('vhost.php_version')}</td><td>
                     <select id="php" class="mono">${['8.1', '8.2', '8.3', '8.4'].map((v) =>
                         `<option ${v === vhost.php_version ? 'selected' : ''}>${v}</option>`).join('')}</select></td></tr>
-                <tr><td>Backend</td><td class="mono">${esc(vhost.web_backend)}</td></tr>
+                <tr><td>Backend</td><td>
+                    <select id="backend" class="mono">
+                        <option value="nginx" ${vhost.web_backend === 'nginx' ? 'selected' : ''}>nginx + FPM (brže)</option>
+                        <option value="nginx_apache" ${vhost.web_backend === 'nginx_apache' ? 'selected' : ''}>nginx → Apache (.htaccess)</option>
+                    </select></td></tr>
                 <tr><td>Sistemski user</td><td class="mono">${esc(vhost.sys_user)}</td></tr>
                 <tr><td>Docroot</td><td class="mono">${esc(vhost.docroot)}</td></tr>
                 <tr><td>Kreirano</td><td>${fmtDate(vhost.created_at)}</td></tr>
@@ -488,9 +503,15 @@ async function pageWebsiteDetail(id) {
             <div id="fm"></div>
         </div>
     </div>
-    <div class="card mt">
-        <div class="page-head"><h2>${t('cron.title')}</h2></div>
-        <div id="cron"></div>
+    <div class="grid cols-2 mt">
+        <div class="card">
+            <div class="page-head"><h2>${t('cron.title')}</h2></div>
+            <div id="cron"></div>
+        </div>
+        <div class="card">
+            <div class="page-head"><h2>${t('ftp.title')}</h2></div>
+            <div id="ftp"></div>
+        </div>
     </div>`;
 
     main().querySelector('#php').addEventListener('change', async (e) => {
@@ -514,8 +535,61 @@ async function pageWebsiteDetail(id) {
         } catch (err) { toast(err.message, 'err'); }
     });
 
+    main().querySelector('#backend').addEventListener('change', async (e) => {
+        try {
+            const r = await api(`/vhosts/${id}/backend`, { method: 'PUT', body: { web_backend: e.target.value } });
+            watchTask(r.task_id, `backend ${vhost.domain}`);
+        } catch (err) { toast(err.message, 'err'); route(); }
+    });
+    main().querySelector('#bkp').addEventListener('click', async () => {
+        try {
+            const r = await api(`/vhosts/${id}/backups`, { method: 'POST', body: {} });
+            watchTask(r.task_id, `backup ${vhost.domain}`);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+
     fileManager(vhost, main().querySelector('#fm'), '/httpdocs');
     cronSection(vhost, main().querySelector('#cron'));
+    ftpSection(vhost, main().querySelector('#ftp'));
+}
+
+// ---------------------------------------------------------------- FTP
+async function ftpSection(vhost, container) {
+    let users;
+    try { users = await api(`/vhosts/${vhost.id}/ftp`); }
+    catch (err) { container.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; return; }
+
+    container.innerHTML = `
+    ${users.length ? `
+    <table class="data"><tbody>
+        ${users.map((u) => `<tr>
+            <td class="mono">${esc(u.username)}</td>
+            <td class="mono" style="word-break:break-all">${esc(u.home_path)}</td>
+            <td class="num"><button class="btn danger" data-del="${u.id}">${t('common.delete')}</button></td>
+        </tr>`).join('')}
+    </tbody></table>` : `<div class="empty">${t('ftp.title')}: 0</div>`}
+    <form id="ftpf" class="mt">
+        <div class="grid cols-2">
+            <div class="field"><label>${t('ftp.username')}</label><input name="username" required pattern="[a-z][a-z0-9_.\\-]{2,31}" class="mono"></div>
+            <div class="field"><label>${t('auth.password')}</label><input name="password" type="password" required minlength="12"></div>
+        </div>
+        <div class="field"><label>Home (unutar vhosta)</label><input name="home" value="/httpdocs" class="mono"></div>
+        <button class="btn primary">${icon('plus')}${t('common.create')}</button>
+    </form>`;
+
+    container.querySelector('#ftpf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            await api(`/vhosts/${vhost.id}/ftp`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+            toast(t('ftp.created'));
+            ftpSection(vhost, container);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    container.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/vhosts/${vhost.id}/ftp/${b.dataset.del}`, { method: 'DELETE' }); ftpSection(vhost, container); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
 }
 
 // ---------------------------------------------------------------- cron
@@ -851,12 +925,164 @@ async function pageMonitoring() {
     }
 }
 
+// ---------------------------------------------------------------- DNS
+async function pageDns() {
+    setActive('dns');
+    main().innerHTML = `
+    <div class="page-head"><h1>${t('nav.dns')}</h1><div class="spacer"></div>
+        <button class="btn primary" id="newzone">${icon('plus')}${t('dns.new_zone')}</button></div>
+    <div class="card" id="zones">${t('common.loading')}</div>
+    <div id="records"></div>`;
+
+    document.getElementById('newzone').addEventListener('click', () => {
+        const modal = openModal(`
+            <div class="dialog-head"><h1>${t('dns.new_zone')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+            <form id="zf">
+                <div class="field"><label>${t('vhost.domain')}</label>
+                    <input name="domain" required placeholder="example.com" class="mono">
+                    <span class="hint">${t('dns.auto_records')}</span></div>
+                <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                    <button class="btn primary">${t('common.create')}</button></div>
+            </form>`);
+        modal.querySelector('#zf').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await api('/dns/zones', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+                modal.close();
+                pageDns();
+            } catch (err) { toast(err.message, 'err'); }
+        });
+    });
+
+    const zones = await api('/dns/zones');
+    document.getElementById('zones').innerHTML = zones.length ? `
+        <table class="data"><thead><tr><th>${t('dns.zone')}</th><th class="hide-sm">Serial</th><th>DNSSEC</th><th></th></tr></thead><tbody>
+        ${zones.map((z) => `<tr class="row-link" data-zone="${z.id}" data-domain="${esc(z.domain)}">
+            <td class="mono">${esc(z.domain)}</td>
+            <td class="mono hide-sm">${esc(z.serial)}</td>
+            <td><span class="badge ${Number(z.dnssec_enabled) ? 'ok' : ''}">${Number(z.dnssec_enabled) ? 'on' : 'off'}</span></td>
+            <td class="num"><button class="btn danger" data-delzone="${z.id}">${t('common.delete')}</button></td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('nav.dns')}: 0</div>`;
+
+    main().querySelectorAll('[data-delzone]').forEach((b) => b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/dns/zones/${b.dataset.delzone}`, { method: 'DELETE' }); pageDns(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    main().querySelectorAll('[data-zone]').forEach((tr) => tr.addEventListener('click', () =>
+        dnsRecords(Number(tr.dataset.zone), tr.dataset.domain)));
+}
+
+async function dnsRecords(zoneId, domain) {
+    const container = document.getElementById('records');
+    container.innerHTML = `<div class="card mt">${t('common.loading')}</div>`;
+    const records = await api(`/dns/zones/${zoneId}/records`);
+
+    container.innerHTML = `
+    <div class="card mt">
+        <div class="page-head"><h2 class="mono">${esc(domain)}</h2></div>
+        <table class="data"><thead><tr>
+            <th>${t('dns.name')}</th><th>Tip</th><th>${t('dns.content')}</th><th class="hide-sm">TTL</th><th class="hide-sm">Prio</th><th></th>
+        </tr></thead><tbody>
+        ${records.map((r) => `<tr>
+            <td class="mono">${esc(r.name)}</td>
+            <td class="mono">${esc(r.type)}</td>
+            <td class="mono" style="word-break:break-all">${esc(r.content)}</td>
+            <td class="mono hide-sm">${r.ttl}</td>
+            <td class="mono hide-sm">${r.prio ?? ''}</td>
+            <td class="num"><button class="btn danger" data-delrec="${r.id}">${t('common.delete')}</button></td>
+        </tr>`).join('')}</tbody></table>
+        <form id="rf" class="mt">
+            <div class="grid cols-4">
+                <div class="field"><label>${t('dns.name')}</label><input name="name" placeholder="@" class="mono"></div>
+                <div class="field"><label>Tip</label><select name="type" class="mono">
+                    ${['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'].map((x) => `<option>${x}</option>`).join('')}</select></div>
+                <div class="field"><label>${t('dns.content')}</label><input name="content" required class="mono"></div>
+                <div class="field"><label>TTL / Prio</label><div class="grid cols-2">
+                    <input name="ttl" value="3600" class="mono"><input name="prio" placeholder="—" class="mono"></div></div>
+            </div>
+            <button class="btn primary">${icon('plus')}${t('common.create')}</button>
+        </form>
+    </div>`;
+
+    container.querySelector('#rf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = Object.fromEntries(new FormData(e.target));
+        if (!body.prio) delete body.prio;
+        try {
+            await api(`/dns/zones/${zoneId}/records`, { method: 'POST', body });
+            dnsRecords(zoneId, domain);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    container.querySelectorAll('[data-delrec]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/dns/zones/${zoneId}/records/${b.dataset.delrec}`, { method: 'DELETE' }); dnsRecords(zoneId, domain); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+}
+
+// ---------------------------------------------------------------- backups
+async function pageBackups() {
+    setActive('backups');
+    main().innerHTML = `<div class="page-head"><h1>${t('nav.backups')}</h1></div><div class="card">${t('common.loading')}</div>`;
+    const backups = await api('/backups');
+    main().querySelector('.card').innerHTML = backups.length ? `
+        <table class="data"><thead><tr>
+            <th>#</th><th>Path</th><th class="hide-sm">${t('backup.size')}</th><th>Status</th><th class="hide-sm">Kreirano</th><th></th>
+        </tr></thead><tbody>
+        ${backups.map((b) => `<tr>
+            <td class="mono">${b.id}</td>
+            <td class="mono" style="word-break:break-all">${esc(b.path || '—')}</td>
+            <td class="mono hide-sm">${fmtBytes(b.size_bytes)}</td>
+            <td>${statusBadge(b.status)}</td>
+            <td class="hide-sm">${fmtDate(b.created_at)}</td>
+            <td class="num">
+                ${b.status === 'done' ? `<button class="btn" data-restore="${b.id}">${t('backup.restore')}</button>` : ''}
+                <button class="btn danger" data-del="${b.id}">${t('common.delete')}</button>
+            </td></tr>`).join('')}</tbody></table>` : `<div class="empty">${t('nav.backups')}: 0</div>`;
+
+    main().querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', () => {
+        const backup = backups.find((x) => String(x.id) === b.dataset.restore);
+        const manifest = backup.manifest ? JSON.parse(backup.manifest) : { databases: [] };
+        const modal = openModal(`
+            <div class="dialog-head"><h1>${t('backup.restore')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+            <form id="rf">
+                <div class="field"><label>${t('backup.mode')}</label>
+                    <select name="mode">
+                        <option value="files">${t('backup.mode_files')}</option>
+                        ${manifest.databases.map((d) => `<option value="db:${esc(d)}">${t('backup.mode_db')}: ${esc(d)}</option>`).join('')}
+                    </select></div>
+                <div class="alert err">${t('backup.restore_warning')}</div>
+                <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                    <button class="btn primary">${t('backup.restore')}</button></div>
+            </form>`);
+        modal.querySelector('#rf').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const value = new FormData(e.target).get('mode');
+            const body = value.startsWith('db:') ? { mode: 'db', db_name: value.slice(3) } : { mode: 'files' };
+            try {
+                const r = await api(`/backups/${backup.id}/restore`, { method: 'POST', body });
+                modal.close();
+                watchTask(r.task_id, `restore #${backup.id}`);
+            } catch (err) { toast(err.message, 'err'); }
+        });
+    }));
+    main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/backups/${b.dataset.del}`, { method: 'DELETE' }); pageBackups(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+}
+
 // ---------------------------------------------------------------- router
 const ROUTES = [
     [/^#\/dashboard$/, pageDashboard],
     [/^#\/websites$/, pageWebsites],
     [/^#\/websites\/(\d+)$/, (m) => pageWebsiteDetail(Number(m[1]))],
     [/^#\/databases$/, pageDatabases],
+    [/^#\/dns$/, pageDns],
+    [/^#\/backups$/, pageBackups],
     [/^#\/ssl$/, pageSsl],
     [/^#\/tasks$/, pageTasks],
     [/^#\/monitoring$/, pageMonitoring],

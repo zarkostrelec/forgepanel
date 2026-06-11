@@ -20,6 +20,29 @@ final class VhostsController extends Controller
         $router->add('GET', '/api/v1/vhosts/{id}', $this->show(...));
         $router->add('DELETE', '/api/v1/vhosts/{id}', $this->delete(...));
         $router->add('PUT', '/api/v1/vhosts/{id}/php', $this->setPhp(...));
+        $router->add('PUT', '/api/v1/vhosts/{id}/backend', $this->setBackend(...));
+    }
+
+    /** Per-domena izbor: nginx (default, brže) ili nginx → Apache (.htaccess/WordPress). */
+    private function setBackend(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'vhosts:write');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+
+        $backend = $request->str('web_backend') ?? '';
+        if (!in_array($backend, ['nginx', 'nginx_apache'], true)) {
+            throw new HttpException(422, 'invalid_backend');
+        }
+
+        $task_id = $this->app->tasks->enqueue('vhost.backend_set', [
+            'vhost_id' => (int) $vhost['id'],
+            'domain' => $vhost['domain'],
+            'php_version' => $vhost['php_version'],
+            'backend' => $backend,
+        ], $ctx->user_id);
+
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.backend_set', ['domain' => $vhost['domain'], 'backend' => $backend], $request->ip);
+        Response::ok(['task_id' => $task_id], 202);
     }
 
     private function index(Request $request): never
@@ -41,7 +64,12 @@ final class VhostsController extends Controller
     private function show(Request $request): never
     {
         $ctx = $this->ctx($request, 'vhosts:read');
-        Response::ok($ctx->vhostOr404((int) $request->param('id')));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost['uptime'] = $this->app->db->one(
+            'SELECT type, target, last_status, response_ms, interval_s FROM uptime_probes WHERE vhost_id = ? LIMIT 1',
+            [$vhost['id']]
+        );
+        Response::ok($vhost);
     }
 
     private function create(Request $request): never
@@ -112,6 +140,12 @@ final class VhostsController extends Controller
             'INSERT INTO ssl_certs (vhost_id, hostname, type, cert_path, key_path, expires_at, status)
              VALUES (?, ?, \'letsencrypt\', ?, ?, NOW(), \'pending\')',
             [$vhost_id, $domain, "/etc/forgepanel/ssl/$domain/fullchain.pem", "/etc/forgepanel/ssl/$domain/privkey.pem"]
+        );
+
+        // Eksterni uptime monitoring — svaki vhost automatski dobiva HTTPS probu
+        $this->app->db->run(
+            "INSERT INTO uptime_probes (vhost_id, type, target, interval_s) VALUES (?, 'https', ?, 300)",
+            [$vhost_id, $domain]
         );
 
         $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.create', ['domain' => $domain], $request->ip);

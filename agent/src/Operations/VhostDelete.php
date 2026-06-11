@@ -32,6 +32,8 @@ final class VhostDelete extends Operation
 
         $context->output('Uklanjam nginx config');
         NginxConf::remove(NginxConf::VHOST_CONF_DIR . "/$domain.conf");
+        \ForgePanel\Agent\System\ApacheConf::removeVhost($domain);
+        @unlink("/etc/cron.d/forgepanel-{$sys_user}");
         $context->progress(25);
 
         $context->output('Uklanjam FPM pool');

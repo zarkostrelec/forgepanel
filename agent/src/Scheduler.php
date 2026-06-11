@@ -15,6 +15,9 @@ final class Scheduler
     /** @var array<string, int> */
     private array $last_run = [];
 
+    /** @var array<int, int> probe_id => zadnja provjera (unix ts) */
+    private array $probe_last = [];
+
     public function __construct(
         private readonly Db $db,
         private readonly Config $config,
@@ -27,6 +30,92 @@ final class Scheduler
         $this->every('aggregate', 3600, $this->aggregate(...));
         $this->every('ssl_renew', 6 * 3600, $this->enqueueSslRenewals(...));
         $this->every('cleanup', 3600, $this->cleanup(...));
+        $this->every('uptime', 30, $this->runUptimeProbes(...));
+    }
+
+    /**
+     * Eksterni uptime monitoring — HTTP/HTTPS/TCP probe za svaki vhost,
+     * response time, eventi i notifikacija vlasniku na promjenu stanja.
+     */
+    private function runUptimeProbes(): void
+    {
+        $now = time();
+        $probes = $this->db->all('SELECT * FROM uptime_probes');
+        foreach ($probes as $probe) {
+            $probe_id = (int) $probe['id'];
+            if (($this->probe_last[$probe_id] ?? 0) + (int) $probe['interval_s'] > $now) {
+                continue;
+            }
+            $this->probe_last[$probe_id] = $now;
+
+            [$status, $response_ms, $detail] = $this->probe((string) $probe['type'], (string) $probe['target']);
+
+            $this->db->run(
+                'UPDATE uptime_probes SET last_status = ?, response_ms = ? WHERE id = ?',
+                [$status, $response_ms, $probe_id]
+            );
+
+            if ($status !== $probe['last_status'] && $probe['last_status'] !== 'unknown') {
+                $this->db->run(
+                    'INSERT INTO uptime_events (probe_id, event, detail) VALUES (?, ?, ?)',
+                    [$probe_id, $status, $detail]
+                );
+                $owner = $this->db->one(
+                    'SELECT s.user_id FROM vhosts v JOIN subscriptions s ON s.id = v.subscription_id WHERE v.id = ?',
+                    [$probe['vhost_id']]
+                );
+                if ($owner !== null) {
+                    $this->db->run(
+                        'INSERT INTO notifications (user_id, severity, title, body) VALUES (?, ?, ?, ?)',
+                        [
+                            $owner['user_id'],
+                            $status === 'down' ? 'error' : 'info',
+                            ($status === 'down' ? 'Stranica nedostupna: ' : 'Stranica ponovno dostupna: ') . $probe['target'],
+                            $detail,
+                        ]
+                    );
+                }
+            }
+        }
+    }
+
+    /** @return array{0: string, 1: ?int, 2: ?string} [status, response_ms, detail] */
+    private function probe(string $type, string $target): array
+    {
+        $start = microtime(true);
+        if ($type === 'tcp') {
+            [$host, $port] = array_pad(explode(':', $target, 2), 2, '443');
+            $socket = @fsockopen($host, (int) $port, $errno, $errstr, 10);
+            $ms = (int) round((microtime(true) - $start) * 1000);
+            if ($socket === false) {
+                return ['down', null, "tcp: $errstr"];
+            }
+            fclose($socket);
+            return ['up', $ms, null];
+        }
+
+        $url = ($type === 'http' ? 'http://' : 'https://') . $target . '/';
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_NOBODY => false,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 3,
+            CURLOPT_SSL_VERIFYPEER => false, // dostupnost, ne validnost certa (SSL expiry prati ssl modul)
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_USERAGENT => 'ForgePanel-Uptime/1.0',
+        ]);
+        curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        $ms = (int) round((microtime(true) - $start) * 1000);
+
+        if ($code >= 200 && $code < 500 && $code !== 0) {
+            return ['up', $ms, null];
+        }
+        return ['down', null, $code > 0 ? "HTTP $code" : $error];
     }
 
     private function every(string $key, int $interval_s, \Closure $job): void

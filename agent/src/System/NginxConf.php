@@ -58,6 +58,64 @@ final class NginxConf
         return $has_v6 ? "listen [::]:{$port}{$extra};" : '';
     }
 
+    /** Bira template prema web backendu vhosta. */
+    public static function templateFor(string $backend, string $domain, string $docroot, string $php_version, string $sys_user): string
+    {
+        return $backend === 'nginx_apache'
+            ? self::vhostProxyTemplate($domain, $docroot)
+            : self::vhostTemplate($domain, $docroot, $php_version, $sys_user);
+    }
+
+    /** nginx ispred Apachea — SSL/statika/ACME na nginxu, ostalo proxy na 127.0.0.1:7080. */
+    public static function vhostProxyTemplate(string $domain, string $docroot): string
+    {
+        $v6_80 = self::listenV6(80);
+        $v6_443 = self::listenV6(443, ' ssl');
+        return <<<NGINX
+        # ForgePanel vhost — {$domain} (nginx → Apache reverse proxy, .htaccess mod)
+        server {
+            listen 80;
+            {$v6_80}
+            server_name {$domain} www.{$domain};
+
+            location /.well-known/acme-challenge/ {
+                root /var/www/forgepanel-acme;
+            }
+            location / {
+                return 301 https://\$host\$request_uri;
+            }
+        }
+
+        server {
+            listen 443 ssl;
+            {$v6_443}
+            http2 on;
+            server_name {$domain} www.{$domain};
+
+            ssl_certificate     /etc/forgepanel/ssl/{$domain}/fullchain.pem;
+            ssl_certificate_key /etc/forgepanel/ssl/{$domain}/privkey.pem;
+
+            access_log /var/www/vhosts/{$domain}/logs/access.log;
+            error_log  /var/www/vhosts/{$domain}/logs/error.log;
+
+            include /etc/nginx/forgepanel/snippets/security.conf;
+
+            location /.well-known/acme-challenge/ {
+                root /var/www/forgepanel-acme;
+            }
+
+            location / {
+                proxy_pass http://127.0.0.1:7080;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_read_timeout 300;
+            }
+        }
+        NGINX;
+    }
+
     public static function vhostTemplate(string $domain, string $docroot, string $php_version, string $sys_user): string
     {
         $v6_80 = self::listenV6(80);
