@@ -181,6 +181,25 @@ paths:
   /vhosts/{id}/ftp:
     get: { summary: FTP useri vhosta, responses: { "200": { description: OK } } }
     post: { summary: Novi FTP user (TLS obavezan, chroot u home), responses: { "201": { description: OK } } }
+  /vhosts/{id}/ssl/renew:
+    post: { summary: "AutoSSL obnova (Let's Encrypt) — task; vraća domenu na auto_renew", responses: { "202": { description: task_id } } }
+  /vhosts/{id}/ssl/custom:
+    post:
+      summary: Ručna instalacija kupljenog certifikata (PEM cert + key + opcionalni chain); validacija ključ↔cert, domene i isteka prije zapisa
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cert_pem, key_pem]
+              properties:
+                cert_pem: { type: string }
+                key_pem: { type: string, description: nešifrirani privatni ključ }
+                chain_pem: { type: string, description: CA intermediate chain (opcionalno) }
+      responses:
+        "201": { description: "expires_at, issuer, sans — auto_renew se isključuje" }
+        "422": { description: Validacija pala (krivi ključ, domena nepokrivena, istekao...) }
   /vhosts/{id}/backups:
     post: { summary: Backup vhosta (fileovi + baze, manifest + SHA-256) — task, responses: { "202": { description: backup_id + task_id } } }
   /backups:

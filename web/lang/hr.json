@@ -208,5 +208,16 @@
     "mail.webmail": "Webmail",
     "mail.webmail_install": "Instaliraj webmail",
     "mail.webmail_installing": "Instalacija webmaila (Roundcube) je pokrenuta — prati task.",
-    "mail.webmail_hostname": "Hostname webmaila (DNS A zapis mora pokazivati na ovaj server):"
+    "mail.webmail_hostname": "Hostname webmaila (DNS A zapis mora pokazivati na ovaj server):",
+    "ssl.renew_le": "Obnovi (LE)",
+    "ssl.renew_started": "AutoSSL obnova pokrenuta — prati task.",
+    "ssl.custom": "Vlastiti cert",
+    "ssl.custom_title": "Instalacija vlastitog certifikata —",
+    "ssl.cert_pem": "Certifikat (PEM)",
+    "ssl.key_pem": "Privatni ključ (PEM)",
+    "ssl.key_hint": "Nešifrirani ključ. Provjerava se da pripada certifikatu i da cert pokriva domenu.",
+    "ssl.chain_pem": "CA chain (PEM, opcionalno)",
+    "ssl.chain_hint": "Intermediate certifikati izdavatelja — obično u zasebnom .ca-bundle fajlu",
+    "ssl.install": "Instaliraj",
+    "ssl.installed": "Certifikat instaliran"
 }
