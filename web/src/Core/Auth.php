@@ -12,6 +12,7 @@ final class Auth
 {
     private const SESSION_TTL_S = 3600 * 8;
     private const MAX_FAILED = 5;
+    private const WEBAUTHN_CHALLENGE_TTL_S = 300;
 
     public function __construct(
         private readonly Db $db,
@@ -28,7 +29,7 @@ final class Auth
         ]);
     }
 
-    /** @return array{status: string, token?: string} */
+    /** @return array{status: string, token?: string, methods?: list<string>} */
     public function login(string $email, string $password, Request $request): array
     {
         $user = $this->db->one('SELECT u.*, r.name AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.email = ?', [$email]);
@@ -52,7 +53,14 @@ final class Auth
         $this->db->run('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?', [$user['id']]);
 
         // 2FA je obavezan za admina: admin bez secreta ulazi, ali UI forsira setup prije svega ostalog
-        $twofa_required = $user['twofa_secret'] !== null;
+        $methods = [];
+        if ($user['twofa_secret'] !== null) {
+            $methods[] = 'totp';
+        }
+        if ($this->userHasWebauthn((int) $user['id'])) {
+            $methods[] = 'webauthn';
+        }
+        $twofa_required = $methods !== [];
 
         if ($this->isNewDevice((int) $user['id'], $request)) {
             $this->notifyNewDevice($user, $request);
@@ -62,7 +70,7 @@ final class Auth
         $this->audit->log((int) $user['id'], $email, 'auth.login', ['twofa_pending' => $twofa_required], $request->ip);
 
         return $twofa_required
-            ? ['status' => 'twofa_required', 'token' => $token]
+            ? ['status' => 'twofa_required', 'token' => $token, 'methods' => $methods]
             : ['status' => 'ok', 'token' => $token];
     }
 
@@ -80,6 +88,93 @@ final class Auth
             throw new HttpException(401, 'invalid_code');
         }
         $this->db->run('UPDATE sessions SET twofa_passed = 1 WHERE id = ?', [$session['id']]);
+    }
+
+    public function userHasWebauthn(int $user_id): bool
+    {
+        return $this->db->one('SELECT 1 FROM webauthn_credentials WHERE user_id = ? LIMIT 1', [$user_id]) !== null;
+    }
+
+    /**
+     * Generira login challenge za WebAuthn drugi faktor (pending session, twofa još nije prošao).
+     *
+     * @return array{challenge: string, rp_id: string, allow: list<string>}
+     */
+    public function webauthnLoginOptions(string $token, string $rp_id): array
+    {
+        $session = $this->sessionRow($token) ?? throw new HttpException(401, 'invalid_session');
+        $credentials = $this->db->all(
+            'SELECT credential_id FROM webauthn_credentials WHERE user_id = ?',
+            [$session['user_id']]
+        );
+        if ($credentials === []) {
+            throw new HttpException(422, 'webauthn_not_configured');
+        }
+        $challenge = WebAuthn::generateChallenge();
+        $this->db->run(
+            'INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
+            ['webauthn_login_' . $session['id'], json_encode(['challenge' => $challenge, 'ts' => time()])]
+        );
+        return [
+            'challenge' => $challenge,
+            'rp_id' => $rp_id,
+            'allow' => array_column($credentials, 'credential_id'),
+        ];
+    }
+
+    /** @param array<string, mixed> $response */
+    public function verifyWebauthnLogin(string $token, array $response, string $rp_id, string $origin, Request $request): void
+    {
+        $session = $this->sessionRow($token) ?? throw new HttpException(401, 'invalid_session');
+        $email = (string) ($this->db->one('SELECT email FROM users WHERE id = ?', [$session['user_id']])['email'] ?? '?');
+
+        $challenge = $this->consumeChallenge('webauthn_login_' . $session['id']);
+        $credential = $this->db->one(
+            'SELECT * FROM webauthn_credentials WHERE credential_id = ? AND user_id = ?',
+            [(string) ($response['credential_id'] ?? ''), $session['user_id']]
+        );
+
+        try {
+            if ($challenge === null || $credential === null) {
+                throw new \RuntimeException('unknown_credential');
+            }
+            $new_count = WebAuthn::verifyAssertion(
+                $response,
+                $challenge,
+                $rp_id,
+                $origin,
+                (string) $credential['public_key'],
+                (int) $credential['alg'],
+                (int) $credential['sign_count'],
+            );
+        } catch (\RuntimeException $e) {
+            $this->audit->log((int) $session['user_id'], $email, 'auth.webauthn_failed', ['reason' => $e->getMessage()], $request->ip);
+            throw new HttpException(401, 'invalid_assertion');
+        }
+
+        $this->db->run(
+            'UPDATE webauthn_credentials SET sign_count = ?, last_used_at = NOW() WHERE id = ?',
+            [$new_count, $credential['id']]
+        );
+        $this->db->run('UPDATE sessions SET twofa_passed = 1 WHERE id = ?', [$session['id']]);
+        $this->audit->log((int) $session['user_id'], $email, 'auth.webauthn_ok', ['key' => $credential['label']], $request->ip);
+    }
+
+    /** Dohvati i obriši spremljeni challenge (jednokratan, TTL 5 min). */
+    public function consumeChallenge(string $key): ?string
+    {
+        $row = $this->db->one('SELECT value FROM settings WHERE `key` = ?', [$key]);
+        if ($row === null) {
+            return null;
+        }
+        $this->db->run('DELETE FROM settings WHERE `key` = ?', [$key]);
+        $data = json_decode((string) $row['value'], true);
+        if (!is_array($data) || !is_string($data['challenge'] ?? null)
+            || time() - (int) ($data['ts'] ?? 0) > self::WEBAUTHN_CHALLENGE_TTL_S
+        ) {
+            return null;
+        }
+        return $data['challenge'];
     }
 
     public function logout(string $token): void

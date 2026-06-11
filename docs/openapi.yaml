@@ -75,6 +75,51 @@ paths:
       summary: Potvrda TOTP koda za session
       responses:
         "200": { description: OK }
+  /auth/webauthn/login/options:
+    post:
+      summary: WebAuthn login challenge za pending session (challenge, rp_id, allow lista credentiala)
+      responses:
+        "200": { description: OK }
+  /auth/webauthn/login:
+    post:
+      summary: Verifikacija WebAuthn assertiona — drugi faktor umjesto TOTP-a
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential_id, authenticator_data, client_data_json, signature]
+              properties:
+                credential_id: { type: string, description: base64url }
+                authenticator_data: { type: string, description: base64url }
+                client_data_json: { type: string, description: base64url }
+                signature: { type: string, description: base64url }
+      responses:
+        "200": { description: OK — session označen kao twofa_passed }
+        "401": { description: Assertion odbijen }
+  /auth/webauthn/register/options:
+    post:
+      summary: Challenge za registraciju novog sigurnosnog ključa (puna autentikacija)
+      responses:
+        "200": { description: "challenge, rp_id, user_id, exclude lista" }
+  /auth/webauthn/register:
+    post:
+      summary: Registracija sigurnosnog ključa (attestation 'none'; ES256/RS256/Ed25519)
+      responses:
+        "201": { description: Ključ spremljen }
+        "422": { description: Nevaljan credential ili istekao challenge }
+  /auth/webauthn/keys:
+    get:
+      summary: Popis registriranih sigurnosnih ključeva korisnika
+      responses:
+        "200": { description: OK }
+  /auth/webauthn/keys/{id}:
+    delete:
+      summary: Uklanjanje sigurnosnog ključa
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: OK }
   /auth/me:
     get:
       summary: Podaci o prijavljenom korisniku

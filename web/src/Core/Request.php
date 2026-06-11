@@ -17,7 +17,21 @@ final class Request
         public readonly string $ip,
         public readonly string $user_agent,
         public readonly ?string $bearer_token,
+        public readonly string $host = '',
+        public readonly string $scheme = 'https',
     ) {
+    }
+
+    /** RP ID za WebAuthn = hostname bez porta. */
+    public function rpId(): string
+    {
+        return strtolower(preg_replace('/:\d+$/', '', $this->host) ?? $this->host);
+    }
+
+    /** Origin kakav browser šalje u clientDataJSON. */
+    public function origin(): string
+    {
+        return $this->scheme . '://' . $this->host;
     }
 
     public static function fromGlobals(): self
@@ -45,6 +59,8 @@ final class Request
             ip: $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0',
             user_agent: $_SERVER['HTTP_USER_AGENT'] ?? '',
             bearer_token: $bearer,
+            host: $_SERVER['HTTP_HOST'] ?? '',
+            scheme: ($_SERVER['HTTPS'] ?? '') !== '' ? 'https' : 'http',
         );
     }
 

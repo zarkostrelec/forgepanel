@@ -350,6 +350,22 @@ CREATE TABLE api_tokens (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE webauthn_credentials (
+    id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    user_id         INT UNSIGNED NOT NULL,
+    label           VARCHAR(64) NOT NULL,
+    credential_id   VARCHAR(1400) NOT NULL,                 -- base64url, sirovo do 1023 bajta
+    public_key      TEXT NOT NULL,                          -- PEM (ES256/RS256) ili base64 raw (Ed25519)
+    alg             SMALLINT NOT NULL,                      -- COSE: -7 ES256, -257 RS256, -8 Ed25519
+    sign_count      INT UNSIGNED NOT NULL DEFAULT 0,        -- clone detekcija
+    transports      JSON NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at    DATETIME NULL,
+    UNIQUE KEY uq_credential (credential_id(255)),
+    INDEX idx_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE settings (
     `key`           VARCHAR(128) PRIMARY KEY,
     value           JSON NOT NULL,

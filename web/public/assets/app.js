@@ -47,6 +47,12 @@ const fmtBytes = (n) => {
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// base64url ↔ ArrayBuffer (WebAuthn)
+const b64u = {
+    enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+    dec: (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)),
+};
+
 // ---------------------------------------------------------------- ikone (Lucide-style outline)
 const ICONS = {
     home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
@@ -76,6 +82,7 @@ const ICONS = {
     history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c1-3.3 3.2-5 6-5s5 1.7 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.8M18 20c-.3-2-1-3.5-2-4.5"/>',
     spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/><circle cx="12" cy="12" r="2.5"/>',
+    key: '<circle cx="8" cy="15" r="4.5"/><path d="M11.5 11.5 20 3M15 8l3 3M18 5l2 2"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 
@@ -264,7 +271,9 @@ const trayHtml = () => [...state.activeTasks.values()].reverse().map((task) => `
     </div>`).join('') || `<div class="empty">${t('task.pending')}: 0</div>`;
 
 // ---------------------------------------------------------------- login
-function renderLogin(step = 'login', preToken = null) {
+function renderLogin(step = 'login', preToken = null, methods = ['totp']) {
+    const hasTotp = methods.includes('totp');
+    const hasKey = methods.includes('webauthn') && navigator.credentials;
     $app.innerHTML = `
     <div class="login-wrap"><div class="card login-card">
         <div class="brand">${state.branding?.logo_url
@@ -277,23 +286,28 @@ function renderLogin(step = 'login', preToken = null) {
                 <div class="field"><label>${t('auth.password')}</label><input name="password" type="password" required autocomplete="current-password"></div>
                 <button class="btn primary" style="width:100%">${t('auth.login')}</button>
             </form>` : `
-            <form id="f">
+            ${hasTotp ? `<form id="f">
                 <div class="field"><label>${t('auth.twofa_code')}</label><input name="code" inputmode="numeric" pattern="\\d{6}" maxlength="6" required autofocus class="mono"></div>
                 <button class="btn primary" style="width:100%">${t('auth.login')}</button>
-            </form>`}
+            </form>` : ''}
+            ${hasKey ? `<button class="btn${hasTotp ? '' : ' primary'}" id="wakey" style="width:100%${hasTotp ? ';margin-top:10px' : ''}">${icon('key')}${t('auth.use_security_key')}</button>` : ''}`}
     </div></div>`;
 
     const form = document.getElementById('f');
     const alertEl = $app.querySelector('.alert');
+    const showErr = (err) => {
+        alertEl.hidden = false;
+        alertEl.textContent = t('auth.' + err.message) !== 'auth.' + err.message ? t('auth.' + err.message) : err.message;
+    };
 
-    form.addEventListener('submit', async (e) => {
+    form?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(form));
         try {
             if (step === 'login') {
                 const r = await api('/auth/login', { method: 'POST', body: data });
                 state.token = r.token;
-                if (r.status === 'twofa_required') return renderLogin('twofa', r.token);
+                if (r.status === 'twofa_required') return renderLogin('twofa', r.token, r.methods ?? ['totp']);
                 localStorage.setItem('fp_token', r.token);
                 await enter();
             } else {
@@ -302,11 +316,32 @@ function renderLogin(step = 'login', preToken = null) {
                 localStorage.setItem('fp_token', preToken);
                 await enter();
             }
-        } catch (err) {
-            alertEl.hidden = false;
-            alertEl.textContent = t('auth.' + err.message) !== 'auth.' + err.message ? t('auth.' + err.message) : err.message;
-        }
+        } catch (err) { showErr(err); }
     });
+
+    const webauthnAttempt = async () => {
+        state.token = preToken;
+        const o = await api('/auth/webauthn/login/options', { method: 'POST' });
+        const cred = await navigator.credentials.get({ publicKey: {
+            challenge: b64u.dec(o.challenge),
+            rpId: o.rp_id,
+            allowCredentials: o.allow.map((id) => ({ type: 'public-key', id: b64u.dec(id) })),
+            userVerification: 'discouraged',
+            timeout: 60000,
+        } });
+        await api('/auth/webauthn/login', { method: 'POST', body: {
+            credential_id: cred.id,
+            authenticator_data: b64u.enc(cred.response.authenticatorData),
+            client_data_json: b64u.enc(cred.response.clientDataJSON),
+            signature: b64u.enc(cred.response.signature),
+        } });
+        localStorage.setItem('fp_token', preToken);
+        await enter();
+    };
+    if (hasKey && step === 'twofa') {
+        document.getElementById('wakey').addEventListener('click', () => webauthnAttempt().catch(showErr));
+        if (!hasTotp) webauthnAttempt().catch(showErr); // jedina metoda → odmah traži ključ
+    }
 }
 
 async function doLogout() {
@@ -353,7 +388,7 @@ function renderShell() {
                 ${NAV.filter(([page, , , role]) => (!role || role === state.me.role) && (!NAV_ROLES[page] || NAV_ROLES[page].includes(state.me.role))).map(([page, ic, key]) =>
                     `<a href="#/${page}" data-page="${page}">${icon(ic)}<span class="nav-label">${t(key)}</span></a>`).join('')}
             </nav>
-            <div class="sidebar-foot mono">${esc(state.me.email)}<br>${esc(state.me.role)}</div>
+            <div class="sidebar-foot mono"><a href="#/profile" style="color:inherit">${esc(state.me.email)}</a><br>${esc(state.me.role)}</div>
         </aside>
         <div class="main">
             <header class="topbar">
@@ -1947,8 +1982,103 @@ async function pageUpdates() {
     }));
 }
 
+// ---------------------------------------------------------------- profil (2FA + sigurnosni ključevi)
+async function pageProfile() {
+    setActive('profile');
+    state.me = await api('/auth/me');
+    main().innerHTML = `
+    <div class="page-head"><h1>${t('profile.title')}</h1></div>
+    <div class="card">
+        <h2>${t('profile.totp')}</h2>
+        <div id="totpbox">${state.me.twofa_enabled
+            ? `<span class="badge ok">${t('profile.enabled')}</span>`
+            : `<p>${t('profile.totp_hint')}</p><button class="btn primary" id="totpsetup">${icon('lock')}${t('profile.totp_setup')}</button>`}</div>
+    </div>
+    <div class="card mt">
+        <h2>${t('profile.webauthn')}</h2>
+        <p>${t('profile.webauthn_hint')}</p>
+        <div id="keys">${t('common.loading')}</div>
+        <form id="addkey" class="row" style="margin-top:12px;gap:8px">
+            <input name="label" placeholder="${t('profile.key_label')}" maxlength="64" required style="flex:1">
+            <button class="btn primary">${icon('key')}${t('profile.add_key')}</button>
+        </form>
+    </div>`;
+
+    document.getElementById('totpsetup')?.addEventListener('click', async () => {
+        const box = document.getElementById('totpbox');
+        try {
+            const s = await api('/auth/twofa/setup', { method: 'POST' });
+            box.innerHTML = `
+                <p>${t('profile.totp_scan')}</p>
+                <div class="mono" style="word-break:break-all;margin:8px 0">${esc(s.secret)}</div>
+                <a class="mono" href="${esc(s.otpauth_uri)}">${t('profile.totp_open_app')}</a>
+                <form id="totpconfirm" class="row" style="margin-top:12px;gap:8px">
+                    <input name="code" inputmode="numeric" pattern="\\d{6}" maxlength="6" required class="mono" placeholder="000000" style="width:120px">
+                    <button class="btn primary">${t('profile.confirm')}</button>
+                </form>`;
+            document.getElementById('totpconfirm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                try {
+                    await api('/auth/twofa/confirm', { method: 'POST', body: { code: new FormData(e.target).get('code') } });
+                    toast(t('profile.totp_enabled'));
+                    pageProfile();
+                } catch (err) { toast(err.message, 'err'); }
+            });
+        } catch (err) { toast(err.message, 'err'); }
+    });
+
+    const renderKeys = async () => {
+        const keys = await api('/auth/webauthn/keys');
+        document.getElementById('keys').innerHTML = keys.length ? `
+        <table class="table"><thead><tr><th>${t('profile.key_label')}</th><th class="hide-sm">${t('profile.created')}</th><th class="hide-sm">${t('profile.last_used')}</th><th></th></tr></thead>
+        <tbody>${keys.map((k) => `<tr>
+            <td>${icon('key')} ${esc(k.label)}</td>
+            <td class="hide-sm">${fmtDate(k.created_at)}</td>
+            <td class="hide-sm">${fmtDate(k.last_used_at)}</td>
+            <td style="text-align:right"><button class="btn danger" data-del="${k.id}">${t('common.delete')}</button></td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('profile.no_keys')}</div>`;
+
+        document.getElementById('keys').querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+            if (!confirm(t('profile.confirm_delete_key'))) return;
+            try { await api(`/auth/webauthn/keys/${b.dataset.del}`, { method: 'DELETE' }); renderKeys(); }
+            catch (err) { toast(err.message, 'err'); }
+        }));
+    };
+    await renderKeys();
+
+    document.getElementById('addkey').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const label = new FormData(e.target).get('label');
+        try {
+            if (!navigator.credentials) throw new Error(t('profile.webauthn_unsupported'));
+            const o = await api('/auth/webauthn/register/options', { method: 'POST' });
+            const cred = await navigator.credentials.create({ publicKey: {
+                challenge: b64u.dec(o.challenge),
+                rp: { id: o.rp_id, name: o.rp_name },
+                user: { id: b64u.dec(o.user_id), name: o.user_name, displayName: o.user_name },
+                pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }, { type: 'public-key', alg: -8 }],
+                excludeCredentials: o.exclude.map((id) => ({ type: 'public-key', id: b64u.dec(id) })),
+                authenticatorSelection: { userVerification: 'discouraged' },
+                attestation: 'none',
+                timeout: 60000,
+            } });
+            await api('/auth/webauthn/register', { method: 'POST', body: {
+                label,
+                credential_id: cred.id,
+                attestation_object: b64u.enc(cred.response.attestationObject),
+                client_data_json: b64u.enc(cred.response.clientDataJSON),
+                transports: cred.response.getTransports?.() ?? [],
+            } });
+            toast(t('profile.key_added'));
+            e.target.reset();
+            renderKeys();
+        } catch (err) { toast(err.message, 'err'); }
+    });
+}
+
 // ---------------------------------------------------------------- router
 const ROUTES = [
+    [/^#\/profile$/, pageProfile],
     [/^#\/dashboard$/, pageDashboard],
     [/^#\/websites$/, pageWebsites],
     [/^#\/websites\/(\d+)$/, (m) => pageWebsiteDetail(Number(m[1]))],
