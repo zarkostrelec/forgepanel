@@ -160,5 +160,21 @@
     "apps.wp_integrity": "Check integrity",
     "apps.wp_db_prompt": "Database name for WordPress:",
     "apps.wp_db_created": "Database and password (save it)",
-    "nav.cloudflare": "Cloudflare"
+    "nav.cloudflare": "Cloudflare",
+    "nav.assistant": "AI assistant",
+    "assistant.intro": "Optional module. Enter your own Anthropic API key — the assistant reads server context and suggests, but never changes anything itself.",
+    "assistant.api_key": "Anthropic API key",
+    "assistant.model": "Model",
+    "assistant.connect": "Connect",
+    "assistant.connected": "AI assistant connected",
+    "assistant.disconnect": "Remove key",
+    "assistant.confirm_disconnect": "Remove the API key?",
+    "assistant.ask": "Question",
+    "assistant.placeholder": "e.g. Why did nginx return 502? Explain this fail2ban jail…",
+    "assistant.context": "Context (optional — config block, log line)",
+    "assistant.context_hint": "Paste config or log the assistant should see",
+    "assistant.send": "Ask the assistant",
+    "assistant.thinking": "Assistant is thinking…",
+    "assistant.diagnose": "Diagnose",
+    "assistant.disclaimer": "The assistant only reads and suggests. You confirm and apply every change yourself through the panel."
 }

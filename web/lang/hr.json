@@ -160,5 +160,21 @@
     "apps.wp_integrity": "Provjeri integritet",
     "apps.wp_db_prompt": "Naziv baze za WordPress:",
     "apps.wp_db_created": "Baza i lozinka (zapiši)",
-    "nav.cloudflare": "Cloudflare"
+    "nav.cloudflare": "Cloudflare",
+    "nav.assistant": "AI asistent",
+    "assistant.intro": "Opcionalan modul. Unesi vlastiti Anthropic API ključ — asistent čita kontekst servera i predlaže, ali ne mijenja ništa sam.",
+    "assistant.api_key": "Anthropic API ključ",
+    "assistant.model": "Model",
+    "assistant.connect": "Poveži",
+    "assistant.connected": "AI asistent povezan",
+    "assistant.disconnect": "Ukloni ključ",
+    "assistant.confirm_disconnect": "Ukloniti API ključ?",
+    "assistant.ask": "Pitanje",
+    "assistant.placeholder": "npr. Zašto je nginx vratio 502? Objasni ovaj fail2ban jail…",
+    "assistant.context": "Kontekst (opcionalno — config blok, log redak)",
+    "assistant.context_hint": "Zalijepi config ili log koji asistent treba vidjeti",
+    "assistant.send": "Pitaj asistenta",
+    "assistant.thinking": "Asistent razmišlja…",
+    "assistant.diagnose": "Dijagnostika",
+    "assistant.disclaimer": "Asistent samo čita i predlaže. Sve izmjene potvrđuješ i izvodiš sam kroz panel."
 }

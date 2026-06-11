@@ -75,6 +75,7 @@ const ICONS = {
     wall: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M8 4v5M16 9v5M8 14v6"/>',
     history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c1-3.3 3.2-5 6-5s5 1.7 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.8M18 20c-.3-2-1-3.5-2-4.5"/>',
+    spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/><circle cx="12" cy="12" r="2.5"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 
@@ -335,6 +336,7 @@ const NAV = [
     ['firewall', 'wall', 'nav.firewall', 'admin'],
     ['config', 'history', 'nav.config', 'admin'],
     ['updates', 'refresh', 'nav.updates', 'admin'],
+    ['assistant', 'spark', 'nav.assistant', 'admin'],
     ['users', 'users', 'nav.users'],
 ];
 
@@ -562,9 +564,11 @@ async function pageWebsiteDetail(id) {
         <h1 class="mono">${esc(vhost.domain)}</h1>${statusBadge(vhost.status)}${uptimeBadge}
         <div class="spacer"></div>
         <button class="btn" id="bkp">${icon('archive')}${t('backup.create')}</button>
+        ${state.me.role === 'admin' ? `<button class="btn" id="diag">${icon('spark')}${t('assistant.diagnose')}</button>` : ''}
         <button class="btn" id="renew">${icon('refresh')}SSL renew</button>
         <button class="btn danger" id="del">${t('common.delete')}</button>
     </div>
+    <div id="diagbox"></div>
     <div class="grid cols-2">
         <div class="card">
             <h2>Postavke</h2>
@@ -613,6 +617,14 @@ async function pageWebsiteDetail(id) {
             await api(`/vhosts/${id}/php`, { method: 'PUT', body: { php_version: e.target.value } });
             toast(`PHP → ${e.target.value}`);
         } catch (err) { toast(err.message, 'err'); route(); }
+    });
+    main().querySelector('#diag')?.addEventListener('click', async () => {
+        const box = main().querySelector('#diagbox');
+        box.innerHTML = `<div class="empty">${t('assistant.thinking')}</div>`;
+        try {
+            const r = await api(`/assistant/diagnose/${id}`, { method: 'POST' });
+            box.innerHTML = `<div class="task-output" style="white-space:pre-wrap">${esc(r.answer)}</div>`;
+        } catch (err) { box.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
     });
     main().querySelector('#renew').addEventListener('click', async () => {
         try {
@@ -1621,6 +1633,62 @@ function brandingModal() {
     });
 }
 
+// ---------------------------------------------------------------- AI asistent (admin)
+async function pageAssistant() {
+    setActive('assistant');
+    main().innerHTML = `<div class="page-head"><h1>${t('nav.assistant')}</h1></div><div class="card">${t('common.loading')}</div>`;
+    const status = await api('/assistant/status');
+
+    if (!status.configured) {
+        main().querySelector('.card').innerHTML = `
+            <div class="empty">${t('assistant.intro')}</div>
+            <form id="kf" style="max-width:520px;margin:0 auto">
+                <div class="field"><label>${t('assistant.api_key')}</label>
+                    <input name="api_key" type="password" required class="mono" placeholder="sk-ant-..."></div>
+                <div class="field"><label>${t('assistant.model')}</label>
+                    <select name="model" class="mono">
+                        <option value="claude-opus-4-8">Claude Opus 4.8 (preporučeno)</option>
+                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (brže/jeftinije)</option>
+                        <option value="claude-haiku-4-5">Claude Haiku 4.5 (najjeftinije)</option>
+                        <option value="claude-fable-5">Claude Fable 5 (najmoćnije)</option>
+                    </select></div>
+                <button class="btn primary">${t('assistant.connect')}</button>
+            </form>`;
+        document.getElementById('kf').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try { await api('/assistant/key', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); toast(t('assistant.connected')); pageAssistant(); }
+            catch (err) { toast(err.message, 'err'); }
+        });
+        return;
+    }
+
+    main().querySelector('.card').innerHTML = `
+        <div class="page-head"><h2>${esc(status.model)}</h2><div class="spacer"></div>
+            <button class="btn danger" id="disc">${t('assistant.disconnect')}</button></div>
+        <div class="field"><label>${t('assistant.ask')}</label>
+            <textarea id="q" style="min-height:90px" placeholder="${t('assistant.placeholder')}"></textarea></div>
+        <div class="field"><label>${t('assistant.context')}</label>
+            <textarea id="ctx" class="mono" style="min-height:80px" placeholder="${t('assistant.context_hint')}"></textarea></div>
+        <button class="btn primary" id="askbtn">${icon('spark')}${t('assistant.send')}</button>
+        <div id="ans" class="mt"></div>
+        <div class="hint mt">${t('assistant.disclaimer')}</div>`;
+
+    document.getElementById('disc').addEventListener('click', async () => {
+        if (!confirm(t('assistant.confirm_disconnect'))) return;
+        try { await api('/assistant/key', { method: 'DELETE' }); pageAssistant(); } catch (err) { toast(err.message, 'err'); }
+    });
+    document.getElementById('askbtn').addEventListener('click', async () => {
+        const question = document.getElementById('q').value.trim();
+        if (!question) return;
+        const ans = document.getElementById('ans');
+        ans.innerHTML = `<div class="empty">${t('assistant.thinking')}</div>`;
+        try {
+            const r = await api('/assistant/ask', { method: 'POST', body: { question, context: document.getElementById('ctx').value } });
+            ans.innerHTML = `<div class="card"><div class="task-output" style="white-space:pre-wrap">${esc(r.answer)}</div></div>`;
+        } catch (err) { ans.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+    });
+}
+
 // ---------------------------------------------------------------- config time-machine (admin)
 async function pageConfig() {
     setActive('config');
@@ -1872,6 +1940,7 @@ const ROUTES = [
     [/^#\/security$/, pageSecurity],
     [/^#\/firewall$/, pageFirewall],
     [/^#\/config$/, pageConfig],
+    [/^#\/assistant$/, pageAssistant],
     [/^#\/users$/, pageUsers],
 ];
 
