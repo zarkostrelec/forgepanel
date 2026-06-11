@@ -39,6 +39,7 @@ final class OperationRegistry
         'malware.scan'      => Operations\MalwareScan::class,
         'quarantine.action' => Operations\QuarantineRestore::class,
         'firewall.action'   => Operations\FirewallAction::class,
+        'config.history'    => Operations\ConfigHistory::class,
         'db.create'         => Operations\DbCreate::class,
         'db.delete'         => Operations\DbDelete::class,
         'db.user_create'    => Operations\DbUserCreate::class,

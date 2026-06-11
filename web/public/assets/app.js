@@ -61,6 +61,7 @@ const ICONS = {
     box: '<path d="M12 2.5 21 7v10l-9 4.5L3 17V7z"/><path d="M3 7l9 4.5L21 7M12 11.5V21.5"/>',
     shield: '<path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z"/><path d="m9 12 2 2 4-4"/>',
     wall: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M8 4v5M16 9v5M8 14v6"/>',
+    history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 
@@ -317,6 +318,7 @@ const NAV = [
     ['monitoring', 'chart', 'nav.monitoring'],
     ['security', 'shield', 'nav.security'],
     ['firewall', 'wall', 'nav.firewall', 'admin'],
+    ['config', 'history', 'nav.config', 'admin'],
     ['updates', 'refresh', 'nav.updates', 'admin'],
 ];
 
@@ -413,12 +415,14 @@ const statusBadge = (s) => {
     return `<span class="badge ${kind}">${t('vhost.status.' + s) !== 'vhost.status.' + s ? t('vhost.status.' + s) : esc(s)}</span>`;
 };
 
-const vhostTable = (vhosts) => vhosts.length ? `
+const vhostTable = (vhosts, selectable = false) => vhosts.length ? `
     <table class="data"><thead><tr>
+        ${selectable ? '<th><input type="checkbox" id="selall"></th>' : ''}
         <th>${t('vhost.domain')}</th><th>PHP</th><th class="hide-sm">Backend</th><th>Status</th><th class="hide-sm">Kreirano</th>
     </tr></thead><tbody>
     ${vhosts.map((v) => `
-        <tr class="row-link" data-vhost="${v.id}">
+        <tr class="${selectable ? '' : 'row-link'}" data-vhost="${v.id}">
+            ${selectable ? `<td><input type="checkbox" class="vsel" value="${v.id}"></td>` : ''}
             <td class="mono">${esc(v.domain)}</td>
             <td class="mono">${esc(v.php_version)}</td>
             <td class="mono hide-sm">${esc(v.web_backend)}</td>
@@ -433,14 +437,65 @@ const bindVhostRows = () => main().querySelectorAll('[data-vhost]').forEach((tr)
 async function pageWebsites() {
     setActive('websites');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.websites')}</h1><div class="spacer"></div>
+    <div class="page-head"><h1>${t('nav.websites')}</h1>
+        <button class="btn" id="bulkbtn">${t('bulk.title')}</button>
+        <div class="spacer"></div>
         <button class="btn primary" id="new">${icon('plus')}${t('vhost.create')}</button></div>
+    <div id="bulkbar" hidden class="card" style="margin-bottom:12px"></div>
     <div class="card">${t('common.loading')}</div>`;
     document.getElementById('new').addEventListener('click', createVhostModal);
 
     const vhosts = await api('/vhosts');
-    main().querySelector('.card').innerHTML = vhostTable(vhosts);
-    bindVhostRows();
+    let bulkMode = false;
+    const render = () => {
+        main().querySelector('.card:last-child').innerHTML = vhostTable(vhosts, bulkMode);
+        if (bulkMode) {
+            main().querySelector('#selall')?.addEventListener('change', (e) =>
+                main().querySelectorAll('.vsel').forEach((c) => { c.checked = e.target.checked; }));
+        } else {
+            bindVhostRows();
+        }
+    };
+    render();
+
+    document.getElementById('bulkbtn').addEventListener('click', () => {
+        bulkMode = !bulkMode;
+        const bar = document.getElementById('bulkbar');
+        bar.hidden = !bulkMode;
+        if (bulkMode) {
+            bar.innerHTML = `
+                <div class="grid cols-4" style="align-items:end">
+                    <div class="field"><label>${t('bulk.action')}</label>
+                        <select id="ba" class="mono">
+                            <option value="php_set">${t('bulk.php_set')}</option>
+                            <option value="ssl_renew">${t('bulk.ssl_renew')}</option>
+                            <option value="malware_scan">${t('bulk.malware_scan')}</option>
+                            <option value="backup">${t('bulk.backup')}</option>
+                            <option value="suspend">${t('bulk.suspend')}</option>
+                            <option value="unsuspend">${t('bulk.unsuspend')}</option>
+                        </select></div>
+                    <div class="field" id="phpwrap"><label>PHP</label>
+                        <select id="bphp" class="mono">${['8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
+                    <div class="field"><label>&nbsp;</label><button class="btn primary" id="barun">${t('bulk.run')}</button></div>
+                </div>`;
+            bar.querySelector('#ba').addEventListener('change', (e) => {
+                bar.querySelector('#phpwrap').style.display = e.target.value === 'php_set' ? '' : 'none';
+            });
+            bar.querySelector('#barun').addEventListener('click', async () => {
+                const sel = [...main().querySelectorAll('.vsel:checked')].map((c) => Number(c.value));
+                if (sel.length === 0) return toast(t('bulk.none_selected'), 'err');
+                const action = bar.querySelector('#ba').value;
+                try {
+                    const r = await api('/bulk/vhosts', { method: 'POST', body: { action, vhost_ids: sel, php_version: bar.querySelector('#bphp').value } });
+                    const ok = Object.values(r.results).filter((x) => !x.error).length;
+                    toast(`${t('bulk.done')}: ${ok}/${sel.length}`);
+                    Object.values(r.results).forEach((x) => x.task_id && watchTask(x.task_id, `bulk ${action} ${x.domain}`));
+                    pageWebsites();
+                } catch (err) { toast(err.message, 'err'); }
+            });
+        }
+        render();
+    });
 }
 
 function createVhostModal() {
@@ -1366,6 +1421,37 @@ async function pageDocker() {
     }));
 }
 
+// ---------------------------------------------------------------- config time-machine (admin)
+async function pageConfig() {
+    setActive('config');
+    main().innerHTML = `<div class="page-head"><h1>${t('nav.config')}</h1></div>
+        <div class="card">${t('config.intro')}</div>
+        <div class="card mt" id="hist">${t('common.loading')}</div>`;
+    const { history } = await api('/config-history');
+    document.getElementById('hist').innerHTML = history.length ? `
+        <table class="data"><thead><tr><th>${t('config.when')}</th><th>${t('config.what')}</th><th>${t('config.who')}</th><th></th></tr></thead><tbody>
+        ${history.map((h) => `<tr>
+            <td class="mono">${fmtDate(h.date)}</td>
+            <td>${esc(h.message)}</td>
+            <td class="mono">${esc(h.changed_by)}</td>
+            <td class="num">
+                <button class="btn ghost" data-diff="${esc(h.hash)}">diff</button>
+                <button class="btn" data-restore="${esc(h.hash)}">${t('config.restore')}</button>
+            </td></tr>`).join('')}</tbody></table>` : `<div class="empty">${t('config.empty')}</div>`;
+
+    main().querySelectorAll('[data-diff]').forEach((b) => b.addEventListener('click', async () => {
+        const r = await api(`/config-history/${b.dataset.diff}/diff`);
+        openModal(`<div class="dialog-head"><h1 class="mono">${esc(b.dataset.diff.slice(0, 10))}</h1>
+            <button class="btn ghost icon" data-close>${icon('x')}</button></div>
+            <div class="task-output">${esc(r.diff || 'nema promjena')}</div>`, { wide: true });
+    }));
+    main().querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('config.confirm_restore'))) return;
+        try { await api(`/config-history/${b.dataset.restore}/restore`, { method: 'POST' }); toast(t('config.restored')); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+}
+
 // ---------------------------------------------------------------- security
 async function pageSecurity() {
     setActive('security');
@@ -1548,6 +1634,7 @@ const ROUTES = [
     [/^#\/docker$/, pageDocker],
     [/^#\/security$/, pageSecurity],
     [/^#\/firewall$/, pageFirewall],
+    [/^#\/config$/, pageConfig],
 ];
 
 async function route() {

@@ -19,6 +19,7 @@ final class TokensController extends Controller
         'dns:read', 'dns:write', 'ftp:read', 'ftp:write', 'backup:read', 'backup:write',
         'mail:read', 'mail:write', 'updates:read', 'updates:write',
         'docker:read', 'docker:write', 'security:read', 'security:write', 'firewall:write',
+        'config:read',
     ];
 
     public function register(Router $router): void

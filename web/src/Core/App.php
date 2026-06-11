@@ -69,6 +69,8 @@ final class App
             new Api\V1\DockerController($this),
             new Api\V1\SecurityController($this),
             new Api\V1\FirewallController($this),
+            new Api\V1\ConfigHistoryController($this),
+            new Api\V1\BulkController($this),
             new Api\V1\TasksController($this),
             new Api\V1\MonitoringController($this),
             new Api\V1\SslController($this),

@@ -38,6 +38,7 @@ final class NginxConf
         }
 
         Systemd::reload('nginx');
+        ConfigGit::snapshot('agent', 'nginx: ' . basename($conf_path));
     }
 
     public static function remove(string $conf_path): void
