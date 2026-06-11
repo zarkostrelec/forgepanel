@@ -217,6 +217,8 @@ td.num { text-align: right; }
 
 .empty { text-align: center; color: var(--text-faint); padding: 36px 0; }
 .mt { margin-top: 12px; }
+.chart { width: 100%; height: 120px; display: block; }
+.chart-meta { font-size: 11px; color: var(--text-faint); margin-top: 6px; }
 .cell-icon { width: 28px; }
 .cell-icon svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; vertical-align: -2px; color: var(--text-muted); }
 

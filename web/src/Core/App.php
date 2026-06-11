@@ -59,6 +59,7 @@ final class App
             new Api\V1\VhostsController($this),
             new Api\V1\DatabasesController($this),
             new Api\V1\FilesController($this),
+            new Api\V1\CronController($this),
             new Api\V1\TasksController($this),
             new Api\V1\MonitoringController($this),
             new Api\V1\SslController($this),

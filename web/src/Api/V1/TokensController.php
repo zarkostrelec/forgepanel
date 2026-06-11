@@ -15,7 +15,7 @@ final class TokensController extends Controller
     private const VALID_SCOPES = [
         'vhosts:read', 'vhosts:write', 'databases:read', 'databases:write',
         'files:read', 'files:write', 'tasks:read', 'monitoring:read',
-        'ssl:read', 'ssl:write',
+        'ssl:read', 'ssl:write', 'cron:read', 'cron:write',
     ];
 
     public function register(Router $router): void

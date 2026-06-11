@@ -51,13 +51,22 @@ final class NginxConf
         }
     }
 
+    /** IPv6 listen direktive samo ako sustav ima IPv6. */
+    private static function listenV6(int $port, string $extra = ''): string
+    {
+        $has_v6 = is_readable('/proc/net/if_inet6') && trim((string) file_get_contents('/proc/net/if_inet6')) !== '';
+        return $has_v6 ? "listen [::]:{$port}{$extra};" : '';
+    }
+
     public static function vhostTemplate(string $domain, string $docroot, string $php_version, string $sys_user): string
     {
+        $v6_80 = self::listenV6(80);
+        $v6_443 = self::listenV6(443, ' ssl');
         return <<<NGINX
         # ForgePanel vhost — generirano, ručne izmjene idu kroz panel (custom direktive)
         server {
             listen 80;
-            listen [::]:80;
+            {$v6_80}
             server_name {$domain} www.{$domain};
 
             location /.well-known/acme-challenge/ {
@@ -70,7 +79,7 @@ final class NginxConf
 
         server {
             listen 443 ssl;
-            listen [::]:443 ssl;
+            {$v6_443}
             http2 on;
             server_name {$domain} www.{$domain};
 

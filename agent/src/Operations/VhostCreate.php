@@ -90,6 +90,7 @@ final class VhostCreate extends Operation
             NginxConf::VHOST_CONF_DIR . "/$domain.conf",
             NginxConf::vhostTemplate($domain, $docroot, $php_version, $sys_user)
         );
+        $this->db->run("UPDATE vhosts SET status = 'active' WHERE id = ?", [$vhost_id]);
         $context->progress(100);
         $context->output("Vhost $domain kreiran.");
 

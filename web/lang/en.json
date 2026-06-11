@@ -38,5 +38,15 @@
     "common.cancel": "Cancel",
     "common.selected": "selected",
     "common.confirm_delete": "Are you sure you want to delete?",
-    "common.loading": "Loading…"
+    "common.loading": "Loading…",
+    "cron.title": "Cron jobs",
+    "cron.schedule": "Schedule",
+    "cron.command": "Command",
+    "cron.last_run": "Last run",
+    "cron.enabled": "enabled",
+    "cron.disabled": "paused",
+    "files.upload": "Upload",
+    "files.download": "Download",
+    "files.mkdir": "New directory",
+    "files.uploaded": "uploaded"
 }

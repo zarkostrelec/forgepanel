@@ -35,6 +35,7 @@ final class Agent
         $registry = new OperationRegistry($this->config, $this->db);
         $audit = new AuditLogger($this->db);
         $worker = new TaskWorker($this->db, $registry, $audit);
+        $scheduler = new Scheduler($this->db, $this->config);
 
         $this->sdNotify('READY=1');
 
@@ -51,6 +52,7 @@ final class Agent
             }
 
             $worker->tick();
+            $scheduler->tick();
         }
 
         fclose($server);

@@ -28,6 +28,7 @@ final class OperationRegistry
         'fs.mkdir'          => Operations\FsMkdir::class,
         'fs.delete'         => Operations\FsDelete::class,
         'fs.chmod'          => Operations\FsChmod::class,
+        'cron.sync'         => Operations\CronSync::class,
         'service.status'    => Operations\ServiceStatus::class,
         'service.reload'    => Operations\ServiceReload::class,
         'ssl.issue'         => Operations\SslIssue::class,

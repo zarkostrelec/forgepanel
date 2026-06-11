@@ -38,5 +38,15 @@
     "common.cancel": "Odustani",
     "common.selected": "odabrano",
     "common.confirm_delete": "Jeste li sigurni da želite obrisati?",
-    "common.loading": "Učitavanje…"
+    "common.loading": "Učitavanje…",
+    "cron.title": "Cron poslovi",
+    "cron.schedule": "Raspored",
+    "cron.command": "Naredba",
+    "cron.last_run": "Zadnje izvršeno",
+    "cron.enabled": "aktivan",
+    "cron.disabled": "pauziran",
+    "files.upload": "Upload",
+    "files.download": "Preuzmi",
+    "files.mkdir": "Novi direktorij",
+    "files.uploaded": "uploadano"
 }

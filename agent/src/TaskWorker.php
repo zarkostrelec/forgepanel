@@ -80,6 +80,9 @@ final class TaskWorker
             $this->audit->log('agent', 'task.done', ['task_id' => $task_id, 'op' => $op_code]);
         } catch (\Throwable $e) {
             $this->finish($task_id, 'failed', error: $e->getMessage());
+            if ($op_code === 'vhost.create' && isset($params['vhost_id'])) {
+                $this->db->run("UPDATE vhosts SET status = 'error' WHERE id = ?", [(int) $params['vhost_id']]);
+            }
             $this->audit->log('agent', 'task.failed', [
                 'task_id' => $task_id,
                 'op' => $op_code,

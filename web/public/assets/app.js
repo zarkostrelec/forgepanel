@@ -52,6 +52,9 @@ const ICONS = {
     user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.5 3.8-5 7-5s5.8 1.5 7 5"/>',
     refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/>',
+    download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 20h16"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 
@@ -484,6 +487,10 @@ async function pageWebsiteDetail(id) {
             <div class="page-head"><h2>${t('nav.files')}</h2></div>
             <div id="fm"></div>
         </div>
+    </div>
+    <div class="card mt">
+        <div class="page-head"><h2>${t('cron.title')}</h2></div>
+        <div id="cron"></div>
     </div>`;
 
     main().querySelector('#php').addEventListener('change', async (e) => {
@@ -508,6 +515,57 @@ async function pageWebsiteDetail(id) {
     });
 
     fileManager(vhost, main().querySelector('#fm'), '/httpdocs');
+    cronSection(vhost, main().querySelector('#cron'));
+}
+
+// ---------------------------------------------------------------- cron
+async function cronSection(vhost, container) {
+    let jobs;
+    try { jobs = await api(`/vhosts/${vhost.id}/cron`); }
+    catch (err) { container.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; return; }
+
+    container.innerHTML = `
+    ${jobs.length ? `
+    <table class="data"><thead><tr>
+        <th>${t('cron.schedule')}</th><th>${t('cron.command')}</th><th class="hide-sm">${t('cron.last_run')}</th><th>Status</th><th></th>
+    </tr></thead><tbody>
+        ${jobs.map((j) => `<tr>
+            <td class="mono">${esc(j.schedule)}</td>
+            <td class="mono">${esc(j.command)}</td>
+            <td class="hide-sm">${fmtDate(j.last_run_at)}</td>
+            <td><span class="badge ${Number(j.enabled) ? 'ok' : 'warn'}">${Number(j.enabled) ? t('cron.enabled') : t('cron.disabled')}</span></td>
+            <td class="num">
+                <button class="btn ghost" data-toggle="${j.id}">${Number(j.enabled) ? '⏸' : '▶'}</button>
+                <button class="btn danger" data-del="${j.id}">${t('common.delete')}</button>
+            </td></tr>`).join('')}
+    </tbody></table>` : `<div class="empty">${t('cron.title')}: 0</div>`}
+    <form id="cronf" class="mt">
+        <div class="grid cols-2">
+            <div class="field"><label>${t('cron.schedule')}</label>
+                <input name="schedule" required placeholder="*/15 * * * *" class="mono">
+                <span class="hint">min sat dan mjesec dan_u_tjednu</span></div>
+            <div class="field"><label>${t('cron.command')}</label>
+                <input name="command" required placeholder="php /var/www/vhosts/.../cron.php" class="mono"></div>
+        </div>
+        <button class="btn primary">${icon('plus')}${t('common.create')}</button>
+    </form>`;
+
+    container.querySelector('#cronf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            await api(`/vhosts/${vhost.id}/cron`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+            cronSection(vhost, container);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    container.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/vhosts/${vhost.id}/cron/${b.dataset.del}`, { method: 'DELETE' }); cronSection(vhost, container); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    container.querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api(`/vhosts/${vhost.id}/cron/${b.dataset.toggle}/toggle`, { method: 'PUT' }); cronSection(vhost, container); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
 }
 
 // ---------------------------------------------------------------- file manager
@@ -529,7 +587,9 @@ async function fileManager(vhost, container, relPath) {
             ${parts.map((p, i) => `<span class="sep">/</span><a href="#" data-go="/${parts.slice(0, i + 1).join('/')}">${esc(p)}</a>`).join('')}
         </div>
         <div class="spacer"></div>
-        <button class="btn icon" data-mkdir title="novi direktorij">${icon('folder')}</button>
+        <button class="btn icon" data-upload title="${t('files.upload')}">${icon('upload')}</button>
+        <button class="btn icon" data-mkdir title="${t('files.mkdir')}">${icon('folder')}</button>
+        <input type="file" hidden>
     </div>
     <table class="data"><tbody>
         ${entries.map((en, i) => `
@@ -546,6 +606,26 @@ async function fileManager(vhost, container, relPath) {
         e.preventDefault();
         fileManager(vhost, container, a.dataset.go === '/' ? '' : a.dataset.go);
     }));
+    const fileInput = container.querySelector('input[type=file]');
+    container.querySelector('[data-upload]').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+        const f = fileInput.files[0];
+        if (!f) return;
+        const fd = new FormData();
+        fd.append('path', relPath);
+        fd.append('file', f);
+        try {
+            const res = await fetch(`/api/v1/vhosts/${vhost.id}/files/upload`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${state.token}` },
+                body: fd,
+            });
+            const json = await res.json();
+            if (!json.ok) throw new Error(json.error);
+            toast(`${f.name}: ${t('files.uploaded')}`);
+            fileManager(vhost, container, relPath);
+        } catch (err) { toast(err.message, 'err'); }
+    });
     container.querySelector('[data-mkdir]').addEventListener('click', async () => {
         const name = prompt('Naziv direktorija:');
         if (!name) return;
@@ -574,10 +654,26 @@ async function openFileEditor(vhost, container, relPath, entry) {
         <div class="field"><textarea class="mono" spellcheck="false">${esc(content)}</textarea></div>
         <div class="dialog-foot">
             <button class="btn danger" id="fdel">${t('common.delete')}</button>
+            <button class="btn" id="fdl">${icon('download')}${t('files.download')}</button>
             <span class="spacer" style="flex:1"></span>
             <button class="btn" data-close>${t('common.cancel')}</button>
             <button class="btn primary" id="fsave">${t('common.save')}</button>
         </div>`, { wide: true });
+
+    modal.querySelector('#fdl').addEventListener('click', async () => {
+        try {
+            const res = await fetch(`/api/v1/vhosts/${vhost.id}/files/download?path=${encodeURIComponent(filePath)}`, {
+                headers: { Authorization: `Bearer ${state.token}` },
+            });
+            if (!res.ok) throw new Error('download_failed');
+            const blob = await res.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = entry.name;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch (err) { toast(err.message, 'err'); }
+    });
 
     modal.querySelector('#fsave').addEventListener('click', async () => {
         const text = modal.querySelector('textarea').value;
@@ -706,11 +802,31 @@ async function pageTasks() {
     }));
 }
 
+function sparkline(points, { height = 120, formatY = (v) => String(v) } = {}) {
+    if (points.length < 2) return `<div class="empty">${t('common.loading')}</div>`;
+    const values = points.map((p) => Number(p.value));
+    const max = Math.max(...values) * 1.1 || 1;
+    const width = 600;
+    const coords = values.map((v, i) =>
+        `${(i / (values.length - 1)) * width},${height - (v / max) * (height - 8)}`).join(' ');
+    return `
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="chart" role="img">
+        <polyline points="${coords}" fill="none" stroke="var(--accent)" stroke-width="2"
+            vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+        <polygon points="0,${height} ${coords} ${width},${height}" fill="var(--accent)" opacity="0.08"/>
+    </svg>
+    <div class="chart-meta mono">max ${formatY(max / 1.1)} · ${points.length} točaka · 24 h</div>`;
+}
+
 async function pageMonitoring() {
     setActive('monitoring');
     main().innerHTML = `<div class="page-head"><h1>${t('nav.monitoring')}</h1></div><div class="empty">${t('common.loading')}</div>`;
     try {
-        const m = await api('/monitoring/now');
+        const [m, cpu, mem] = await Promise.all([
+            api('/monitoring/now'),
+            api('/monitoring/history?metric=cpu_load1').catch(() => []),
+            api('/monitoring/history?metric=mem_used_bytes').catch(() => []),
+        ]);
         main().innerHTML = `
         <div class="page-head"><h1>${t('nav.monitoring')}</h1></div>
         <div class="grid cols-4">
@@ -724,6 +840,10 @@ async function pageMonitoring() {
                 <div class="sub">od ${fmtBytes(m.disk_total_bytes)}</div></div>
             <div class="card stat"><div class="label">Uptime</div>
                 <div class="value">${Math.floor(m.uptime_s / 86400)}d ${Math.floor((m.uptime_s % 86400) / 3600)}h</div></div>
+        </div>
+        <div class="grid cols-2 mt">
+            <div class="card"><h2>CPU load (1m)</h2>${sparkline(cpu, { formatY: (v) => v.toFixed(2) })}</div>
+            <div class="card"><h2>RAM</h2>${sparkline(mem, { formatY: fmtBytes })}</div>
         </div>`;
     } catch {
         main().innerHTML = `<div class="page-head"><h1>${t('nav.monitoring')}</h1></div>

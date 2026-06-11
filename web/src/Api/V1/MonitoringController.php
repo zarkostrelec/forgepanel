@@ -44,9 +44,11 @@ final class MonitoringController extends Controller
         if (!$ctx->isAdmin() && !preg_match('/^vhost:\d+$/', (string) $scope)) {
             $scope = 'server'; // klijent dobiva samo agregat servera ili svoje vhostove
         }
-        $metric = preg_match('/^[a-z_]{1,32}$/', (string) ($_GET['metric'] ?? '')) ? $_GET['metric'] : 'cpu_pct';
-        $resolution = in_array($_GET['resolution'] ?? 'minute', ['minute', 'hour', 'day'], true)
-            ? $_GET['resolution'] : 'minute';
+        $metric = preg_match('/^[a-z][a-z0-9_]{0,31}$/', (string) ($_GET['metric'] ?? '')) ? $_GET['metric'] : 'cpu_load1';
+        $resolution = (string) ($_GET['resolution'] ?? 'minute');
+        if (!in_array($resolution, ['minute', 'hour', 'day'], true)) {
+            $resolution = 'minute';
+        }
 
         Response::ok($this->app->db->all(
             'SELECT value, ts FROM monitoring_metrics

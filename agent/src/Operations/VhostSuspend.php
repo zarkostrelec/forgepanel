@@ -30,7 +30,6 @@ final class VhostSuspend extends Operation
             $conf = <<<NGINX
             server {
                 listen 80;
-                listen [::]:80;
                 server_name {$domain} www.{$domain};
                 return 503;
             }

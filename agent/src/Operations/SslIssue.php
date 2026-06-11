@@ -39,8 +39,16 @@ final class SslIssue extends Operation
         $context->output("AutoSSL: izdajem certifikat za $primary");
         $context->progress(10);
 
-        $acme = new Acme();
-        $cert = $acme->issue($hostnames, (string) $params['contact_email'], $context->output(...));
+        try {
+            $acme = new Acme();
+            $cert = $acme->issue($hostnames, (string) $params['contact_email'], $context->output(...));
+        } catch (\Throwable $e) {
+            $this->db->run(
+                "UPDATE ssl_certs SET status = 'error', last_error = ? WHERE hostname = ?",
+                [mb_substr($e->getMessage(), 0, 2000), $primary]
+            );
+            throw $e;
+        }
         $context->progress(80);
 
         $ssl_dir = "/etc/forgepanel/ssl/$primary";
@@ -59,6 +67,27 @@ final class SslIssue extends Operation
 
         $parsed = openssl_x509_parse($cert['fullchain']);
         $expires_at = is_array($parsed) ? date('Y-m-d H:i:s', (int) $parsed['validTo_time_t']) : null;
+
+        // Registar certifikata: postojeći red se ažurira, novi se kreira (panel cert i sl.)
+        $updated = $this->db->run(
+            "UPDATE ssl_certs SET status = 'active', last_error = NULL, expires_at = ?,
+                    cert_path = ?, key_path = ?, type = 'letsencrypt'
+             WHERE hostname = ?",
+            [$expires_at, "$ssl_dir/fullchain.pem", "$ssl_dir/privkey.pem", $primary]
+        )->rowCount();
+        if ($updated === 0) {
+            $this->db->run(
+                "INSERT INTO ssl_certs (vhost_id, hostname, type, cert_path, key_path, expires_at, status)
+                 VALUES (?, ?, 'letsencrypt', ?, ?, ?, 'active')",
+                [
+                    isset($params['vhost_id']) ? (int) $params['vhost_id'] : null,
+                    $primary,
+                    "$ssl_dir/fullchain.pem",
+                    "$ssl_dir/privkey.pem",
+                    $expires_at,
+                ]
+            );
+        }
 
         $context->progress(100);
         $context->output("Certifikat aktivan, vrijedi do $expires_at");

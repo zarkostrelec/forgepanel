@@ -30,6 +30,10 @@ final class Request
                 $body = $decoded;
             }
         }
+        // multipart/form-data (file upload) — PHP ga parsira u $_POST/$_FILES
+        if ($body === [] && $_POST !== []) {
+            $body = $_POST;
+        }
 
         $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
         $bearer = preg_match('/^Bearer\s+(\S+)$/', $auth, $m) ? $m[1] : null;
@@ -59,5 +63,11 @@ final class Request
     public function param(string $key): string
     {
         return $this->route_params[$key] ?? throw new HttpException(500, 'missing_route_param');
+    }
+
+    public function query(string $key, ?string $default = null): ?string
+    {
+        $value = $_GET[$key] ?? $default;
+        return $value === null ? null : (string) $value;
     }
 }
