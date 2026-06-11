@@ -102,5 +102,16 @@
     "docker.name": "Naziv",
     "docker.host_port": "Host port",
     "docker.container_port": "Container port",
-    "docker.logs": "Logovi"
+    "docker.logs": "Logovi",
+    "nav.security": "Sigurnost",
+    "nav.firewall": "Firewall",
+    "security.scan_vhost": "Skeniraj stranicu",
+    "security.run_scan": "Pokreni scan",
+    "security.auto_quarantine": "Automatski u karantenu (high severity)",
+    "security.quarantine": "Karantena",
+    "security.history": "Povijest scanova",
+    "security.restore": "Vrati",
+    "security.clean": "Karantena prazna — čisto.",
+    "security.confirm_restore": "Vraćanje fajla iz karantene na originalnu lokaciju. Siguran si da je čist?",
+    "firewall.allow": "Dozvoli"
 }

@@ -59,6 +59,8 @@ const ICONS = {
     archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
     mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
     box: '<path d="M12 2.5 21 7v10l-9 4.5L3 17V7z"/><path d="M3 7l9 4.5L21 7M12 11.5V21.5"/>',
+    shield: '<path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z"/><path d="m9 12 2 2 4-4"/>',
+    wall: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M8 4v5M16 9v5M8 14v6"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 
@@ -313,6 +315,8 @@ const NAV = [
     ['backups', 'archive', 'nav.backups'],
     ['tasks', 'tasks', 'nav.tasks'],
     ['monitoring', 'chart', 'nav.monitoring'],
+    ['security', 'shield', 'nav.security'],
+    ['firewall', 'wall', 'nav.firewall', 'admin'],
     ['updates', 'refresh', 'nav.updates', 'admin'],
 ];
 
@@ -1362,6 +1366,111 @@ async function pageDocker() {
     }));
 }
 
+// ---------------------------------------------------------------- security
+async function pageSecurity() {
+    setActive('security');
+    main().innerHTML = `
+    <div class="page-head"><h1>${t('nav.security')}</h1></div>
+    <div class="card"><h2>${t('security.scan_vhost')}</h2><div id="scanbox">${t('common.loading')}</div></div>
+    <div class="card mt"><h2>${t('security.quarantine')}</h2><div id="quar">${t('common.loading')}</div></div>
+    <div class="card mt"><h2>${t('security.history')}</h2><div id="scans">${t('common.loading')}</div></div>`;
+
+    const vhosts = await api('/vhosts');
+    document.getElementById('scanbox').innerHTML = `
+        <div class="field" style="max-width:480px">
+            <select id="sv" class="mono">${vhosts.map((v) => `<option value="${v.id}">${esc(v.domain)}</option>`).join('')}</select>
+        </div>
+        <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+            <input type="checkbox" id="autoq"> ${t('security.auto_quarantine')}</label>
+        <button class="btn primary" id="runscan">${icon('shield')}${t('security.run_scan')}</button>`;
+    document.getElementById('runscan').addEventListener('click', async () => {
+        const id = document.getElementById('sv').value;
+        try {
+            const r = await api(`/vhosts/${id}/security/scan`, { method: 'POST', body: { auto_quarantine: document.getElementById('autoq').checked } });
+            watchTask(r.task_id, `malware.scan`);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+
+    const [quar, scans] = await Promise.all([api('/security/quarantine'), api('/security/scans')]);
+    document.getElementById('quar').innerHTML = quar.length ? `
+        <table class="data"><thead><tr><th>${t('vhost.domain')}</th><th>Path</th><th>Signatura</th><th></th></tr></thead><tbody>
+        ${quar.map((q) => `<tr>
+            <td class="mono">${esc(q.domain)}</td>
+            <td class="mono" style="word-break:break-all">${esc(q.path)}</td>
+            <td class="mono"><span class="badge err">${esc(q.signature)}</span></td>
+            <td class="num">
+                <button class="btn" data-restore="${q.id}">${t('security.restore')}</button>
+                <button class="btn danger" data-purge="${q.id}">${t('common.delete')}</button>
+            </td></tr>`).join('')}</tbody></table>` : `<div class="empty">${t('security.clean')}</div>`;
+
+    document.getElementById('scans').innerHTML = scans.length ? `
+        <table class="data"><tbody>
+        ${scans.map((s) => `<tr>
+            <td class="mono">${esc(s.domain ?? '—')}</td>
+            <td>${statusBadge(s.status)}</td>
+            <td class="mono">${s.files_scanned} fileova</td>
+            <td><span class="badge ${Number(s.threats_found) ? 'err' : 'ok'}">${s.threats_found} prijetnji</span></td>
+            <td class="hide-sm">${fmtDate(s.started_at)}</td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`;
+
+    main().querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('security.confirm_restore'))) return;
+        try { await api(`/security/quarantine/${b.dataset.restore}/restore`, { method: 'POST' }); pageSecurity(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    main().querySelectorAll('[data-purge]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/security/quarantine/${b.dataset.purge}/delete`, { method: 'POST' }); pageSecurity(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+}
+
+// ---------------------------------------------------------------- firewall (admin)
+async function pageFirewall() {
+    setActive('firewall');
+    main().innerHTML = `
+    <div class="page-head"><h1>${t('nav.firewall')}</h1></div>
+    <div class="card"><h2>ufw</h2><div id="ufw">${t('common.loading')}</div></div>
+    <div class="card mt"><h2>fail2ban</h2><div id="f2b">${t('common.loading')}</div></div>`;
+
+    try {
+        const rules = await api('/firewall/rules');
+        document.getElementById('ufw').innerHTML = `
+            <div class="task-output">${esc((rules.rules || []).join('\n') || 'nema pravila')}</div>
+            <form id="uf" class="mt"><div class="grid cols-4">
+                <div class="field"><label>Port</label><input name="port" type="number" required class="mono"></div>
+                <div class="field"><label>Proto</label><select name="proto" class="mono"><option>tcp</option><option>udp</option></select></div>
+                <div class="field"><label>Od (CIDR, opc.)</label><input name="from" class="mono" placeholder="any"></div>
+                <div class="field"><label>&nbsp;</label><button class="btn primary">${t('firewall.allow')}</button></div>
+            </div></form>`;
+        document.getElementById('uf').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const f = Object.fromEntries(new FormData(e.target));
+            if (!f.from) delete f.from;
+            try { await api('/firewall/rules', { method: 'POST', body: { ...f, port: Number(f.port) } }); pageFirewall(); }
+            catch (err) { toast(err.message, 'err'); }
+        });
+
+        const data = await api('/firewall/jails');
+        document.getElementById('f2b').innerHTML = (data.jails || []).length ? `
+            <table class="data"><thead><tr><th>Jail</th><th>Banano</th><th class="hide-sm">Ukupno</th><th>IP-ovi</th></tr></thead><tbody>
+            ${data.jails.map((j) => `<tr>
+                <td class="mono">${esc(j.jail)}</td>
+                <td class="mono"><span class="badge ${j.banned ? 'warn' : 'ok'}">${j.banned}</span></td>
+                <td class="mono hide-sm">${j.total}</td>
+                <td class="mono">${j.ips.map((ip) => `${esc(ip)} <button class="btn ghost" data-unban="${esc(j.jail)}|${esc(ip)}">✕</button>`).join(' ') || '—'}</td>
+            </tr>`).join('')}</tbody></table>` : `<div class="empty">nema jailova</div>`;
+        main().querySelectorAll('[data-unban]').forEach((b) => b.addEventListener('click', async () => {
+            const [jail, ip] = b.dataset.unban.split('|');
+            try { await api('/firewall/unban', { method: 'POST', body: { jail, ip } }); pageFirewall(); }
+            catch (err) { toast(err.message, 'err'); }
+        }));
+    } catch (err) {
+        main().querySelector('.content')?.insertAdjacentHTML?.('beforeend', '');
+        document.getElementById('ufw').innerHTML = `<div class="alert err">${esc(err.message)}</div>`;
+    }
+}
+
 // ---------------------------------------------------------------- updates (admin)
 async function pageUpdates() {
     setActive('updates');
@@ -1437,6 +1546,8 @@ const ROUTES = [
     [/^#\/monitoring$/, pageMonitoring],
     [/^#\/updates$/, pageUpdates],
     [/^#\/docker$/, pageDocker],
+    [/^#\/security$/, pageSecurity],
+    [/^#\/firewall$/, pageFirewall],
 ];
 
 async function route() {

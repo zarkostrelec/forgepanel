@@ -102,5 +102,16 @@
     "docker.name": "Name",
     "docker.host_port": "Host port",
     "docker.container_port": "Container port",
-    "docker.logs": "Logs"
+    "docker.logs": "Logs",
+    "nav.security": "Security",
+    "nav.firewall": "Firewall",
+    "security.scan_vhost": "Scan website",
+    "security.run_scan": "Run scan",
+    "security.auto_quarantine": "Auto-quarantine (high severity)",
+    "security.quarantine": "Quarantine",
+    "security.history": "Scan history",
+    "security.restore": "Restore",
+    "security.clean": "Quarantine empty — clean.",
+    "security.confirm_restore": "Restoring a quarantined file to its original location. Are you sure it is clean?",
+    "firewall.allow": "Allow"
 }
