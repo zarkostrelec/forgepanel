@@ -1,0 +1,6 @@
+# MariaDB 11.x LTS — mariadb.org
+Types: deb
+URIs: https://deb.mariadb.org/11.8/ubuntu
+Suites: {SUITE}
+Components: main
+Signed-By: /etc/apt/keyrings/mariadb.gpg

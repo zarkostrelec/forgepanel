@@ -1,0 +1,125 @@
+openapi: 3.1.0
+info:
+  title: ForgePanel API
+  version: 0.1.0
+  description: >
+    REST API ForgePanela — API-first: UI je samo potrošač ovog API-ja.
+    Autentikacija: Bearer token (session token iz /auth/login ili API token sa scopovima).
+servers:
+  - url: https://{host}:8443/api/v1
+    variables:
+      host:
+        default: panel.example.com
+
+security:
+  - bearer: []
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  schemas:
+    Error:
+      type: object
+      properties:
+        ok: { type: boolean, const: false }
+        error: { type: string }
+    Ok:
+      type: object
+      properties:
+        ok: { type: boolean, const: true }
+        data: {}
+    Vhost:
+      type: object
+      properties:
+        id: { type: integer }
+        domain: { type: string }
+        subscription_id: { type: integer }
+        sys_user: { type: string }
+        php_version: { type: string, enum: ["8.1", "8.2", "8.3", "8.4"] }
+        web_backend: { type: string, enum: [nginx, nginx_apache] }
+        docroot: { type: string }
+        status: { type: string, enum: [active, suspended, creating, error] }
+    Task:
+      type: object
+      properties:
+        id: { type: integer }
+        op: { type: string }
+        status: { type: string, enum: [pending, running, done, failed, cancelled] }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        output: { type: string, nullable: true }
+        error: { type: string, nullable: true }
+
+paths:
+  /auth/login:
+    post:
+      security: []
+      summary: Prijava (e-mail + lozinka); može vratiti twofa_required
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200": { description: "status: ok | twofa_required + session token" }
+        "401": { description: Neispravni podaci }
+        "429": { description: Račun zaključan (rate limit) }
+  /auth/twofa:
+    post:
+      summary: Potvrda TOTP koda za session
+      responses:
+        "200": { description: OK }
+  /auth/me:
+    get:
+      summary: Podaci o prijavljenom korisniku
+      responses:
+        "200": { description: OK }
+  /vhosts:
+    get:
+      summary: Lista vhostova (filtrirano po vlasništvu)
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Kreiranje vhosta (task) + AutoSSL (task)
+      responses:
+        "202": { description: "vhost_id, task_id, ssl_task_id" }
+  /vhosts/{id}:
+    get:
+      summary: Detalji vhosta
+      responses: { "200": { description: OK }, "404": { description: Ne postoji / tuđi } }
+    delete:
+      summary: Brisanje vhosta (task)
+      responses: { "202": { description: task_id } }
+  /vhosts/{id}/php:
+    put:
+      summary: Promjena PHP verzije domene
+      responses: { "200": { description: OK } }
+  /vhosts/{id}/ssl/renew:
+    post:
+      summary: Ručna obnova certifikata (task)
+      responses: { "202": { description: task_id } }
+  /vhosts/{id}/files/list:
+    post:
+      summary: File manager — listanje (path relativan na vhost root)
+      responses: { "200": { description: OK } }
+  /databases:
+    get: { summary: Lista baza, responses: { "200": { description: OK } } }
+    post: { summary: Nova baza, responses: { "201": { description: OK } } }
+  /databases/{id}/users:
+    post: { summary: Novi DB user za bazu, responses: { "201": { description: OK } } }
+  /tasks/{id}:
+    get: { summary: Stanje taska, responses: { "200": { description: OK } } }
+  /tasks/{id}/stream:
+    get:
+      summary: SSE stream progressa taska
+      responses: { "200": { description: "text/event-stream" } }
+  /monitoring/now:
+    get: { summary: Trenutne metrike servera, responses: { "200": { description: OK } } }
+  /tokens:
+    post: { summary: Novi API token sa scopovima, responses: { "201": { description: Token se prikazuje samo jednom } } }

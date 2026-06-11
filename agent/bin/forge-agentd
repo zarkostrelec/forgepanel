@@ -1,0 +1,23 @@
+#!/usr/bin/php8.4
+<?php
+
+declare(strict_types=1);
+
+/**
+ * forge-agentd — privilegirani agent ForgePanela.
+ * Sluša UNIX socket, prima isključivo whitelistane operacije (op-code + validirani
+ * parametri), obrađuje task queue asinkrono. Web sloj nikad ne izvršava shell komande.
+ */
+
+if (posix_geteuid() !== 0) {
+    fwrite(STDERR, "forge-agentd mora raditi kao root.\n");
+    exit(1);
+}
+
+require __DIR__ . '/../src/Autoloader.php';
+
+ForgePanel\Agent\Autoloader::register(__DIR__ . '/../src');
+
+$config = ForgePanel\Agent\Config::load($argv[1] ?? '/etc/forgepanel/agent.ini');
+
+(new ForgePanel\Agent\Agent($config))->run();
