@@ -6,8 +6,10 @@ const state = {
     me: null,
     lang: {},
     langCode: localStorage.getItem('fp_lang') ?? 'hr',
-    theme: localStorage.getItem('fp_theme') ?? 'dark',
+    theme: localStorage.getItem('fp_theme') ?? 'light',
     activeTasks: new Map(),
+    aiThread: [],
+    aiOpen: false,
 };
 
 const $app = document.getElementById('app');
@@ -53,38 +55,53 @@ const b64u = {
     dec: (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)),
 };
 
-// ---------------------------------------------------------------- ikone (Lucide-style outline)
+// ---------------------------------------------------------------- ikone (geometrijski strokeovi, docs/design/ui.jsx)
 const ICONS = {
-    home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
-    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
-    db: '<ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5v13c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8v-13"/><path d="M4 12c0 1.5 3.6 2.8 8 2.8s8-1.3 8-2.8"/>',
-    lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>',
-    tasks: '<path d="M4 6h12M4 12h16M4 18h9"/>',
-    chart: '<path d="M4 20V4"/><path d="M4 20h16"/><path d="M8 16v-5M13 16V8M18 16v-8"/>',
-    folder: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h9A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/>',
-    file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
-    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
-    x: '<path d="M6 6l12 12M18 6 6 18"/>',
-    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/>',
-    activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
-    user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.5 3.8-5 7-5s5.8 1.5 7 5"/>',
-    refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>',
+    grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+    globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5c2.6 2.3 2.6 14.7 0 17c-2.6-2.3-2.6-14.7 0-17z"/>',
+    folder: '<path d="M3.5 6.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+    pulse: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
+    activity: '<path d="M3 13h3.5l2.5-7 4 12 2.5-7H21"/>',
+    shield: '<path d="M12 3.5l7 2.5v6c0 4.4-3 7.5-7 8.5c-4-1-7-4.1-7-8.5v-6z"/>',
+    terminal: '<path d="M5 8l4 4-4 4"/><path d="M12 17h7"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+    sparkle: '<path d="M12 4l1.8 5.4L19 11l-5.2 1.6L12 18l-1.8-5.4L5 11l5.2-1.6z"/>',
+    spark: '<path d="M12 4l1.8 5.4L19 11l-5.2 1.6L12 18l-1.8-5.4L5 11l5.2-1.6z"/>',
+    bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2.5h-15z"/><path d="M10 21h4"/>',
+    gear: '<circle cx="12" cy="12" r="3.5"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>',
+    chevR: '<path d="M9 5l7 7-7 7"/>',
+    chevD: '<path d="M5 9l7 7 7-7"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
-    upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/>',
-    download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 20h16"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
-    dns: '<circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M12 7.2V12m0 0-5.2 5M12 12l5.2 5"/>',
-    archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
-    mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+    play: '<path d="M7 5l12 7-12 7z"/>',
+    refresh: '<path d="M19 12a7 7 0 1 1-2-5"/><path d="M17 3v4h4"/>',
+    lock: '<rect x="5.5" y="10.5" width="13" height="9" rx="2"/><path d="M8.5 10.5v-3a3.5 3.5 0 0 1 7 0v3"/>',
+    dots: '<circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
+    file: '<path d="M6 3.5h8l4 4v13h-12z"/><path d="M14 3.5v4h4"/>',
+    db: '<ellipse cx="12" cy="6" rx="7.5" ry="3"/><path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6"/><path d="M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3"/>',
+    server: '<rect x="3.5" y="4.5" width="17" height="6.5" rx="1.5"/><rect x="3.5" y="13" width="17" height="6.5" rx="1.5"/><circle cx="7.5" cy="7.75" r="0.8" fill="currentColor" stroke="none"/><circle cx="7.5" cy="16.25" r="0.8" fill="currentColor" stroke="none"/>',
+    x: '<path d="M6 6l12 12M18 6L6 18"/>',
+    check: '<path d="M5 13l4.5 4.5L19 7"/>',
+    arrowUR: '<path d="M7 17L17 7M9 7h8v8"/>',
+    branch: '<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6M18 10.2c0 4-5 3.8-9.8 5.4"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.5l3.5 2"/>',
+    zap: '<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>',
+    mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>',
+    download: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
+    upload: '<path d="M12 15V4M7 9l5-5 5 5M5 20h14"/>',
+    key: '<circle cx="8" cy="12" r="4.5"/><path d="M12.5 12H21M18 12v3.5M15 12v2.5"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.2 5.2l1.8 1.8M17 17l1.8 1.8M18.8 5.2 17 7M7 17l-1.8 1.8"/>',
+    moon: '<path d="M20 13.5A8 8 0 0 1 10.5 4 8 8 0 1 0 20 13.5z"/>',
+    user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.5 3.8-5 7-5s5.8 1.5 7 5"/>',
+    logout: '<path d="M14 4h-8v16h8"/><path d="M10 12h11M17.5 8.5 21 12l-3.5 3.5"/>',
     box: '<path d="M12 2.5 21 7v10l-9 4.5L3 17V7z"/><path d="M3 7l9 4.5L21 7M12 11.5V21.5"/>',
-    shield: '<path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z"/><path d="m9 12 2 2 4-4"/>',
     wall: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M8 4v5M16 9v5M8 14v6"/>',
     history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c1-3.3 3.2-5 6-5s5 1.7 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.8M18 20c-.3-2-1-3.5-2-4.5"/>',
-    spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/><circle cx="12" cy="12" r="2.5"/>',
-    key: '<circle cx="8" cy="15" r="4.5"/><path d="M11.5 11.5 20 3M15 8l3 3M18 5l2 2"/>',
+    archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
+    dns: '<circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M12 7.2V12m0 0-5.2 5M12 12l5.2 5"/>',
 };
-const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
+const icon = (name, size = 16) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0" aria-hidden="true">${ICONS[name] ?? '<circle cx="12" cy="12" r="8"/>'}</svg>`;
+const dot = (tone = 'ok', pulse = false) => `<span class="dot ${tone}${pulse ? ' pulse' : ''}"></span>`;
 
 // ---------------------------------------------------------------- API klijent
 async function api(path, { method = 'GET', body } = {}) {
@@ -147,27 +164,29 @@ class FpPalette extends HTMLElement {
     async open() {
         if (this.isConnected) return;
         this.classList.add('overlay', 'top');
-        this.innerHTML = `<div class="dialog">
-            <input class="palette-input" placeholder="Traži domene, akcije, postavke…" autocomplete="off">
+        this.innerHTML = `<div class="palette-dialog">
+            <div class="palette-head">${icon('search')}
+                <input class="palette-input" placeholder="${t('palette.placeholder')}" autocomplete="off">
+                <span class="kbd">esc</span></div>
             <div class="palette-list"></div>
         </div>`;
         document.body.append(this);
 
         this.actions = [
-            { label: t('nav.dashboard'), type: 'stranica', go: '#/dashboard' },
-            { label: t('nav.websites'), type: 'stranica', go: '#/websites' },
-            { label: t('nav.databases'), type: 'stranica', go: '#/databases' },
-            { label: t('nav.ssl'), type: 'stranica', go: '#/ssl' },
-            { label: t('nav.tasks'), type: 'stranica', go: '#/tasks' },
-            { label: t('nav.monitoring'), type: 'stranica', go: '#/monitoring' },
-            { label: t('vhost.create'), type: 'akcija', run: () => createVhostModal() },
-            { label: t('db.create'), type: 'akcija', run: () => createDbModal() },
-            { label: 'Tamna/svijetla tema', type: 'akcija', run: toggleTheme },
-            { label: t('auth.logout'), type: 'akcija', run: doLogout },
+            { group: t('palette.actions'), ic: 'plus', label: t('vhost.create'), run: () => createVhostModal() },
+            { group: t('palette.actions'), ic: 'db', label: t('db.create'), run: () => createDbModal() },
+            { group: t('palette.actions'), ic: state.theme === 'dark' ? 'sun' : 'moon', label: t('palette.theme'), run: toggleTheme },
+            { group: t('palette.actions'), ic: 'logout', label: t('auth.logout'), run: doLogout },
+            ...RAIL.filter(railVisible).map((r) => ({
+                group: t('palette.nav'), ic: r.icon, label: `${t('palette.goto')} ${t(r.label)}`, kbd: `G ${r.key.toUpperCase()}`, go: `#/${r.pages[0]}`,
+            })),
+            { group: t('palette.nav'), ic: 'user', label: t('profile.title'), go: '#/profile' },
         ];
+        if (state.me.role === 'admin') this.actions.splice(4, 0,
+            { group: t('palette.actions'), ic: 'sparkle', label: t('assistant.ask'), run: () => toggleAiDrawer(true) });
         try {
             (await api('/vhosts')).forEach((v) =>
-                this.actions.push({ label: v.domain, type: 'domena', go: `#/websites/${v.id}` }));
+                this.actions.push({ group: t('nav.websites'), ic: 'globe', label: v.domain, go: `#/websites/${v.id}` }));
         } catch { /* offline lista i dalje radi */ }
 
         this.input = this.querySelector('input');
@@ -187,13 +206,19 @@ class FpPalette extends HTMLElement {
     }
     filtered() {
         const q = (this.input?.value ?? '').toLowerCase().trim();
-        return this.actions.filter((a) => a.label.toLowerCase().includes(q)).slice(0, 12);
+        return this.actions.filter((a) => a.label.toLowerCase().includes(q)).slice(0, 14);
     }
     renderList() {
-        this.list.innerHTML = this.filtered().map((a, i) =>
-            `<div class="palette-item${i === this.idx ? ' active' : ''}" data-i="${i}">
-                <span>${esc(a.label)}</span><span class="type">${a.type}</span>
-            </div>`).join('') || '<div class="empty">Nema rezultata</div>';
+        let lastGroup = null;
+        this.list.innerHTML = this.filtered().map((a, i) => {
+            const head = a.group !== lastGroup ? `<div class="palette-group">${esc(a.group)}</div>` : '';
+            lastGroup = a.group;
+            return `${head}<div class="palette-item${i === this.idx ? ' active' : ''}" data-i="${i}">
+                <span class="pi-icon">${icon(a.ic ?? 'chevR')}</span>
+                <span class="pi-label">${esc(a.label)}</span>
+                <span class="pi-kbd">${a.kbd ? `<span class="kbd">${a.kbd}</span>` : ''}</span>
+            </div>`;
+        }).join('') || `<div class="empty">${t('palette.empty')}</div>`;
         this.list.querySelectorAll('.palette-item').forEach((el) =>
             el.addEventListener('click', () => this.pick(this.filtered()[Number(el.dataset.i)])));
     }
@@ -206,10 +231,18 @@ class FpPalette extends HTMLElement {
 customElements.define('fp-palette', FpPalette);
 const palette = new FpPalette();
 
+// globalne kratice: Ctrl/⌘+K paleta, Ctrl/⌘+J AI, G+slovo navigacija
+let gPending = false;
 document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && state.me) {
-        e.preventDefault();
-        palette.open();
+    if (!state.me) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); palette.open(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); toggleAiDrawer(); return; }
+    const inInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+    if (inInput || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key.toLowerCase() === 'g') { gPending = true; setTimeout(() => { gPending = false; }, 900); return; }
+    if (gPending) {
+        const target = RAIL.filter(railVisible).find((r) => r.key === e.key.toLowerCase());
+        if (target) { location.hash = `#/${target.pages[0]}`; gPending = false; }
     }
 });
 
@@ -276,9 +309,12 @@ function renderLogin(step = 'login', preToken = null, methods = ['totp']) {
     const hasKey = methods.includes('webauthn') && navigator.credentials;
     $app.innerHTML = `
     <div class="login-wrap"><div class="card login-card">
-        <div class="brand">${state.branding?.logo_url
-            ? `<img src="${esc(state.branding.logo_url)}" alt="" style="height:26px">`
-            : `<div class="brand-mark">${esc(brandName()[0])}</div>`}<div class="brand-name">${esc(brandName())}</div></div>
+        <div class="login-brand">
+            <div class="mark">${state.branding?.logo_url
+                ? `<img src="${esc(state.branding.logo_url)}" alt="">`
+                : icon('zap', 20)}</div>
+            <div class="name">${esc(brandName())}</div>
+        </div>
         <div class="alert err" hidden></div>
         ${step === 'login' ? `
             <form id="f">
@@ -356,58 +392,98 @@ function toggleTheme() {
     document.documentElement.dataset.theme = state.theme;
 }
 
-const NAV = [
-    ['dashboard', 'home', 'nav.dashboard'],
-    ['websites', 'globe', 'nav.websites'],
-    ['databases', 'db', 'nav.databases'],
-    ['mail', 'mail', 'nav.mail'],
-    ['docker', 'box', 'nav.docker'],
-    ['dns', 'dns', 'nav.dns'],
-    ['ssl', 'lock', 'nav.ssl'],
-    ['backups', 'archive', 'nav.backups'],
-    ['tasks', 'tasks', 'nav.tasks'],
-    ['monitoring', 'chart', 'nav.monitoring'],
-    ['security', 'shield', 'nav.security'],
-    ['firewall', 'wall', 'nav.firewall', 'admin'],
-    ['config', 'history', 'nav.config', 'admin'],
-    ['updates', 'refresh', 'nav.updates', 'admin'],
-    ['assistant', 'spark', 'nav.assistant', 'admin'],
-    ['users', 'users', 'nav.users'],
+// rail: grupe modula; grupe s više stranica dobivaju tab strip (tabsHtml)
+const RAIL = [
+    { id: 'dashboard', icon: 'grid', label: 'nav.dashboard', key: 'd', pages: ['dashboard'] },
+    { id: 'websites', icon: 'globe', label: 'nav.websites', key: 's', pages: ['websites'] },
+    { id: 'files', icon: 'folder', label: 'nav.files', key: 'f', pages: ['files'] },
+    { id: 'databases', icon: 'db', label: 'nav.databases', key: 'b', pages: ['databases'] },
+    { id: 'mail', icon: 'mail', label: 'nav.mail', key: 'e', pages: ['mail'] },
+    { id: 'docker', icon: 'box', label: 'nav.docker', key: 'k', pages: ['docker'] },
+    { id: 'backups', icon: 'download', label: 'nav.backups', key: 'a', pages: ['backups'] },
+    { id: 'monitoring', icon: 'pulse', label: 'nav.monitoring', key: 'm', pages: ['monitoring', 'tasks'] },
+    { id: 'protect', icon: 'shield', label: 'nav.protect', key: 'p', pages: ['ssl', 'dns', 'security', 'firewall'] },
+    { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config'] },
+    { id: 'users', icon: 'users', label: 'nav.users', key: 'o', roles: ['admin', 'reseller'], pages: ['users'] },
 ];
+const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
 
-const NAV_ROLES = { users: ['admin', 'reseller'] };
+const TAB_GROUPS = {
+    monitoring: [['monitoring', 'nav.monitoring', 'pulse'], ['tasks', 'nav.tasks', 'clock']],
+    protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
+    server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history']],
+};
+
+// tab strip za grupirane stranice (Zaštita: SSL · DNS · Sigurnost · Firewall, itd.)
+function tabsHtml(groupId, activePage) {
+    const tabs = (TAB_GROUPS[groupId] ?? []).filter(([, , , role]) => !role || role === state.me.role);
+    if (tabs.length < 2) return '';
+    return `<nav class="tabs">${tabs.map(([page, key, ic]) =>
+        `<a href="#/${page}" class="${page === activePage ? 'active' : ''}">${icon(ic)}${t(key)}</a>`).join('')}</nav>`;
+}
 
 function renderShell() {
+    const initials = state.me.email.slice(0, 2).toUpperCase();
+    const isAdmin = state.me.role === 'admin';
     $app.innerHTML = `
     <div class="shell">
-        <aside class="sidebar">
-            <div class="brand">${state.branding?.logo_url
-                ? `<img src="${esc(state.branding.logo_url)}" alt="" style="height:26px;border-radius:6px">`
-                : `<div class="brand-mark">${esc(brandName()[0])}</div>`}<div class="brand-name">${esc(brandName())}</div></div>
-            <nav class="nav">
-                ${NAV.filter(([page, , , role]) => (!role || role === state.me.role) && (!NAV_ROLES[page] || NAV_ROLES[page].includes(state.me.role))).map(([page, ic, key]) =>
-                    `<a href="#/${page}" data-page="${page}">${icon(ic)}<span class="nav-label">${t(key)}</span></a>`).join('')}
-            </nav>
-            <div class="sidebar-foot mono"><a href="#/profile" style="color:inherit">${esc(state.me.email)}</a><br>${esc(state.me.role)}</div>
-        </aside>
+        <nav class="rail" aria-label="Glavna navigacija">
+            <div class="rail-logo" title="${esc(brandName())}">${state.branding?.logo_url
+                ? `<img src="${esc(state.branding.logo_url)}" alt="${esc(brandName())}">`
+                : icon('zap')}</div>
+            ${RAIL.filter(railVisible).map((r) => `
+            <div class="rail-item">
+                <button class="rail-btn" data-rail="${r.id}" data-go="#/${r.pages[0]}" aria-label="${t(r.label)}">${icon(r.icon)}</button>
+                <span class="rail-tip">${t(r.label)} <span class="kbd-hint">G ${r.key.toUpperCase()}</span></span>
+            </div>`).join('')}
+            <div class="rail-spacer"></div>
+            <div class="rail-sep"></div>
+            <div class="rail-item">
+                <button class="rail-btn" data-go="#/profile" data-rail="profile" aria-label="${t('profile.title')}">${icon('key')}</button>
+                <span class="rail-tip">${t('profile.title')}</span>
+            </div>
+            <button class="rail-avatar" aria-label="${esc(state.me.email)}">${esc(initials)}</button>
+        </nav>
         <div class="main">
             <header class="topbar">
-                <button class="btn ghost icon menu-btn" aria-label="izbornik">${icon('menu')}</button>
-                <div class="search-hint"><span>Traži… </span><span class="kbd">Ctrl K</span></div>
-                <div class="spacer"></div>
-                <button class="btn ghost icon tray-btn" aria-label="zadaci">${icon('activity')}<span class="dot"></span></button>
-                <button class="btn ghost icon theme-btn" aria-label="tema">${icon('sun')}</button>
-                <button class="btn ghost icon logout-btn" aria-label="${t('auth.logout')}">${icon('user')}</button>
+                <div class="topbar-host">${dot('ok', true)}<span class="host-name">${esc(location.hostname || brandName())}</span></div>
+                <div class="crumbs-bar" id="crumbs"></div>
+                <button class="search-btn">${icon('search')}
+                    <span class="search-label">${t('palette.placeholder')}</span>
+                    <span class="keys"><span class="kbd">Ctrl</span><span class="kbd">K</span></span></button>
+                ${isAdmin ? `<button class="ai-btn" id="aibtn" title="Forge AI (Ctrl+J)">${icon('sparkle')}<span class="ai-label">Forge AI</span></button>` : ''}
+                <button class="icon-btn tray-btn" aria-label="${t('nav.tasks')}">${icon('activity')}<span class="dot"></span></button>
+                <button class="icon-btn theme-btn" aria-label="Tema">${icon(state.theme === 'dark' ? 'sun' : 'moon')}</button>
             </header>
-            <main class="content"></main>
+            <div class="body-row">
+                <main class="content"></main>
+                <aside class="ai-drawer" id="aidrawer" hidden></aside>
+            </div>
         </div>
     </div>`;
 
-    $app.querySelector('.search-hint').addEventListener('click', () => palette.open());
-    $app.querySelector('.theme-btn').addEventListener('click', toggleTheme);
-    $app.querySelector('.logout-btn').addEventListener('click', doLogout);
-    $app.querySelector('.menu-btn').addEventListener('click', () =>
-        $app.querySelector('.shell').classList.toggle('nav-open'));
+    $app.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { location.hash = b.dataset.go; }));
+    $app.querySelector('.search-btn').addEventListener('click', () => palette.open());
+    $app.querySelector('#aibtn')?.addEventListener('click', () => toggleAiDrawer());
+    $app.querySelector('.theme-btn').addEventListener('click', (e) => {
+        toggleTheme();
+        e.currentTarget.innerHTML = icon(state.theme === 'dark' ? 'sun' : 'moon');
+    });
+    $app.querySelector('.rail-avatar').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const existing = document.querySelector('.user-pop');
+        if (existing) return existing.remove();
+        const pop = document.createElement('div');
+        pop.className = 'user-pop';
+        pop.innerHTML = `
+            <div class="who"><div class="em">${esc(state.me.email)}</div><div class="ro">${esc(state.me.role)}</div></div>
+            <button data-act="profile">${icon('user')}${t('profile.title')}</button>
+            <button data-act="logout">${icon('logout')}${t('auth.logout')}</button>`;
+        document.body.append(pop);
+        pop.querySelector('[data-act="profile"]').addEventListener('click', () => { pop.remove(); location.hash = '#/profile'; });
+        pop.querySelector('[data-act="logout"]').addEventListener('click', () => { pop.remove(); doLogout(); });
+        setTimeout(() => document.addEventListener('click', () => pop.remove(), { once: true }));
+    });
     $app.querySelector('.tray-btn').addEventListener('click', (e) => {
         e.stopPropagation();
         const existing = document.querySelector('.tray-pop');
@@ -415,54 +491,262 @@ function renderShell() {
         const pop = document.createElement('div');
         pop.className = 'tray-pop';
         pop.innerHTML = trayHtml();
-        $app.querySelector('.main').append(pop);
-        document.addEventListener('click', () => pop.remove(), { once: true });
+        document.body.append(pop);
+        setTimeout(() => document.addEventListener('click', () => pop.remove(), { once: true }));
     });
     renderTray();
+    if (state.aiOpen) renderAiDrawer();
 }
 
 const main = () => $app.querySelector('.content');
 
-function setActive(page) {
-    $app.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
-    $app.querySelector('.shell')?.classList.remove('nav-open');
+function setActive(page, crumbs = null) {
+    const group = RAIL.find((r) => r.pages.includes(page));
+    $app.querySelectorAll('.rail-btn[data-rail]').forEach((b) =>
+        b.classList.toggle('active', b.dataset.rail === (group?.id ?? page)));
+    const titleKey = (TAB_GROUPS[group?.id] ?? []).find(([p]) => p === page)?.[1] ?? group?.label ?? `nav.${page}`;
+    setCrumbs(crumbs ?? [t(titleKey) === `nav.${page}` ? t('profile.title') : t(titleKey)]);
+    document.querySelector('.user-pop')?.remove();
+}
+
+function setCrumbs(parts) {
+    const el = document.getElementById('crumbs');
+    if (el) el.innerHTML = parts.map((p) => `${icon('chevR')}<span class="crumb">${esc(p)}</span>`).join('');
+}
+
+// ---------------------------------------------------------------- Forge AI drawer (⌘J / Ctrl+J)
+function toggleAiDrawer(forceOpen = null) {
+    if (state.me?.role !== 'admin') return;
+    state.aiOpen = forceOpen ?? !state.aiOpen;
+    const drawer = document.getElementById('aidrawer');
+    if (!drawer) return;
+    drawer.hidden = !state.aiOpen;
+    document.getElementById('aibtn')?.classList.toggle('active', state.aiOpen);
+    if (state.aiOpen) renderAiDrawer();
+}
+
+async function renderAiDrawer() {
+    const drawer = document.getElementById('aidrawer');
+    if (!drawer) return;
+    drawer.hidden = false;
+    document.getElementById('aibtn')?.classList.add('active');
+    drawer.innerHTML = `
+        <header>
+            <span class="mark">${icon('sparkle')}</span>
+            <div><div class="title">Forge AI</div><div class="sub">${t('ai.sub')}</div></div>
+            <button class="icon-btn" id="aiclose" style="margin-left:auto" aria-label="${t('common.cancel')}">${icon('x')}</button>
+        </header>
+        <div class="ai-thread" id="aithread"><div class="empty">${t('common.loading')}</div></div>
+        <div class="ai-foot" id="aifoot"></div>`;
+    drawer.querySelector('#aiclose').addEventListener('click', () => toggleAiDrawer(false));
+
+    let status;
+    try { status = await api('/assistant/status'); }
+    catch (err) { drawer.querySelector('#aithread').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; return; }
+
+    if (!status.configured) {
+        drawer.querySelector('#aithread').innerHTML = `
+            <div class="ai-msg-ai">${t('assistant.intro')}</div>
+            <form id="aikf">
+                <div class="field"><label>${t('assistant.api_key')}</label>
+                    <input name="api_key" type="password" required class="mono" placeholder="sk-ant-..."></div>
+                <div class="field"><label>${t('assistant.model')}</label>
+                    <select name="model" class="mono">
+                        <option value="claude-opus-4-8">Claude Opus 4.8 (preporučeno)</option>
+                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (brže/jeftinije)</option>
+                        <option value="claude-haiku-4-5">Claude Haiku 4.5 (najjeftinije)</option>
+                        <option value="claude-fable-5">Claude Fable 5 (najmoćnije)</option>
+                    </select></div>
+                <button class="btn primary">${t('assistant.connect')}</button>
+            </form>`;
+        drawer.querySelector('#aikf').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await api('/assistant/key', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+                toast(t('assistant.connected'));
+                renderAiDrawer();
+            } catch (err) { toast(err.message, 'err'); }
+        });
+        return;
+    }
+
+    const threadEl = drawer.querySelector('#aithread');
+    const renderThread = () => {
+        threadEl.innerHTML = state.aiThread.length
+            ? state.aiThread.map((m) => `<div class="${m.who === 'user' ? 'ai-msg-user' : 'ai-msg-ai'}">${esc(m.text)}</div>`).join('')
+            : `<div class="ai-msg-ai">${t('ai.welcome')}</div>`;
+        threadEl.scrollTop = threadEl.scrollHeight;
+    };
+    renderThread();
+
+    drawer.querySelector('#aifoot').innerHTML = `
+        <div class="ai-sugg">${[t('ai.sugg1'), t('ai.sugg2'), t('ai.sugg3')].map((s) =>
+            `<button type="button" data-sugg="${esc(s)}">${esc(s)}</button>`).join('')}
+            <button type="button" data-disconnect title="${esc(status.model)}">⚙ ${t('assistant.disconnect')}</button></div>
+        <form class="ai-inputrow" id="aiform">
+            <input name="q" placeholder="${t('assistant.placeholder')}" autocomplete="off">
+            <button class="btn primary icon" aria-label="${t('assistant.send')}">${icon('arrowUR')}</button>
+        </form>`;
+
+    const input = drawer.querySelector('#aiform input');
+    const ask = async (question) => {
+        if (!question) return;
+        state.aiThread.push({ who: 'user', text: question });
+        state.aiThread.push({ who: 'ai', text: t('assistant.thinking') });
+        renderThread();
+        try {
+            const r = await api('/assistant/ask', { method: 'POST', body: { question, context: '' } });
+            state.aiThread[state.aiThread.length - 1] = { who: 'ai', text: r.answer };
+        } catch (err) {
+            state.aiThread[state.aiThread.length - 1] = { who: 'ai', text: '✕ ' + err.message };
+        }
+        renderThread();
+    };
+    drawer.querySelector('#aiform').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const q = input.value.trim();
+        input.value = '';
+        ask(q);
+    });
+    drawer.querySelectorAll('[data-sugg]').forEach((b) => b.addEventListener('click', () => ask(b.dataset.sugg)));
+    drawer.querySelector('[data-disconnect]').addEventListener('click', async () => {
+        if (!confirm(t('assistant.confirm_disconnect'))) return;
+        try { await api('/assistant/key', { method: 'DELETE' }); state.aiThread = []; renderAiDrawer(); }
+        catch (err) { toast(err.message, 'err'); }
+    });
+    input.focus();
 }
 
 // ---------------------------------------------------------------- stranice
+// mini sparkline za metric kartice
+function spark(values, { w = 84, h = 30, color = 'var(--accent)' } = {}) {
+    if (!values || values.length < 2) return '';
+    const max = Math.max(...values) * 1.1 || 1;
+    const step = w / (values.length - 1);
+    const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`);
+    const last = pts[pts.length - 1].split(',');
+    return `<svg width="${w}" height="${h}" style="overflow:visible;flex-shrink:0">
+        <polygon points="0,${h} ${pts.join(' ')} ${w},${h}" fill="${color}" opacity="0.12"/>
+        <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round"/>
+        <circle cx="${last[0]}" cy="${last[1]}" r="2.4" fill="${color}"/></svg>`;
+}
+
+const metricCard = ({ label, value, unit = '', sub = '', sparkHtml = '' }) => `
+    <div class="card metric">
+        <div class="label">${label}</div>
+        <div class="row"><div>
+            <span class="value num">${value}</span>${unit ? `<span class="unit num">${unit}</span>` : ''}
+            <div class="sub num">${sub}</div>
+        </div>${sparkHtml}</div>
+    </div>`;
+
 async function pageDashboard() {
     setActive('dashboard');
-    main().innerHTML = `<div class="page-head"><h1>${t('nav.dashboard')}</h1></div><div class="empty">${t('common.loading')}</div>`;
+    main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
 
     const isAdmin = state.me.role === 'admin';
-    const [vhosts, certs, metrics, services] = await Promise.all([
+    const [vhosts, certs, metrics, services, tasks, cpuHist, memHist] = await Promise.all([
         api('/vhosts').catch(() => []),
         api('/ssl').catch(() => []),
         isAdmin ? api('/monitoring/now').catch(() => null) : null,
         isAdmin ? api('/monitoring/services').catch(() => null) : null,
+        api('/tasks').catch(() => []),
+        isAdmin ? api('/monitoring/history?metric=cpu_load1').catch(() => []) : [],
+        isAdmin ? api('/monitoring/history?metric=mem_used_bytes').catch(() => []) : [],
     ]);
 
     const expiring = certs.filter((c) => new Date(String(c.expires_at).replace(' ', 'T')) - Date.now() < 30 * 864e5);
+    const upCount = vhosts.filter((v) => v.status === 'active').length;
+
+    const cards = [];
+    if (metrics) {
+        cards.push(metricCard({
+            label: 'CPU', value: metrics.load[0].toFixed(2), unit: `/ ${metrics.cpu_count}`,
+            sub: `load ${metrics.load.map((l) => l.toFixed(2)).join(' · ')}`,
+            sparkHtml: spark(cpuHist.slice(-40).map((p) => Number(p.value))),
+        }));
+        cards.push(metricCard({
+            label: 'RAM', value: fmtBytes(metrics.mem_total_bytes - metrics.mem_available_bytes),
+            unit: `/ ${fmtBytes(metrics.mem_total_bytes)}`,
+            sub: `${Math.round((1 - metrics.mem_available_bytes / metrics.mem_total_bytes) * 100)}% iskorišteno`,
+            sparkHtml: spark(memHist.slice(-40).map((p) => Number(p.value)), { color: 'var(--info)' }),
+        }));
+        cards.push(metricCard({
+            label: 'Disk', value: fmtBytes(metrics.disk_total_bytes - metrics.disk_free_bytes),
+            unit: `/ ${fmtBytes(metrics.disk_total_bytes)}`,
+            sub: `${fmtBytes(metrics.disk_free_bytes)} slobodno`,
+        }));
+        cards.push(metricCard({
+            label: 'Uptime', value: `${Math.floor(metrics.uptime_s / 86400)}d ${Math.floor((metrics.uptime_s % 86400) / 3600)}h`,
+        }));
+    }
+    cards.push(metricCard({
+        label: t('nav.websites'), value: vhosts.length,
+        sub: `${upCount} ${t('vhost.status.active')}`,
+    }));
+    if (!metrics) cards.push(metricCard({ label: 'SSL < 30 dana', value: expiring.length }));
+
+    const recentTasks = tasks.slice(0, 6);
 
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.dashboard')}</h1></div>
-    <div class="grid cols-4">
-        <div class="card stat"><div class="label">${t('nav.websites')}</div><div class="value">${vhosts.length}</div></div>
-        <div class="card stat"><div class="label">SSL &lt; 30 dana</div><div class="value">${expiring.length}</div></div>
-        ${metrics ? `
-        <div class="card stat"><div class="label">Load (1m) / CPU</div>
-            <div class="value">${metrics.load[0].toFixed(2)}<span class="sub"> / ${metrics.cpu_count}</span></div></div>
-        <div class="card stat"><div class="label">RAM slobodno</div>
-            <div class="value">${fmtBytes(metrics.mem_available_bytes)}</div>
-            <div class="sub">od ${fmtBytes(metrics.mem_total_bytes)} · disk ${fmtBytes(metrics.disk_free_bytes)} slobodno</div></div>` : ''}
-    </div>
-    ${services ? `
-    <div class="card mt"><h2>Servisi</h2><table class="data"><tbody>
-        ${Object.entries(services).map(([name, props]) => `
-            <tr><td class="mono">${esc(name)}</td>
-            <td><span class="badge ${props.ActiveState === 'active' ? 'ok' : 'err'}">${esc(props.ActiveState ?? '?')}</span></td>
-            <td class="mono hide-sm">${props.MemoryCurrent && props.MemoryCurrent !== '[not set]' ? fmtBytes(props.MemoryCurrent) : ''}</td></tr>`).join('')}
-    </tbody></table></div>` : ''}
-    <div class="card mt"><h2>${t('nav.websites')}</h2>${vhostTable(vhosts.slice(0, 8))}</div>`;
+    <div class="grid cols-5" style="margin-bottom:var(--gap)">${cards.slice(0, 5).join('')}</div>
+
+    ${expiring.length ? `
+    <div class="ai-box" style="margin-bottom:var(--gap)">
+        <span class="mark">${icon('lock')}</span>
+        <div style="min-width:0">
+            <div style="font-weight:650;margin-bottom:3px">SSL · ${expiring.length} ${t('dash.ssl_expiring')}</div>
+            <div style="font-size:var(--fs-sm);color:var(--ink-2)" class="mono">${expiring.slice(0, 4).map((c) => esc(c.hostname)).join(' · ')}${expiring.length > 4 ? ' …' : ''}</div>
+            <div style="margin-top:9px"><a class="btn small primary" href="#/ssl">${icon('refresh')}${t('ssl.renew_le')}</a></div>
+        </div>
+    </div>` : ''}
+
+    <div class="grid split">
+        <div style="display:flex;flex-direction:column;gap:var(--gap);min-width:0">
+            ${services ? `
+            <div class="card flush">
+                <div class="card-head"><h2>${t('dash.services')}</h2><span class="spacer"></span>
+                    <span class="badge ${Object.values(services).every((p) => p.ActiveState === 'active') ? 'ok' : 'warn'}">
+                        ${Object.values(services).filter((p) => p.ActiveState === 'active').length}/${Object.keys(services).length} ${t('dash.healthy')}</span></div>
+                <table class="data"><tbody>
+                ${Object.entries(services).map(([name, props]) => `
+                    <tr><td><span style="display:flex;align-items:center;gap:8px;font-weight:550">
+                        ${dot(props.ActiveState === 'active' ? 'ok' : 'err')}${esc(name)}</span></td>
+                    <td><span class="badge ${props.ActiveState === 'active' ? 'ok' : 'err'}">${esc(props.ActiveState ?? '?')}</span></td>
+                    <td class="mono num hide-sm">${props.MemoryCurrent && props.MemoryCurrent !== '[not set]' ? fmtBytes(props.MemoryCurrent) : ''}</td></tr>`).join('')}
+                </tbody></table>
+            </div>` : ''}
+            <div class="card flush">
+                <div class="card-head"><h2>${t('nav.websites')}</h2><span class="spacer"></span>
+                    <a class="btn small" href="#/websites">${t('dash.all')} ${icon('chevR')}</a></div>
+                ${vhostTable(vhosts.slice(0, 8))}
+            </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:var(--gap);min-width:0">
+            <div class="card flush">
+                <div class="card-head"><h2>${t('dash.recent_tasks')}</h2><span class="spacer"></span>
+                    <a class="btn small" href="#/tasks">${t('dash.all')} ${icon('chevR')}</a></div>
+                ${recentTasks.length ? recentTasks.map((task) => `
+                <div style="display:flex;align-items:center;gap:9px;padding:8px 14px;border-bottom:1px solid var(--line-2)">
+                    <span style="color:${task.status === 'done' ? 'var(--ok)' : task.status === 'failed' ? 'var(--danger)' : 'var(--info)'}">
+                        ${icon(task.status === 'done' ? 'check' : task.status === 'failed' ? 'x' : 'clock')}</span>
+                    <span class="mono" style="font-size:var(--fs-sm);font-weight:550;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(task.op)}</span>
+                    <span style="margin-left:auto;font-size:var(--fs-xs);color:var(--ink-3);white-space:nowrap">${fmtDate(task.created_at)}</span>
+                </div>`).join('') : `<div class="empty">${t('nav.tasks')}: 0</div>`}
+            </div>
+            <div class="card flush">
+                <div class="card-head"><h2>SSL</h2></div>
+                ${certs.slice(0, 6).map((c) => {
+                    const days = Math.floor((new Date(String(c.expires_at).replace(' ', 'T')) - Date.now()) / 864e5);
+                    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line-2)">
+                        ${icon('lock')}
+                        <span class="mono" style="font-size:var(--fs-sm);min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(c.hostname)}</span>
+                        <span style="margin-left:auto"><span class="badge ${days < 14 ? 'err' : days < 30 ? 'warn' : 'ok'}">${days} d</span></span>
+                    </div>`;
+                }).join('') || `<div class="empty">${t('nav.ssl')}: 0</div>`}
+            </div>
+        </div>
+    </div>`;
 
     bindVhostRows();
 }
@@ -494,7 +778,7 @@ const bindVhostRows = () => main().querySelectorAll('[data-vhost]').forEach((tr)
 async function pageWebsites() {
     setActive('websites');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.websites')}</h1>
+    <div class="page-head">
         <button class="btn" id="bulkbtn">${t('bulk.title')}</button>
         <div class="spacer"></div>
         <button class="btn primary" id="new">${icon('plus')}${t('vhost.create')}</button></div>
@@ -587,6 +871,7 @@ async function pageWebsiteDetail(id) {
     setActive('websites');
     main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
     const vhost = await api(`/vhosts/${id}`);
+    setActive('websites', [t('nav.websites'), vhost.domain]);
 
     const uptime = vhost.uptime;
     const uptimeBadge = uptime
@@ -922,26 +1207,27 @@ async function fileManager(vhost, container, relPath) {
 
     const parts = relPath.split('/').filter(Boolean);
     container.innerHTML = `
-    <div class="page-head">
-        <div class="crumbs">
-            <a href="#" data-go="/">${esc(vhost.domain)}</a>
-            ${parts.map((p, i) => `<span class="sep">/</span><a href="#" data-go="/${parts.slice(0, i + 1).join('/')}">${esc(p)}</a>`).join('')}
+    <div class="fm">
+        <div class="fm-bar">
+            <div class="crumbs">
+                <a href="#" data-go="/">${esc(vhost.domain)}</a>
+                ${parts.map((p, i) => `<span class="sep">/</span><a href="#" data-go="/${parts.slice(0, i + 1).join('/')}">${esc(p)}</a>`).join('')}
+            </div>
+            <button class="icon-btn" data-upload title="${t('files.upload')}">${icon('upload')}</button>
+            <button class="icon-btn" data-mkdir title="${t('files.mkdir')}">${icon('folder')}</button>
+            <input type="file" hidden>
         </div>
-        <div class="spacer"></div>
-        <button class="btn icon" data-upload title="${t('files.upload')}">${icon('upload')}</button>
-        <button class="btn icon" data-mkdir title="${t('files.mkdir')}">${icon('folder')}</button>
-        <input type="file" hidden>
-    </div>
-    <table class="data"><tbody>
-        ${entries.map((en, i) => `
-        <tr class="row-link" data-i="${i}">
-            <td class="cell-icon">${icon(en.type === 'dir' ? 'folder' : 'file')}</td>
-            <td class="mono">${esc(en.name)}</td>
-            <td class="mono num hide-sm">${en.type === 'file' ? fmtBytes(en.size_bytes) : ''}</td>
-            <td class="mono hide-sm">${esc(en.mode)}</td>
-            <td class="hide-sm">${fmtDate(en.mtime)}</td>
-        </tr>`).join('') || `<tr><td><div class="empty">prazno</div></td></tr>`}
-    </tbody></table>`;
+        <table><tbody>
+            ${entries.map((en, i) => `
+            <tr data-i="${i}">
+                <td class="cell-icon">${icon(en.type === 'dir' ? 'folder' : 'file', 15)}</td>
+                <td class="mono">${esc(en.name)}</td>
+                <td class="meta num hide-sm">${en.type === 'file' ? fmtBytes(en.size_bytes) : ''}</td>
+                <td class="meta hide-sm">${esc(en.mode)}</td>
+                <td class="meta hide-sm">${fmtDate(en.mtime)}</td>
+            </tr>`).join('') || `<tr><td><div class="empty">prazno</div></td></tr>`}
+        </tbody></table>
+    </div>`;
 
     container.querySelectorAll('[data-go]').forEach((a) => a.addEventListener('click', (e) => {
         e.preventDefault();
@@ -992,7 +1278,7 @@ async function openFileEditor(vhost, container, relPath, entry) {
 
     const modal = openModal(`
         <div class="dialog-head"><h1 class="mono">${esc(entry.name)}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
-        <div class="field"><textarea class="mono" spellcheck="false">${esc(content)}</textarea></div>
+        <textarea class="code-edit" spellcheck="false">${esc(content)}</textarea>
         <div class="dialog-foot">
             <button class="btn danger" id="fdel">${t('common.delete')}</button>
             <button class="btn" id="fdl">${icon('download')}${t('files.download')}</button>
@@ -1035,11 +1321,36 @@ async function openFileEditor(vhost, container, relPath, entry) {
     });
 }
 
+// ---------------------------------------------------------------- datoteke (samostalna stranica)
+async function pageFiles() {
+    setActive('files');
+    main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+    const vhosts = await api('/vhosts');
+    if (!vhosts.length) {
+        main().innerHTML = `<div class="card"><div class="empty">${t('files.no_vhosts')}</div></div>`;
+        return;
+    }
+    const saved = Number(sessionStorage.getItem('fp_files_vhost'));
+    const current = vhosts.find((v) => v.id === saved) ?? vhosts[0];
+    main().innerHTML = `
+    <div class="page-head">
+        <select id="fvh" class="input mono">${vhosts.map((v) =>
+            `<option value="${v.id}" ${v.id === current.id ? 'selected' : ''}>${esc(v.domain)}</option>`).join('')}</select>
+        <span class="hint mono">${esc(current.docroot ?? '')}</span>
+    </div>
+    <div id="fmwrap"></div>`;
+    fileManager(current, main().querySelector('#fmwrap'), '/httpdocs');
+    main().querySelector('#fvh').addEventListener('change', (e) => {
+        sessionStorage.setItem('fp_files_vhost', e.target.value);
+        pageFiles();
+    });
+}
+
 // ---------------------------------------------------------------- databases / ssl / tasks / monitoring
 async function pageDatabases() {
     setActive('databases');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.databases')}</h1><div class="spacer"></div>
+    <div class="page-head"><div class="spacer"></div>
         <button class="btn primary" id="new">${icon('plus')}${t('db.create')}</button></div>
     <div class="card">${t('common.loading')}</div>`;
     document.getElementById('new').addEventListener('click', createDbModal);
@@ -1113,7 +1424,7 @@ function createDbUserModal(dbId) {
 
 async function pageSsl() {
     setActive('ssl');
-    main().innerHTML = `<div class="page-head"><h1>${t('nav.ssl')}</h1></div><div class="card">${t('common.loading')}</div>`;
+    main().innerHTML = `${tabsHtml('protect', 'ssl')}<div class="card">${t('common.loading')}</div>`;
     const certs = await api('/ssl');
     main().querySelector('.card').innerHTML = certs.length ? `
         <table class="data"><thead><tr><th>Hostname</th><th class="hide-sm">Tip</th><th>${t('ssl.expires')}</th><th>Status</th><th></th></tr></thead><tbody>
@@ -1169,7 +1480,7 @@ function customCertModal(vhostId, hostname) {
 
 async function pageTasks() {
     setActive('tasks');
-    main().innerHTML = `<div class="page-head"><h1>${t('nav.tasks')}</h1></div><div class="card">${t('common.loading')}</div>`;
+    main().innerHTML = `${tabsHtml('monitoring', 'tasks')}<div class="card">${t('common.loading')}</div>`;
     const tasks = await api('/tasks');
     main().querySelector('.card').innerHTML = tasks.length ? `
         <table class="data"><thead><tr><th>#</th><th>Operacija</th><th>Status</th><th class="hide-sm">Progress</th><th class="hide-sm">Kreirano</th><th class="hide-sm">Završeno</th></tr></thead><tbody>
@@ -1191,25 +1502,28 @@ async function pageTasks() {
     }));
 }
 
-function sparkline(points, { height = 120, formatY = (v) => String(v) } = {}) {
+function sparkline(points, { height = 130, formatY = (v) => String(v), color = 'var(--accent)' } = {}) {
     if (points.length < 2) return `<div class="empty">${t('common.loading')}</div>`;
     const values = points.map((p) => Number(p.value));
     const max = Math.max(...values) * 1.1 || 1;
     const width = 600;
     const coords = values.map((v, i) =>
         `${(i / (values.length - 1)) * width},${height - (v / max) * (height - 8)}`).join(' ');
+    const gridLines = [1, 2, 3, 4].map((i) =>
+        `<line x1="0" x2="${width}" y1="${(i / 5) * height}" y2="${(i / 5) * height}" stroke="var(--line-2)" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join('');
     return `
     <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="chart" role="img">
-        <polyline points="${coords}" fill="none" stroke="var(--accent)" stroke-width="2"
+        ${gridLines}
+        <polygon points="0,${height} ${coords} ${width},${height}" fill="${color}" opacity="0.1"/>
+        <polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.8"
             vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
-        <polygon points="0,${height} ${coords} ${width},${height}" fill="var(--accent)" opacity="0.08"/>
     </svg>
     <div class="chart-meta mono">max ${formatY(max / 1.1)} · ${points.length} točaka · 24 h</div>`;
 }
 
 async function pageMonitoring() {
     setActive('monitoring');
-    main().innerHTML = `<div class="page-head"><h1>${t('nav.monitoring')}</h1></div><div class="empty">${t('common.loading')}</div>`;
+    main().innerHTML = `${tabsHtml('monitoring', 'monitoring')}<div class="empty">${t('common.loading')}</div>`;
     try {
         const [m, cpu, mem] = await Promise.all([
             api('/monitoring/now'),
@@ -1217,26 +1531,23 @@ async function pageMonitoring() {
             api('/monitoring/history?metric=mem_used_bytes').catch(() => []),
         ]);
         main().innerHTML = `
-        <div class="page-head"><h1>${t('nav.monitoring')}</h1></div>
-        <div class="grid cols-4">
-            <div class="card stat"><div class="label">Load 1/5/15</div>
-                <div class="value">${m.load.map((l) => l.toFixed(2)).join(' ')}</div><div class="sub">${m.cpu_count} jezgri</div></div>
-            <div class="card stat"><div class="label">RAM</div>
-                <div class="value">${fmtBytes(m.mem_total_bytes - m.mem_available_bytes)}</div>
-                <div class="sub">od ${fmtBytes(m.mem_total_bytes)}</div></div>
-            <div class="card stat"><div class="label">Disk</div>
-                <div class="value">${fmtBytes(m.disk_total_bytes - m.disk_free_bytes)}</div>
-                <div class="sub">od ${fmtBytes(m.disk_total_bytes)}</div></div>
-            <div class="card stat"><div class="label">Uptime</div>
-                <div class="value">${Math.floor(m.uptime_s / 86400)}d ${Math.floor((m.uptime_s % 86400) / 3600)}h</div></div>
+        ${tabsHtml('monitoring', 'monitoring')}
+        <div class="grid cols-4" style="margin-bottom:var(--gap)">
+            ${metricCard({ label: 'Load 1/5/15', value: m.load.map((l) => l.toFixed(2)).join(' '), sub: `${m.cpu_count} jezgri` })}
+            ${metricCard({ label: 'RAM', value: fmtBytes(m.mem_total_bytes - m.mem_available_bytes), unit: `/ ${fmtBytes(m.mem_total_bytes)}` })}
+            ${metricCard({ label: 'Disk', value: fmtBytes(m.disk_total_bytes - m.disk_free_bytes), unit: `/ ${fmtBytes(m.disk_total_bytes)}` })}
+            ${metricCard({ label: 'Uptime', value: `${Math.floor(m.uptime_s / 86400)}d ${Math.floor((m.uptime_s % 86400) / 3600)}h` })}
         </div>
-        <div class="grid cols-2 mt">
-            <div class="card"><h2>CPU load (1m)</h2>${sparkline(cpu, { formatY: (v) => v.toFixed(2) })}</div>
-            <div class="card"><h2>RAM</h2>${sparkline(mem, { formatY: fmtBytes })}</div>
+        <div class="grid cols-2">
+            <div class="card flush"><div class="card-head"><h2>CPU load (1m)</h2><span class="spacer"></span>
+                <span class="num" style="font-size:var(--fs-sm);color:var(--ink-2)">${m.load[0].toFixed(2)}</span></div>
+                <div class="pad">${sparkline(cpu, { formatY: (v) => v.toFixed(2) })}</div></div>
+            <div class="card flush"><div class="card-head"><h2>RAM</h2><span class="spacer"></span>
+                <span class="num" style="font-size:var(--fs-sm);color:var(--ink-2)">${fmtBytes(m.mem_total_bytes - m.mem_available_bytes)}</span></div>
+                <div class="pad">${sparkline(mem, { formatY: fmtBytes, color: 'var(--info)' })}</div></div>
         </div>`;
     } catch {
-        main().innerHTML = `<div class="page-head"><h1>${t('nav.monitoring')}</h1></div>
-            <div class="empty">Dostupno administratoru.</div>`;
+        main().innerHTML = `${tabsHtml('monitoring', 'monitoring')}<div class="empty">Dostupno administratoru.</div>`;
     }
 }
 
@@ -1244,7 +1555,8 @@ async function pageMonitoring() {
 async function pageDns() {
     setActive('dns');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.dns')}</h1><div class="spacer"></div>
+    ${tabsHtml('protect', 'dns')}
+    <div class="page-head"><div class="spacer"></div>
         <button class="btn primary" id="newzone">${icon('plus')}${t('dns.new_zone')}</button></div>
     <div class="card" id="zones">${t('common.loading')}</div>
     <div id="records"></div>`;
@@ -1340,12 +1652,11 @@ async function dnsRecords(zoneId, domain) {
 // ---------------------------------------------------------------- mail
 async function pageMail() {
     setActive('mail');
-    main().innerHTML = `<div class="page-head"><h1>${t('nav.mail')}</h1></div><div class="empty">${t('common.loading')}</div>`;
+    main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
 
     const status = await api('/mail/status');
     if (!status.installed) {
         main().innerHTML = `
-        <div class="page-head"><h1>${t('nav.mail')}</h1></div>
         <div class="card"><div class="empty">
             <p>${t('mail.not_installed')}</p>
             ${state.me.role === 'admin' ? `<button class="btn primary" id="setup">${t('mail.install')}</button>` : ''}
@@ -1362,7 +1673,7 @@ async function pageMail() {
 
     const wm = status.webmail;
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.mail')}</h1><div class="spacer"></div>
+    <div class="page-head"><div class="spacer"></div>
         ${wm?.hostname
             ? `<a class="btn" href="https://${esc(wm.hostname)}" target="_blank" rel="noopener">${icon('mail')}${t('mail.webmail')}</a>`
             : state.me.role === 'admin' ? `<button class="btn" id="wmsetup">${icon('mail')}${t('mail.webmail_install')}</button>` : ''}
@@ -1499,7 +1810,7 @@ async function mailDomainDetail(domainId, domainName, domain) {
 // ---------------------------------------------------------------- backups
 async function pageBackups() {
     setActive('backups');
-    main().innerHTML = `<div class="page-head"><h1>${t('nav.backups')}</h1></div><div class="card">${t('common.loading')}</div>`;
+    main().innerHTML = `<div class="card">${t('common.loading')}</div>`;
     const backups = await api('/backups');
     main().querySelector('.card').innerHTML = backups.length ? `
         <table class="data"><thead><tr>
@@ -1553,7 +1864,7 @@ async function pageBackups() {
 async function pageDocker() {
     setActive('docker');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.docker')}</h1><div class="spacer"></div>
+    <div class="page-head"><div class="spacer"></div>
         <button class="btn primary" id="newc">${icon('plus')}${t('docker.new')}</button></div>
     <div class="card" id="list">${t('common.loading')}</div>`;
 
@@ -1630,7 +1941,7 @@ async function pageDocker() {
 async function pageUsers() {
     setActive('users');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.users')}</h1><div class="spacer"></div>
+    <div class="page-head"><div class="spacer"></div>
         <button class="btn" id="brand">${t('users.branding')}</button>
         <button class="btn primary" id="newu">${icon('plus')}${t('users.new')}</button></div>
     <div class="card" id="list">${t('common.loading')}</div>
@@ -1754,66 +2065,16 @@ function brandingModal() {
     });
 }
 
-// ---------------------------------------------------------------- AI asistent (admin)
-async function pageAssistant() {
-    setActive('assistant');
-    main().innerHTML = `<div class="page-head"><h1>${t('nav.assistant')}</h1></div><div class="card">${t('common.loading')}</div>`;
-    const status = await api('/assistant/status');
-
-    if (!status.configured) {
-        main().querySelector('.card').innerHTML = `
-            <div class="empty">${t('assistant.intro')}</div>
-            <form id="kf" style="max-width:520px;margin:0 auto">
-                <div class="field"><label>${t('assistant.api_key')}</label>
-                    <input name="api_key" type="password" required class="mono" placeholder="sk-ant-..."></div>
-                <div class="field"><label>${t('assistant.model')}</label>
-                    <select name="model" class="mono">
-                        <option value="claude-opus-4-8">Claude Opus 4.8 (preporučeno)</option>
-                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (brže/jeftinije)</option>
-                        <option value="claude-haiku-4-5">Claude Haiku 4.5 (najjeftinije)</option>
-                        <option value="claude-fable-5">Claude Fable 5 (najmoćnije)</option>
-                    </select></div>
-                <button class="btn primary">${t('assistant.connect')}</button>
-            </form>`;
-        document.getElementById('kf').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            try { await api('/assistant/key', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); toast(t('assistant.connected')); pageAssistant(); }
-            catch (err) { toast(err.message, 'err'); }
-        });
-        return;
-    }
-
-    main().querySelector('.card').innerHTML = `
-        <div class="page-head"><h2>${esc(status.model)}</h2><div class="spacer"></div>
-            <button class="btn danger" id="disc">${t('assistant.disconnect')}</button></div>
-        <div class="field"><label>${t('assistant.ask')}</label>
-            <textarea id="q" style="min-height:90px" placeholder="${t('assistant.placeholder')}"></textarea></div>
-        <div class="field"><label>${t('assistant.context')}</label>
-            <textarea id="ctx" class="mono" style="min-height:80px" placeholder="${t('assistant.context_hint')}"></textarea></div>
-        <button class="btn primary" id="askbtn">${icon('spark')}${t('assistant.send')}</button>
-        <div id="ans" class="mt"></div>
-        <div class="hint mt">${t('assistant.disclaimer')}</div>`;
-
-    document.getElementById('disc').addEventListener('click', async () => {
-        if (!confirm(t('assistant.confirm_disconnect'))) return;
-        try { await api('/assistant/key', { method: 'DELETE' }); pageAssistant(); } catch (err) { toast(err.message, 'err'); }
-    });
-    document.getElementById('askbtn').addEventListener('click', async () => {
-        const question = document.getElementById('q').value.trim();
-        if (!question) return;
-        const ans = document.getElementById('ans');
-        ans.innerHTML = `<div class="empty">${t('assistant.thinking')}</div>`;
-        try {
-            const r = await api('/assistant/ask', { method: 'POST', body: { question, context: document.getElementById('ctx').value } });
-            ans.innerHTML = `<div class="card"><div class="task-output" style="white-space:pre-wrap">${esc(r.answer)}</div></div>`;
-        } catch (err) { ans.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
-    });
+// ---------------------------------------------------------------- AI asistent → Forge AI drawer (⌘J)
+function pageAssistant() {
+    location.hash = '#/dashboard';
+    toggleAiDrawer(true);
 }
 
 // ---------------------------------------------------------------- config time-machine (admin)
 async function pageConfig() {
     setActive('config');
-    main().innerHTML = `<div class="page-head"><h1>${t('nav.config')}</h1></div>
+    main().innerHTML = `${tabsHtml('server', 'config')}
         <div class="card">${t('config.intro')}</div>
         <div class="card mt" id="hist">${t('common.loading')}</div>`;
     const { history } = await api('/config-history');
@@ -1845,7 +2106,7 @@ async function pageConfig() {
 async function pageSecurity() {
     setActive('security');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.security')}</h1></div>
+    ${tabsHtml('protect', 'security')}
     <div class="card"><h2>${t('security.scan_vhost')}</h2><div id="scanbox">${t('common.loading')}</div></div>
     <div class="card mt"><h2>${t('security.quarantine')}</h2><div id="quar">${t('common.loading')}</div></div>
     <div class="card mt"><h2>${t('deliv.title')}</h2><div id="deliv"></div></div>
@@ -1941,7 +2202,7 @@ async function deliverabilityPanel(container) {
 async function pageFirewall() {
     setActive('firewall');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.firewall')}</h1></div>
+    ${tabsHtml('protect', 'firewall')}
     <div class="card"><h2>ufw</h2><div id="ufw">${t('common.loading')}</div></div>
     <div class="card mt"><h2>fail2ban</h2><div id="f2b">${t('common.loading')}</div></div>`;
 
@@ -1987,7 +2248,8 @@ async function pageFirewall() {
 async function pageUpdates() {
     setActive('updates');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('nav.updates')}</h1><div class="spacer"></div>
+    ${tabsHtml('server', 'updates')}
+    <div class="page-head"><div class="spacer"></div>
         <button class="btn" id="scan">${icon('refresh')}${t('updates.scan')}</button></div>
     <div class="card" id="comps">${t('common.loading')}</div>
     <div class="card mt"><h2>${t('updates.history')}</h2><div id="hist">${t('common.loading')}</div></div>`;
@@ -2049,7 +2311,6 @@ async function pageProfile() {
     setActive('profile');
     state.me = await api('/auth/me');
     main().innerHTML = `
-    <div class="page-head"><h1>${t('profile.title')}</h1></div>
     <div class="card">
         <h2>${t('profile.totp')}</h2>
         <div id="totpbox">${state.me.twofa_enabled
@@ -2060,7 +2321,7 @@ async function pageProfile() {
         <h2>${t('profile.webauthn')}</h2>
         <p>${t('profile.webauthn_hint')}</p>
         <div id="keys">${t('common.loading')}</div>
-        <form id="addkey" class="row" style="margin-top:12px;gap:8px">
+        <form id="addkey" style="display:flex;margin-top:12px;gap:8px">
             <input name="label" placeholder="${t('profile.key_label')}" maxlength="64" required style="flex:1">
             <button class="btn primary">${icon('key')}${t('profile.add_key')}</button>
         </form>
@@ -2074,7 +2335,7 @@ async function pageProfile() {
                 <p>${t('profile.totp_scan')}</p>
                 <div class="mono" style="word-break:break-all;margin:8px 0">${esc(s.secret)}</div>
                 <a class="mono" href="${esc(s.otpauth_uri)}">${t('profile.totp_open_app')}</a>
-                <form id="totpconfirm" class="row" style="margin-top:12px;gap:8px">
+                <form id="totpconfirm" style="display:flex;margin-top:12px;gap:8px">
                     <input name="code" inputmode="numeric" pattern="\\d{6}" maxlength="6" required class="mono" placeholder="000000" style="width:120px">
                     <button class="btn primary">${t('profile.confirm')}</button>
                 </form>`;
@@ -2092,7 +2353,7 @@ async function pageProfile() {
     const renderKeys = async () => {
         const keys = await api('/auth/webauthn/keys');
         document.getElementById('keys').innerHTML = keys.length ? `
-        <table class="table"><thead><tr><th>${t('profile.key_label')}</th><th class="hide-sm">${t('profile.created')}</th><th class="hide-sm">${t('profile.last_used')}</th><th></th></tr></thead>
+        <table class="data"><thead><tr><th>${t('profile.key_label')}</th><th class="hide-sm">${t('profile.created')}</th><th class="hide-sm">${t('profile.last_used')}</th><th></th></tr></thead>
         <tbody>${keys.map((k) => `<tr>
             <td>${icon('key')} ${esc(k.label)}</td>
             <td class="hide-sm">${fmtDate(k.created_at)}</td>
@@ -2144,6 +2405,7 @@ const ROUTES = [
     [/^#\/dashboard$/, pageDashboard],
     [/^#\/websites$/, pageWebsites],
     [/^#\/websites\/(\d+)$/, (m) => pageWebsiteDetail(Number(m[1]))],
+    [/^#\/files$/, pageFiles],
     [/^#\/databases$/, pageDatabases],
     [/^#\/mail$/, pageMail],
     [/^#\/dns$/, pageDns],
