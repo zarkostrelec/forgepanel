@@ -43,6 +43,7 @@ final class OperationRegistry
         'migrator.cpanel_parse' => Operations\MigratorCpanelParse::class,
         'waf.toggle'        => Operations\WafToggle::class,
         'country.block'     => Operations\CountryBlock::class,
+        'node.app'          => Operations\NodeApp::class,
         'deliverability.check' => Operations\DeliverabilityCheck::class,
         'staging.clone'     => Operations\StagingClone::class,
         'apps.wp_install'   => Operations\WpInstall::class,

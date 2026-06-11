@@ -79,6 +79,8 @@ final class App
             new Api\V1\CloudflareController($this),
             new Api\V1\AppsController($this),
             new Api\V1\MigratorController($this),
+            new Api\V1\ProvisioningController($this),
+            new Api\V1\NodeController($this),
             new Api\V1\TasksController($this),
             new Api\V1\MonitoringController($this),
             new Api\V1\SslController($this),

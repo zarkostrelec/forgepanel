@@ -20,7 +20,7 @@ final class TokensController extends Controller
         'mail:read', 'mail:write', 'updates:read', 'updates:write',
         'docker:read', 'docker:write', 'security:read', 'security:write', 'firewall:write',
         'config:read', 'users:read', 'users:write', 'branding:write',
-        'cloudflare:read', 'cloudflare:write',
+        'cloudflare:read', 'cloudflare:write', 'provisioning:write', 'migrator:write',
     ];
 
     public function register(Router $router): void

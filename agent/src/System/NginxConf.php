@@ -117,6 +117,42 @@ final class NginxConf
         NGINX;
     }
 
+    /** nginx → reverse proxy na lokalni port (Docker container ili Node app). */
+    public static function vhostProxyTemplateForPort(string $domain, int $port): string
+    {
+        $v6_80 = self::listenV6(80);
+        $v6_443 = self::listenV6(443, ' ssl');
+        return <<<NGINX
+        # ForgePanel vhost — {$domain} (nginx → 127.0.0.1:{$port})
+        server {
+            listen 80;
+            {$v6_80}
+            server_name {$domain} www.{$domain};
+            location /.well-known/acme-challenge/ { root /var/www/forgepanel-acme; }
+            location / { return 301 https://\$host\$request_uri; }
+        }
+        server {
+            listen 443 ssl;
+            {$v6_443}
+            http2 on;
+            server_name {$domain} www.{$domain};
+            ssl_certificate     /etc/forgepanel/ssl/{$domain}/fullchain.pem;
+            ssl_certificate_key /etc/forgepanel/ssl/{$domain}/privkey.pem;
+            access_log /var/www/vhosts/{$domain}/logs/access.log;
+            location / {
+                proxy_pass http://127.0.0.1:{$port};
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade \$http_upgrade;
+                proxy_set_header Connection "upgrade";
+            }
+        }
+        NGINX;
+    }
+
     public static function vhostTemplate(string $domain, string $docroot, string $php_version, string $sys_user): string
     {
         $v6_80 = self::listenV6(80);
