@@ -208,5 +208,16 @@
     "mail.webmail": "Webmail",
     "mail.webmail_install": "Install webmail",
     "mail.webmail_installing": "Webmail (Roundcube) installation started — watch the task.",
-    "mail.webmail_hostname": "Webmail hostname (DNS A record must point to this server):"
+    "mail.webmail_hostname": "Webmail hostname (DNS A record must point to this server):",
+    "ssl.renew_le": "Renew (LE)",
+    "ssl.renew_started": "AutoSSL renewal started — watch the task.",
+    "ssl.custom": "Custom cert",
+    "ssl.custom_title": "Install custom certificate —",
+    "ssl.cert_pem": "Certificate (PEM)",
+    "ssl.key_pem": "Private key (PEM)",
+    "ssl.key_hint": "Unencrypted key. Verified to match the certificate; the cert must cover the domain.",
+    "ssl.chain_pem": "CA chain (PEM, optional)",
+    "ssl.chain_hint": "Issuer intermediate certificates — usually a separate .ca-bundle file",
+    "ssl.install": "Install",
+    "ssl.installed": "Certificate installed"
 }

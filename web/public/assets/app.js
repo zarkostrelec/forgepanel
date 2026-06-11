@@ -1116,15 +1116,55 @@ async function pageSsl() {
     main().innerHTML = `<div class="page-head"><h1>${t('nav.ssl')}</h1></div><div class="card">${t('common.loading')}</div>`;
     const certs = await api('/ssl');
     main().querySelector('.card').innerHTML = certs.length ? `
-        <table class="data"><thead><tr><th>Hostname</th><th class="hide-sm">Tip</th><th>${t('ssl.expires')}</th><th>Status</th></tr></thead><tbody>
+        <table class="data"><thead><tr><th>Hostname</th><th class="hide-sm">Tip</th><th>${t('ssl.expires')}</th><th>Status</th><th></th></tr></thead><tbody>
         ${certs.map((c) => {
             const days = Math.floor((new Date(String(c.expires_at).replace(' ', 'T')) - Date.now()) / 864e5);
             return `<tr>
                 <td class="mono">${esc(c.hostname)}</td>
-                <td class="mono hide-sm">${esc(c.type)}</td>
+                <td class="mono hide-sm">${esc(c.type)}${Number(c.auto_renew) ? ' · auto' : ''}</td>
                 <td>${fmtDate(c.expires_at)} <span class="badge ${days < 14 ? 'err' : days < 30 ? 'warn' : 'ok'}">${days} d</span></td>
-                <td>${statusBadge(c.status)}</td></tr>`;
+                <td>${statusBadge(c.status)}</td>
+                <td class="num">${c.vhost_id ? `
+                    <button class="btn ghost" data-renew="${c.vhost_id}">${t('ssl.renew_le')}</button>
+                    <button class="btn ghost" data-custom="${c.vhost_id}" data-host="${esc(c.hostname)}">${t('ssl.custom')}</button>` : ''}</td></tr>`;
         }).join('')}</tbody></table>` : `<div class="empty">${t('nav.ssl')}: 0</div>`;
+
+    main().querySelectorAll('[data-renew]').forEach((b) => b.addEventListener('click', async () => {
+        try {
+            const r = await api(`/vhosts/${b.dataset.renew}/ssl/renew`, { method: 'POST' });
+            watchTask(r.task_id, 'ssl.issue');
+            toast(t('ssl.renew_started'));
+        } catch (err) { toast(err.message, 'err'); }
+    }));
+    main().querySelectorAll('[data-custom]').forEach((b) => b.addEventListener('click', () =>
+        customCertModal(b.dataset.custom, b.dataset.host)));
+}
+
+// Ručna instalacija kupljenog certifikata (PEM) — validaciju radi agent prije zapisa
+function customCertModal(vhostId, hostname) {
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('ssl.custom_title')} <span class="mono">${esc(hostname)}</span></h1>
+            <button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="cf">
+            <div class="field"><label>${t('ssl.cert_pem')}</label>
+                <textarea name="cert_pem" required rows="6" class="mono" placeholder="-----BEGIN CERTIFICATE-----"></textarea></div>
+            <div class="field"><label>${t('ssl.key_pem')}</label>
+                <textarea name="key_pem" required rows="6" class="mono" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+                <span class="hint">${t('ssl.key_hint')}</span></div>
+            <div class="field"><label>${t('ssl.chain_pem')}</label>
+                <textarea name="chain_pem" rows="4" class="mono" placeholder="${t('ssl.chain_hint')}"></textarea></div>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('ssl.install')}</button></div>
+        </form>`, { wide: true });
+    modal.querySelector('#cf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            const r = await api(`/vhosts/${vhostId}/ssl/custom`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+            toast(`${t('ssl.installed')} (${r.issuer}, ${fmtDate(r.expires_at)})`);
+            modal.close();
+            pageSsl();
+        } catch (err) { toast(err.message, 'err'); }
+    });
 }
 
 async function pageTasks() {
