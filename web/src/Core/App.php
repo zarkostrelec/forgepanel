@@ -76,6 +76,8 @@ final class App
             new Api\V1\DelegationController($this),
             new Api\V1\DeliverabilityController($this),
             new Api\V1\StagingController($this),
+            new Api\V1\CloudflareController($this),
+            new Api\V1\AppsController($this),
             new Api\V1\TasksController($this),
             new Api\V1\MonitoringController($this),
             new Api\V1\SslController($this),

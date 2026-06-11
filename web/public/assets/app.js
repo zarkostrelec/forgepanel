@@ -605,7 +605,8 @@ async function pageWebsiteDetail(id) {
         <div class="page-head"><h2>${t('staging.title')}</h2><div class="spacer"></div>
             <button class="btn" id="newstg">${icon('plus')}${t('staging.create')}</button></div>
         <div id="staging"></div>
-    </div>`;
+    </div>
+    <div class="card mt"><div class="page-head"><h2>${t('apps.title')}</h2></div><div id="apps"></div></div>`;
 
     main().querySelector('#php').addEventListener('change', async (e) => {
         try {
@@ -646,12 +647,37 @@ async function pageWebsiteDetail(id) {
     ftpSection(vhost, main().querySelector('#ftp'));
     gitSection(vhost, main().querySelector('#git'));
     stagingSection(vhost, main().querySelector('#staging'));
+    appsSection(vhost, main().querySelector('#apps'));
     main().querySelector('#newstg').addEventListener('click', async () => {
         const sub = prompt(t('staging.prompt'), 'staging');
         if (!sub) return;
         try {
             const r = await api(`/vhosts/${id}/staging`, { method: 'POST', body: { subdomain: sub } });
             watchTask(r.task_id, `staging ${r.staging_domain}`);
+        } catch (err) { toast(err.message, 'err'); }
+    });
+}
+
+function appsSection(vhost, container) {
+    container.innerHTML = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn primary" id="wpinstall">${icon('box')}${t('apps.install_wp')}</button>
+            <button class="btn" id="wpcheck">${icon('shield')}${t('apps.wp_integrity')}</button>
+        </div>
+        <div id="appsresult" class="mt"></div>`;
+    container.querySelector('#wpinstall').addEventListener('click', async () => {
+        const db = prompt(t('apps.wp_db_prompt'), 'wp_' + vhost.domain.replace(/[^a-z0-9]/g, '_').slice(0, 40));
+        if (!db) return;
+        try {
+            const r = await api(`/vhosts/${vhost.id}/apps/wordpress`, { method: 'POST', body: { db_name: db } });
+            watchTask(r.task_id, `WordPress ${vhost.domain}`);
+            container.querySelector('#appsresult').innerHTML = `<div class="alert ok">${t('apps.wp_db_created')}: <span class="mono">${esc(db)}</span> / <span class="mono">${esc(r.db_password)}</span></div>`;
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    container.querySelector('#wpcheck').addEventListener('click', async () => {
+        try {
+            const r = await api(`/vhosts/${vhost.id}/apps/wordpress/checksums`, { method: 'POST' });
+            watchTask(r.task_id, `WP integritet ${vhost.domain}`);
         } catch (err) { toast(err.message, 'err'); }
     });
 }

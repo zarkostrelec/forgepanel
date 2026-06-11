@@ -154,5 +154,11 @@
     "deliv.rbl_check": "RBL blacklist check",
     "deliv.rbl_server": "Check server IP",
     "deliv.listed": "Listed on",
-    "deliv.clean": "Clean"
+    "deliv.clean": "Clean",
+    "apps.title": "Applications",
+    "apps.install_wp": "Install WordPress",
+    "apps.wp_integrity": "Check integrity",
+    "apps.wp_db_prompt": "Database name for WordPress:",
+    "apps.wp_db_created": "Database and password (save it)",
+    "nav.cloudflare": "Cloudflare"
 }

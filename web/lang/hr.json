@@ -154,5 +154,11 @@
     "deliv.rbl_check": "RBL blacklist provjera",
     "deliv.rbl_server": "Provjeri IP servera",
     "deliv.listed": "Na listama",
-    "deliv.clean": "Čisto"
+    "deliv.clean": "Čisto",
+    "apps.title": "Aplikacije",
+    "apps.install_wp": "Instaliraj WordPress",
+    "apps.wp_integrity": "Provjeri integritet",
+    "apps.wp_db_prompt": "Naziv baze za WordPress:",
+    "apps.wp_db_created": "Baza i lozinka (zapiši)",
+    "nav.cloudflare": "Cloudflare"
 }

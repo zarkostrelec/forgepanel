@@ -42,6 +42,8 @@ final class OperationRegistry
         'config.history'    => Operations\ConfigHistory::class,
         'deliverability.check' => Operations\DeliverabilityCheck::class,
         'staging.clone'     => Operations\StagingClone::class,
+        'apps.wp_install'   => Operations\WpInstall::class,
+        'apps.wp_checksums' => Operations\WpChecksums::class,
         'db.create'         => Operations\DbCreate::class,
         'db.delete'         => Operations\DbDelete::class,
         'db.user_create'    => Operations\DbUserCreate::class,

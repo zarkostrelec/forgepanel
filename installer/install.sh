@@ -316,12 +316,14 @@ panel_fqdn = "${PANEL_FQDN}"
 EOF
     chmod 600 "$FP_ETC/agent.ini"
 
+    local app_secret; app_secret=$(openssl rand -hex 32)
     cat > "$FP_ETC/web.ini" <<EOF
 db_dsn = "mysql:host=localhost;dbname=forgepanel;charset=utf8mb4"
 db_user = "forgepanel"
 db_pass = "${db_pass}"
 acme_email = "${ADMIN_EMAIL}"
 panel_fqdn = "${PANEL_FQDN}"
+app_secret = "${app_secret}"
 EOF
     chown root:fpanel "$FP_ETC/web.ini"
     chmod 640 "$FP_ETC/web.ini"
