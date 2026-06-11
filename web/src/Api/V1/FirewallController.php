@@ -20,6 +20,45 @@ final class FirewallController extends Controller
         $router->add('GET', '/api/v1/firewall/jails', $this->jails(...));
         $router->add('POST', '/api/v1/firewall/ban', $this->ban(...));
         $router->add('POST', '/api/v1/firewall/unban', $this->unban(...));
+        $router->add('POST', '/api/v1/firewall/country-block', $this->countryBlock(...));
+        $router->add('POST', '/api/v1/vhosts/{id}/waf', $this->waf(...));
+    }
+
+    /** Country blocking (ipset GeoIP) — admin. */
+    private function countryBlock(Request $request): never
+    {
+        $ctx = $this->admin($request);
+        $countries = $request->body['countries'] ?? [];
+        if (!is_array($countries) || count($countries) > 50) {
+            throw new HttpException(422, 'invalid_countries');
+        }
+        foreach ($countries as $cc) {
+            if (!is_string($cc) || !preg_match('/^[a-z]{2}$/i', $cc)) {
+                throw new HttpException(422, 'invalid_country_code');
+            }
+        }
+        $task_id = $this->app->tasks->enqueue('country.block', ['countries' => array_values($countries)], $ctx->user_id);
+        $this->app->db->run(
+            "INSERT INTO settings (`key`, value) VALUES ('blocked_countries', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
+            [json_encode(array_values($countries))]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'firewall.country_block', ['countries' => $countries], $request->ip);
+        Response::ok(['task_id' => $task_id], 202);
+    }
+
+    /** WAF per-vhost (admin ili vlasnik vhosta). */
+    private function waf(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'firewall:write');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $task_id = $this->app->tasks->enqueue('waf.toggle', [
+            'vhost_id' => (int) $vhost['id'],
+            'domain' => $vhost['domain'],
+            'enabled' => (bool) ($request->body['enabled'] ?? false),
+            'paranoia' => $request->int('paranoia', 1),
+        ], $ctx->user_id);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'firewall.waf', ['domain' => $vhost['domain'], 'enabled' => $request->body['enabled'] ?? false], $request->ip);
+        Response::ok(['task_id' => $task_id], 202);
     }
 
     private function rules(Request $request): never
