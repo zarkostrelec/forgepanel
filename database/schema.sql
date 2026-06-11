@@ -278,6 +278,7 @@ CREATE TABLE components (
     repo_suite        VARCHAR(32) NULL,                     -- resolute / noble (fallback)
     policy_id         INT UNSIGNED NULL,
     status            ENUM('installed','not_installed','updating','frozen','error') NOT NULL DEFAULT 'not_installed',
+    security_update   TINYINT(1) NOT NULL DEFAULT 0,        -- dostupni update dolazi iz security pocketa
     packages          JSON NOT NULL                         -- apt paketi komponente
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

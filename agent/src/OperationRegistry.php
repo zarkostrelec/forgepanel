@@ -31,6 +31,8 @@ final class OperationRegistry
         'backup.delete'     => Operations\BackupDelete::class,
         'git.keygen'        => Operations\GitKeygen::class,
         'git.deploy'        => Operations\GitDeploy::class,
+        'updates.scan'      => Operations\UpdatesScan::class,
+        'updates.apply'     => Operations\UpdatesApply::class,
         'db.create'         => Operations\DbCreate::class,
         'db.delete'         => Operations\DbDelete::class,
         'db.user_create'    => Operations\DbUserCreate::class,

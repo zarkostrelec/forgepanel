@@ -83,5 +83,18 @@
     "git.connect": "Poveži repo",
     "git.connected": "Repo povezan",
     "git.deploy_now": "Deploy sada",
-    "git.last_deploy": "Zadnji deploy"
+    "git.last_deploy": "Zadnji deploy",
+    "nav.updates": "Updatei",
+    "updates.scan": "Skeniraj",
+    "updates.component": "Komponenta",
+    "updates.current": "Instalirano",
+    "updates.available": "Dostupno",
+    "updates.policy": "Politika",
+    "updates.apply": "Update",
+    "updates.history": "Povijest updatea",
+    "updates.run_scan": "Pokreni scan za popis komponenti.",
+    "updates.mode_manual": "ručno",
+    "updates.mode_auto_all": "auto (sve)",
+    "updates.mode_auto_security_only": "auto (samo security)",
+    "updates.mode_frozen": "zamrznuto"
 }

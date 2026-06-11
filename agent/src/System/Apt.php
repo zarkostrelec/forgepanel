@@ -35,15 +35,15 @@ final class Apt
         );
     }
 
-    /** @return array<string, array{current: string, available: string}> */
+    /** @return array<string, array{current: string, available: string, suite: string}> */
     public static function listUpgradable(): array
     {
         $out = Proc::mustRun(['apt', 'list', '--upgradable'], timeout_s: 120)->stdout;
         $result = [];
         foreach (explode("\n", $out) as $line) {
-            // npr: nginx/resolute 1.27.4-1 amd64 [upgradable from: 1.27.3-1]
-            if (preg_match('#^([^/]+)/\S+\s+(\S+)\s+\S+\s+\[upgradable from:\s+(\S+)\]#', $line, $m)) {
-                $result[$m[1]] = ['current' => $m[3], 'available' => $m[2]];
+            // npr: nginx/resolute-security 1.27.4-1 amd64 [upgradable from: 1.27.3-1]
+            if (preg_match('#^([^/]+)/(\S+)\s+(\S+)\s+\S+\s+\[upgradable from:\s+(\S+)\]#', $line, $m)) {
+                $result[$m[1]] = ['current' => $m[4], 'available' => $m[3], 'suite' => $m[2]];
             }
         }
         return $result;

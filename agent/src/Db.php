@@ -49,4 +49,9 @@ final class Db
     {
         return $this->run($sql, $params)->fetchAll();
     }
+
+    public function lastId(): int
+    {
+        return (int) $this->pdo()->lastInsertId();
+    }
 }

@@ -511,6 +511,14 @@ EOF
     sysctl --system >/dev/null 2>&1 || true
 
     # SSH: PasswordAuthentication NE diramo — korisnik se ne smije zaključati.
+
+    # OS sloj: unattended-upgrades samo za security (panel orkestrira ostalo)
+    apt-get install -y -q unattended-upgrades
+    cat > /etc/apt/apt.conf.d/52forgepanel-unattended.conf <<'EOF'
+Unattended-Upgrade::Allowed-Origins { "${distro_id}:${distro_codename}-security"; };
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
 }
 
 register_components() {

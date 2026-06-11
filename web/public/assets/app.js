@@ -311,6 +311,7 @@ const NAV = [
     ['backups', 'archive', 'nav.backups'],
     ['tasks', 'tasks', 'nav.tasks'],
     ['monitoring', 'chart', 'nav.monitoring'],
+    ['updates', 'refresh', 'nav.updates', 'admin'],
 ];
 
 function renderShell() {
@@ -319,7 +320,7 @@ function renderShell() {
         <aside class="sidebar">
             <div class="brand"><div class="brand-mark">F</div><div class="brand-name">ForgePanel</div></div>
             <nav class="nav">
-                ${NAV.map(([page, ic, key]) =>
+                ${NAV.filter(([, , , role]) => !role || role === state.me.role).map(([page, ic, key]) =>
                     `<a href="#/${page}" data-page="${page}">${icon(ic)}<span class="nav-label">${t(key)}</span></a>`).join('')}
             </nav>
             <div class="sidebar-foot mono">${esc(state.me.email)}<br>${esc(state.me.role)}</div>
@@ -1282,6 +1283,67 @@ async function pageBackups() {
     }));
 }
 
+// ---------------------------------------------------------------- updates (admin)
+async function pageUpdates() {
+    setActive('updates');
+    main().innerHTML = `
+    <div class="page-head"><h1>${t('nav.updates')}</h1><div class="spacer"></div>
+        <button class="btn" id="scan">${icon('refresh')}${t('updates.scan')}</button></div>
+    <div class="card" id="comps">${t('common.loading')}</div>
+    <div class="card mt"><h2>${t('updates.history')}</h2><div id="hist">${t('common.loading')}</div></div>`;
+
+    document.getElementById('scan').addEventListener('click', async () => {
+        try {
+            const r = await api('/updates/scan', { method: 'POST' });
+            watchTask(r.task_id, 'updates.scan');
+        } catch (err) { toast(err.message, 'err'); }
+    });
+
+    const [comps, hist] = await Promise.all([api('/updates'), api('/updates/history')]);
+
+    document.getElementById('comps').innerHTML = comps.length ? `
+        <table class="data"><thead><tr>
+            <th>${t('updates.component')}</th><th>${t('updates.current')}</th><th>${t('updates.available')}</th>
+            <th class="hide-sm">Suite</th><th>${t('updates.policy')}</th><th></th>
+        </tr></thead><tbody>
+        ${comps.map((c) => `<tr>
+            <td class="mono">${esc(c.name)}${c.status === 'frozen' ? ' <span class="badge err">frozen</span>' : ''}</td>
+            <td class="mono">${esc(c.current_version ?? '—')}</td>
+            <td class="mono">${c.available_version
+                ? `<span class="badge ${c.security_update ? 'err' : 'warn'}">${esc(c.available_version)}${c.security_update ? ' · security' : ''}</span>`
+                : '<span class="badge ok">aktualno</span>'}</td>
+            <td class="mono hide-sm">${esc(c.repo_suite ?? '')}</td>
+            <td><select class="mono" data-policy="${esc(c.name)}">
+                ${['manual', 'auto_all', 'auto_security_only', 'frozen'].map((m) =>
+                    `<option value="${m}" ${c.mode === m ? 'selected' : ''}>${t('updates.mode_' + m)}</option>`).join('')}
+            </select></td>
+            <td class="num">${c.available_version && c.status !== 'frozen'
+                ? `<button class="btn primary" data-apply="${esc(c.name)}">${t('updates.apply')}</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('updates.run_scan')}</div>`;
+
+    document.getElementById('hist').innerHTML = hist.length ? `
+        <table class="data"><tbody>
+        ${hist.map((h) => `<tr>
+            <td class="mono">${esc(h.name)}</td>
+            <td class="mono">${esc(h.from_version)} → ${esc(h.to_version)}</td>
+            <td>${statusBadge(h.status === 'rolled_back' ? 'failed' : h.status)}${h.status === 'rolled_back' ? ' <span class="badge warn">rollback</span>' : ''}</td>
+            <td class="hide-sm">${fmtDate(h.created_at)}</td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`;
+
+    main().querySelectorAll('[data-apply]').forEach((b) => b.addEventListener('click', async () => {
+        try {
+            const r = await api(`/updates/${b.dataset.apply}/apply`, { method: 'POST' });
+            watchTask(r.task_id, `update ${b.dataset.apply}`);
+        } catch (err) { toast(err.message, 'err'); }
+    }));
+    main().querySelectorAll('[data-policy]').forEach((s) => s.addEventListener('change', async () => {
+        try {
+            await api(`/updates/${s.dataset.policy}/policy`, { method: 'PUT', body: { mode: s.value } });
+            toast(`${s.dataset.policy}: ${t('updates.mode_' + s.value)}`);
+        } catch (err) { toast(err.message, 'err'); pageUpdates(); }
+    }));
+}
+
 // ---------------------------------------------------------------- router
 const ROUTES = [
     [/^#\/dashboard$/, pageDashboard],
@@ -1294,6 +1356,7 @@ const ROUTES = [
     [/^#\/ssl$/, pageSsl],
     [/^#\/tasks$/, pageTasks],
     [/^#\/monitoring$/, pageMonitoring],
+    [/^#\/updates$/, pageUpdates],
 ];
 
 async function route() {

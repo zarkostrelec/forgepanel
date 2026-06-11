@@ -31,6 +31,99 @@ final class Scheduler
         $this->every('ssl_renew', 6 * 3600, $this->enqueueSslRenewals(...));
         $this->every('cleanup', 3600, $this->cleanup(...));
         $this->every('uptime', 30, $this->runUptimeProbes(...));
+        $this->every('updates_scan', 4 * 3600, $this->enqueueUpdatesScan(...));
+        $this->every('updates_auto', 900, $this->enqueueAutoUpdates(...));
+        $this->every('suite_watch', 24 * 3600, $this->watchSuites(...));
+    }
+
+    /** Svaka 4 h: scan dostupnih updatea (kao task — vidljivo u UI-ju). */
+    private function enqueueUpdatesScan(): void
+    {
+        $pending = $this->db->one(
+            "SELECT 1 FROM tasks WHERE op = 'updates.scan' AND status IN ('pending', 'running')"
+        );
+        if ($pending === null) {
+            $this->db->run("INSERT INTO tasks (op, params) VALUES ('updates.scan', '{}')");
+        }
+    }
+
+    /**
+     * Auto-update: komponente s politikom auto_all / auto_security_only,
+     * unutar maintenance windowa, bez major skokova (ti su UVIJEK ručni).
+     */
+    private function enqueueAutoUpdates(): void
+    {
+        $due = $this->db->all(
+            "SELECT c.name, c.current_version, c.available_version, c.security_update,
+                    p.mode, p.window_start, p.window_end, p.window_days
+             FROM components c JOIN update_policies p ON p.component_id = c.id
+             WHERE c.available_version IS NOT NULL AND c.status = 'installed'
+               AND p.mode IN ('auto_all', 'auto_security_only')"
+        );
+        foreach ($due as $component) {
+            if ($component['mode'] === 'auto_security_only' && !(bool) $component['security_update']) {
+                continue;
+            }
+            $days = json_decode((string) $component['window_days'], true) ?: [7];
+            if (!System\UpdatePolicy::inWindow((string) $component['window_start'], (string) $component['window_end'], $days)) {
+                continue;
+            }
+            if (System\UpdatePolicy::isMajorJump((string) $component['current_version'], (string) $component['available_version'])) {
+                continue; // major skok = ručni wizard, nikad auto
+            }
+            $pending = $this->db->one(
+                "SELECT 1 FROM tasks WHERE op = 'updates.apply' AND status IN ('pending', 'running')
+                 AND JSON_UNQUOTE(JSON_EXTRACT(params, '$.component')) = ?",
+                [$component['name']]
+            );
+            if ($pending === null) {
+                $this->db->run(
+                    "INSERT INTO tasks (op, params) VALUES ('updates.apply', ?)",
+                    [json_encode(['component' => $component['name']])]
+                );
+            }
+        }
+    }
+
+    /**
+     * Suite watcher: repoi na noble fallbacku automatski migriraju na resolute
+     * kad postane dostupan + notifikacija adminima.
+     */
+    private function watchSuites(): void
+    {
+        $repo_urls = [
+            'ondrej-php' => 'https://ppa.launchpadcontent.net/ondrej/php/ubuntu',
+            'ondrej-apache2' => 'https://ppa.launchpadcontent.net/ondrej/apache2/ubuntu',
+            'nginx' => 'https://nginx.org/packages/mainline/ubuntu',
+            'mariadb' => 'https://deb.mariadb.org/11.8/ubuntu',
+        ];
+        $fallbacks = $this->db->all("SELECT id, name FROM components WHERE repo_suite = 'noble'");
+        foreach ($fallbacks as $repo) {
+            $url = $repo_urls[$repo['name']] ?? null;
+            $sources_file = "/etc/apt/sources.list.d/forgepanel-{$repo['name']}.sources";
+            if ($url === null || !is_file($sources_file)) {
+                continue;
+            }
+            $ch = curl_init("$url/dists/resolute/Release");
+            curl_setopt_array($ch, [CURLOPT_NOBODY => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15]);
+            curl_exec($ch);
+            $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            curl_close($ch);
+            if ($code !== 200) {
+                continue;
+            }
+            $content = (string) file_get_contents($sources_file);
+            file_put_contents($sources_file, str_replace('Suites: noble', 'Suites: resolute', $content));
+            $this->db->run("UPDATE components SET repo_suite = 'resolute' WHERE id = ?", [$repo['id']]);
+            $admins = $this->db->all("SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name = 'admin'");
+            foreach ($admins as $admin) {
+                $this->db->run(
+                    "INSERT INTO notifications (user_id, severity, title, body) VALUES (?, 'info', ?, ?)",
+                    [$admin['id'], "Repo {$repo['name']} migriran na resolute suite",
+                        'Upstream je objavio resolute pakete; fallback na noble više nije potreban.']
+                );
+            }
+        }
     }
 
     /**

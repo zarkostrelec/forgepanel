@@ -83,5 +83,18 @@
     "git.connect": "Connect repo",
     "git.connected": "Repo connected",
     "git.deploy_now": "Deploy now",
-    "git.last_deploy": "Last deploy"
+    "git.last_deploy": "Last deploy",
+    "nav.updates": "Updates",
+    "updates.scan": "Scan",
+    "updates.component": "Component",
+    "updates.current": "Installed",
+    "updates.available": "Available",
+    "updates.policy": "Policy",
+    "updates.apply": "Update",
+    "updates.history": "Update history",
+    "updates.run_scan": "Run a scan to list components.",
+    "updates.mode_manual": "manual",
+    "updates.mode_auto_all": "auto (all)",
+    "updates.mode_auto_security_only": "auto (security only)",
+    "updates.mode_frozen": "frozen"
 }
