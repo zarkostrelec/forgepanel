@@ -251,6 +251,12 @@ bootstrap_repos() {
             "https://mariadb.org/mariadb_release_signing_key.pgp" \
             "main"
     fi
+    if [[ ",$COMPONENTS," == *",docker,"* ]]; then
+        add_repo "docker" \
+            "https://download.docker.com/linux/ubuntu" \
+            "https://download.docker.com/linux/ubuntu/gpg" \
+            "stable"
+    fi
 
     apt-get update -q
 }

@@ -96,5 +96,11 @@
     "updates.mode_manual": "manual",
     "updates.mode_auto_all": "auto (all)",
     "updates.mode_auto_security_only": "auto (security only)",
-    "updates.mode_frozen": "frozen"
+    "updates.mode_frozen": "frozen",
+    "nav.docker": "Docker",
+    "docker.new": "New container",
+    "docker.name": "Name",
+    "docker.host_port": "Host port",
+    "docker.container_port": "Container port",
+    "docker.logs": "Logs"
 }

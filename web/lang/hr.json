@@ -96,5 +96,11 @@
     "updates.mode_manual": "ručno",
     "updates.mode_auto_all": "auto (sve)",
     "updates.mode_auto_security_only": "auto (samo security)",
-    "updates.mode_frozen": "zamrznuto"
+    "updates.mode_frozen": "zamrznuto",
+    "nav.docker": "Docker",
+    "docker.new": "Novi container",
+    "docker.name": "Naziv",
+    "docker.host_port": "Host port",
+    "docker.container_port": "Container port",
+    "docker.logs": "Logovi"
 }

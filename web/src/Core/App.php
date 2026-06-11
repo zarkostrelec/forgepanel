@@ -66,6 +66,7 @@ final class App
             new Api\V1\MailController($this),
             new Api\V1\GitController($this),
             new Api\V1\UpdatesController($this),
+            new Api\V1\DockerController($this),
             new Api\V1\TasksController($this),
             new Api\V1\MonitoringController($this),
             new Api\V1\SslController($this),

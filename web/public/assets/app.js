@@ -58,6 +58,7 @@ const ICONS = {
     dns: '<circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M12 7.2V12m0 0-5.2 5M12 12l5.2 5"/>',
     archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
     mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+    box: '<path d="M12 2.5 21 7v10l-9 4.5L3 17V7z"/><path d="M3 7l9 4.5L21 7M12 11.5V21.5"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 
@@ -306,6 +307,7 @@ const NAV = [
     ['websites', 'globe', 'nav.websites'],
     ['databases', 'db', 'nav.databases'],
     ['mail', 'mail', 'nav.mail'],
+    ['docker', 'box', 'nav.docker'],
     ['dns', 'dns', 'nav.dns'],
     ['ssl', 'lock', 'nav.ssl'],
     ['backups', 'archive', 'nav.backups'],
@@ -1283,6 +1285,83 @@ async function pageBackups() {
     }));
 }
 
+// ---------------------------------------------------------------- docker
+async function pageDocker() {
+    setActive('docker');
+    main().innerHTML = `
+    <div class="page-head"><h1>${t('nav.docker')}</h1><div class="spacer"></div>
+        <button class="btn primary" id="newc">${icon('plus')}${t('docker.new')}</button></div>
+    <div class="card" id="list">${t('common.loading')}</div>`;
+
+    document.getElementById('newc').addEventListener('click', () => {
+        const modal = openModal(`
+            <div class="dialog-head"><h1>${t('docker.new')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+            <form id="cf">
+                <div class="grid cols-2">
+                    <div class="field"><label>${t('docker.name')}</label><input name="name" required pattern="[a-z0-9][a-z0-9_\\-]{0,40}" class="mono"></div>
+                    <div class="field"><label>Image</label><input name="image" required class="mono" placeholder="nginx:alpine"></div>
+                </div>
+                <div class="grid cols-2">
+                    <div class="field"><label>${t('docker.host_port')} (127.0.0.1)</label><input name="host_port" type="number" min="1024" max="65535" class="mono"></div>
+                    <div class="field"><label>${t('docker.container_port')}</label><input name="container_port" type="number" min="1" max="65535" class="mono"></div>
+                </div>
+                <div class="field"><label>RAM limit (MB)</label><input name="memory_mb" type="number" value="256" min="16" max="16384" class="mono"></div>
+                <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                    <button class="btn primary">${t('common.create')}</button></div>
+            </form>`);
+        modal.querySelector('#cf').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const f = Object.fromEntries(new FormData(e.target));
+            const body = {
+                name: f.name,
+                image: f.image,
+                memory_bytes: Number(f.memory_mb) * 1048576,
+                ports: f.host_port ? [{ host: Number(f.host_port), container: Number(f.container_port || 80) }] : [],
+            };
+            try {
+                const r = await api('/docker', { method: 'POST', body });
+                modal.close();
+                watchTask(r.task_id, `docker ${f.name}`);
+            } catch (err) { toast(err.message, 'err'); }
+        });
+    });
+
+    const containers = await api('/docker');
+    document.getElementById('list').innerHTML = containers.length ? `
+        <table class="data"><thead><tr>
+            <th>${t('docker.name')}</th><th>Image</th><th>Status</th><th class="hide-sm">Proxy</th><th></th>
+        </tr></thead><tbody>
+        ${containers.map((c) => `<tr>
+            <td class="mono">${esc(c.name)}</td>
+            <td class="mono">${esc(c.image)}</td>
+            <td><span class="badge ${c.state === 'running' ? 'ok' : c.state === 'exited' ? 'err' : ''}">${esc(c.state)}</span></td>
+            <td class="mono hide-sm">${c.proxy_port ? ':' + c.proxy_port : '—'}</td>
+            <td class="num">
+                <button class="btn ghost" data-act="restart" data-id="${c.id}">↻</button>
+                <button class="btn ghost" data-act="${c.state === 'running' ? 'stop' : 'start'}" data-id="${c.id}">${c.state === 'running' ? '⏸' : '▶'}</button>
+                <button class="btn ghost" data-logs="${c.id}">${t('docker.logs')}</button>
+                <button class="btn danger" data-del="${c.id}">${t('common.delete')}</button>
+            </td></tr>`).join('')}</tbody></table>` : `<div class="empty">${t('nav.docker')}: 0</div>`;
+
+    main().querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api(`/docker/${b.dataset.id}/action`, { method: 'POST', body: { action: b.dataset.act } }); pageDocker(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    main().querySelectorAll('[data-logs]').forEach((b) => b.addEventListener('click', async () => {
+        try {
+            const r = await api(`/docker/${b.dataset.logs}/logs`);
+            openModal(`<div class="dialog-head"><h1>${t('docker.logs')}</h1>
+                <button class="btn ghost icon" data-close>${icon('x')}</button></div>
+                <div class="task-output">${esc(r.logs ?? '')}</div>`, { wide: true });
+        } catch (err) { toast(err.message, 'err'); }
+    }));
+    main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/docker/${b.dataset.del}`, { method: 'DELETE' }); pageDocker(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+}
+
 // ---------------------------------------------------------------- updates (admin)
 async function pageUpdates() {
     setActive('updates');
@@ -1357,6 +1436,7 @@ const ROUTES = [
     [/^#\/tasks$/, pageTasks],
     [/^#\/monitoring$/, pageMonitoring],
     [/^#\/updates$/, pageUpdates],
+    [/^#\/docker$/, pageDocker],
 ];
 
 async function route() {
