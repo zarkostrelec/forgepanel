@@ -20,7 +20,11 @@ use ForgePanel\Agent\Validator;
 final class WebmailSetup extends Operation
 {
     private const RC_ROOT = '/var/lib/roundcube';
-    private const POOL_CONF = '/etc/php/8.4/fpm/pool.d/forgepanel-webmail.conf';
+
+    // Webmail vozi panelov PHP (agent radi na njemu, pa je runtime verzija = panelova) —
+    // na 26.04 bez ondrej PPA to je distro 8.5, s ondrejem 8.4
+    private const PANEL_PHP = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+    private const POOL_CONF = '/etc/php/' . self::PANEL_PHP . '/fpm/pool.d/forgepanel-webmail.conf';
 
     public function isLongRunning(): bool
     {
@@ -43,7 +47,7 @@ final class WebmailSetup extends Operation
             ['debconf-set-selections'],
             stdin: "roundcube-core roundcube/dbconfig-install boolean false\n"
         );
-        Apt::install(['roundcube-core', 'roundcube-mysql', 'php8.4-fpm'], $context->output(...));
+        Apt::install(['roundcube-core', 'roundcube-mysql', 'php' . self::PANEL_PHP . '-fpm'], $context->output(...));
 
         $context->output("Roundcube baza + DB user\n");
         $context->progress(40);
@@ -110,8 +114,8 @@ final class WebmailSetup extends Operation
         php_admin_flag[expose_php] = off
         INI;
         file_put_contents(self::POOL_CONF, $pool . "\n");
-        Proc::mustRun(['php-fpm8.4', '-t']);
-        Systemd::reload('php8.4-fpm');
+        Proc::mustRun(['php-fpm' . self::PANEL_PHP, '-t']);
+        Systemd::reload('php' . self::PANEL_PHP . '-fpm');
 
         $context->output("nginx vhost {$hostname} (self-signed do AutoSSL-a)\n");
         $context->progress(85);

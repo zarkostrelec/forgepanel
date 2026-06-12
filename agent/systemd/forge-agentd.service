@@ -6,7 +6,9 @@ Wants=mariadb.service
 
 [Service]
 Type=notify
-ExecStart=/opt/forgepanel/agent/bin/forge-agentd /etc/forgepanel/agent.ini
+# forgepanel-php = symlink na panelov PHP (installer ga postavlja) — agent ne
+# ovisi o verziji u imenu interpretera niti o update-alternatives /usr/bin/php
+ExecStart=/usr/local/bin/forgepanel-php /opt/forgepanel/agent/bin/forge-agentd /etc/forgepanel/agent.ini
 Restart=always
 RestartSec=3
 

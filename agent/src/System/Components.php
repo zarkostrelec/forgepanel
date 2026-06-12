@@ -54,6 +54,14 @@ final class Components
             'config_dirs' => ['/etc/php/8.4'],
             'config_test' => ['php-fpm8.4', '-t'],
         ],
+        // 8.5 dolazi iz distro archiva (26.04 universe) — jedina verzija dostupna
+        // dok ondrej PPA ne objavi resolute suite
+        'php8.5' => [
+            'packages' => ['php8.5-cli', 'php8.5-fpm', 'php8.5-mysql', 'php8.5-curl', 'php8.5-mbstring', 'php8.5-xml', 'php8.5-zip', 'php8.5-intl'],
+            'service' => 'php8.5-fpm',
+            'config_dirs' => ['/etc/php/8.5'],
+            'config_test' => ['php-fpm8.5', '-t'],
+        ],
         'postfix' => [
             'packages' => ['postfix', 'postfix-mysql'],
             'service' => 'postfix',

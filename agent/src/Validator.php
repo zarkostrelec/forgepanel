@@ -12,7 +12,7 @@ namespace ForgePanel\Agent;
 final class Validator
 {
     public const VHOST_ROOT = '/var/www/vhosts';
-    public const PHP_VERSIONS = ['8.1', '8.2', '8.3', '8.4'];
+    public const PHP_VERSIONS = ['8.1', '8.2', '8.3', '8.4', '8.5'];
 
     public static function fqdn(mixed $value, string $field = 'domain'): string
     {

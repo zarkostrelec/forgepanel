@@ -15,7 +15,7 @@ use ForgePanel\Web\Core\Router;
  */
 final class BulkController extends Controller
 {
-    private const PHP_VERSIONS = ['8.1', '8.2', '8.3', '8.4'];
+    private const PHP_VERSIONS = ['8.1', '8.2', '8.3', '8.4', '8.5'];
 
     public function register(Router $router): void
     {

@@ -27,7 +27,8 @@ final class MonitoringController extends Controller
     {
         $this->ctx($request, 'monitoring:read')->requireRole('admin');
         $services = [];
-        foreach (['nginx', 'mariadb', 'php8.4-fpm', 'fail2ban'] as $service) {
+        // panelov FPM servis = verzija na kojoj web sloj radi (runtime, ne hardkodirano)
+        foreach (['nginx', 'mariadb', 'php' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION . '-fpm', 'fail2ban'] as $service) {
             try {
                 $services[$service] = $this->app->agent->call('service.status', ['service' => $service]);
             } catch (\Throwable) {
