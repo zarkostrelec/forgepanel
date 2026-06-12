@@ -33,7 +33,10 @@ final class Response
         // style-src 'unsafe-inline': UI koristi inline style atribute (progress width); script-src ostaje strogo 'self'.
         // base-uri/form-action 'self' i object-src 'none' zatvaraju injection vektore; upgrade-insecure-requests.
         header("Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; upgrade-insecure-requests");
-        header('Strict-Transport-Security: max-age=63072000; includeSubDomains; preload');
+        // HSTS samo za panel host: BEZ includeSubDomains (panel je često subdomena
+        // klijentove domene — pinnali bismo tuđe poddomene na 2 godine) i BEZ preload
+        // (signal za preload listu bez stvarne registracije je pogrešan).
+        header('Strict-Transport-Security: max-age=63072000');
         header('Cross-Origin-Opener-Policy: same-origin');
         header('Cross-Origin-Resource-Policy: same-origin');
         header('X-Permitted-Cross-Domain-Policies: none');
