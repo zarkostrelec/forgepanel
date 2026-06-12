@@ -266,5 +266,16 @@
     "mon.range": "Range",
     "mon.off": "off",
     "ai.clear": "Clear",
-    "ai.live": "live"
+    "ai.live": "live",
+    "dash.topology": "Server topology",
+    "dash.live_events": "Live events",
+    "dash.recent_deploys": "Recent deploys",
+    "dash.open_analysis": "Open analysis",
+    "mon.cores": "Cores",
+    "mon.membreak": "Memory",
+    "mon.top": "Top processes",
+    "mon.user": "User",
+    "mon.apps": "apps",
+    "mon.cache": "cache/buffer",
+    "mon.free": "free"
 }

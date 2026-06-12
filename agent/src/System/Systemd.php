@@ -42,7 +42,7 @@ final class Systemd
     {
         self::assertUnit($unit);
         $out = Proc::mustRun(['systemctl', 'show', $unit,
-            '--property=LoadState,ActiveState,SubState,MainPID,MemoryCurrent,CPUUsageNSec'])->stdout;
+            '--property=LoadState,ActiveState,SubState,MainPID,MemoryCurrent,CPUUsageNSec,ActiveEnterTimestamp'])->stdout;
         $props = [];
         foreach (explode("\n", trim($out)) as $line) {
             if (str_contains($line, '=')) {

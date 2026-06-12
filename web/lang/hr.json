@@ -266,5 +266,16 @@
     "mon.range": "Period",
     "mon.off": "isključeno",
     "ai.clear": "Očisti",
-    "ai.live": "live"
+    "ai.live": "live",
+    "dash.topology": "Topologija servera",
+    "dash.live_events": "Događaji uživo",
+    "dash.recent_deploys": "Zadnji deployi",
+    "dash.open_analysis": "Otvori analizu",
+    "mon.cores": "Jezgre",
+    "mon.membreak": "Memorija",
+    "mon.top": "Top procesi",
+    "mon.user": "Korisnik",
+    "mon.apps": "aplikacije",
+    "mon.cache": "cache/buffer",
+    "mon.free": "slobodno"
 }

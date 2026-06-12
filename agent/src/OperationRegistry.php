@@ -66,6 +66,7 @@ final class OperationRegistry
         'ssl.panel_issue'   => Operations\PanelSslIssue::class,
         'ssl.install_custom' => Operations\SslInstallCustom::class,
         'system.metrics'    => Operations\SystemMetrics::class,
+        'system.top'        => Operations\SystemTop::class,
         'assistant.status'  => Operations\AssistantStatus::class,
         'assistant.query'   => Operations\AssistantQuery::class,
         'assistant.exec'    => Operations\AssistantExec::class,
