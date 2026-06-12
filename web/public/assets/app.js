@@ -95,6 +95,7 @@ const ICONS = {
     logout: '<path d="M14 4h-8v16h8"/><path d="M10 12h11M17.5 8.5 21 12l-3.5 3.5"/>',
     box: '<path d="M12 2.5 21 7v10l-9 4.5L3 17V7z"/><path d="M3 7l9 4.5L21 7M12 11.5V21.5"/>',
     wall: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M8 4v5M16 9v5M8 14v6"/>',
+    cloud: '<path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.3A3.5 3.5 0 0 1 17 18z"/>',
     history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c1-3.3 3.2-5 6-5s5 1.7 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.8M18 20c-.3-2-1-3.5-2-4.5"/>',
     archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
@@ -402,7 +403,7 @@ const RAIL = [
     { id: 'docker', icon: 'box', label: 'nav.docker', key: 'k', pages: ['docker'] },
     { id: 'backups', icon: 'download', label: 'nav.backups', key: 'a', pages: ['backups'] },
     { id: 'monitoring', icon: 'pulse', label: 'nav.monitoring', key: 'm', pages: ['monitoring', 'tasks'] },
-    { id: 'protect', icon: 'shield', label: 'nav.protect', key: 'p', pages: ['ssl', 'dns', 'security', 'firewall'] },
+    { id: 'protect', icon: 'shield', label: 'nav.protect', key: 'p', pages: ['ssl', 'dns', 'cloudflare', 'security', 'firewall'] },
     { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config'] },
     { id: 'users', icon: 'users', label: 'nav.users', key: 'o', roles: ['admin', 'reseller'], pages: ['users'] },
 ];
@@ -410,7 +411,7 @@ const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
 
 const TAB_GROUPS = {
     monitoring: [['monitoring', 'nav.monitoring', 'pulse'], ['tasks', 'nav.tasks', 'clock']],
-    protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
+    protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['cloudflare', 'nav.cloudflare', 'cloud', 'admin'], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
     server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history']],
 };
 
@@ -1521,34 +1522,143 @@ function sparkline(points, { height = 130, formatY = (v) => String(v), color = '
     <div class="chart-meta mono">max ${formatY(max / 1.1)} · ${points.length} točaka · 24 h</div>`;
 }
 
+const bps = (v) => `${fmtBytes(v)}/s`;
+const lastVal = (arr) => (arr.length ? Number(arr.at(-1).value) : null);
+
 async function pageMonitoring() {
     setActive('monitoring');
     main().innerHTML = `${tabsHtml('monitoring', 'monitoring')}<div class="empty">${t('common.loading')}</div>`;
     try {
-        const [m, cpu, mem] = await Promise.all([
+        const h = (metric) => api(`/monitoring/history?metric=${metric}`).catch(() => []);
+        const [m, services, cpuPct, cpuLoad, mem, dRead, dWrite, netRx, netTx] = await Promise.all([
             api('/monitoring/now'),
-            api('/monitoring/history?metric=cpu_load1').catch(() => []),
-            api('/monitoring/history?metric=mem_used_bytes').catch(() => []),
+            api('/monitoring/services').catch(() => ({})),
+            h('cpu_pct'), h('cpu_load1'), h('mem_used_bytes'),
+            h('disk_read_bps'), h('disk_write_bps'), h('net_rx_bps'), h('net_tx_bps'),
         ]);
+        const cpuIsPct = cpuPct.length >= 2;
+        const cpuSeries = cpuIsPct ? cpuPct : cpuLoad;
+        const memPct = Math.round((1 - m.mem_available_bytes / m.mem_total_bytes) * 100);
+
+        const svcRows = Object.entries(services).map(([name, s]) => {
+            const st = s.ActiveState || 'unknown';
+            return `<tr>
+                <td class="mono">${esc(name)}</td>
+                <td><span class="badge ${st === 'active' ? 'ok' : (st === 'failed' ? 'err' : '')}">${esc(s.SubState || st)}</span></td>
+                <td class="mono num">${s.cpu_pct != null ? s.cpu_pct.toFixed(1) + '%' : '—'}</td>
+                <td class="mono num">${s.mem_bytes != null ? fmtBytes(s.mem_bytes) : '—'}</td>
+            </tr>`;
+        }).join('');
+
+        const chart = (title, series, opts, now) => `
+            <div class="card flush"><div class="card-head"><h2>${title}</h2><span class="spacer"></span>
+                <span class="num" style="font-size:var(--fs-sm);color:var(--ink-2)">${now}</span></div>
+                <div class="pad">${sparkline(series, opts)}</div></div>`;
+
         main().innerHTML = `
         ${tabsHtml('monitoring', 'monitoring')}
         <div class="grid cols-4" style="margin-bottom:var(--gap)">
             ${metricCard({ label: 'Load 1/5/15', value: m.load.map((l) => l.toFixed(2)).join(' '), sub: `${m.cpu_count} jezgri` })}
-            ${metricCard({ label: 'RAM', value: fmtBytes(m.mem_total_bytes - m.mem_available_bytes), unit: `/ ${fmtBytes(m.mem_total_bytes)}` })}
-            ${metricCard({ label: 'Disk', value: fmtBytes(m.disk_total_bytes - m.disk_free_bytes), unit: `/ ${fmtBytes(m.disk_total_bytes)}` })}
+            ${metricCard({ label: 'RAM', value: fmtBytes(m.mem_total_bytes - m.mem_available_bytes), unit: `/ ${fmtBytes(m.mem_total_bytes)}`, sub: `${memPct}% iskorišteno` })}
+            ${metricCard({ label: 'Disk', value: fmtBytes(m.disk_total_bytes - m.disk_free_bytes), unit: `/ ${fmtBytes(m.disk_total_bytes)}`, sub: `${fmtBytes(m.disk_free_bytes)} slobodno` })}
             ${metricCard({ label: 'Uptime', value: `${Math.floor(m.uptime_s / 86400)}d ${Math.floor((m.uptime_s % 86400) / 3600)}h` })}
         </div>
         <div class="grid cols-2">
-            <div class="card flush"><div class="card-head"><h2>CPU load (1m)</h2><span class="spacer"></span>
-                <span class="num" style="font-size:var(--fs-sm);color:var(--ink-2)">${m.load[0].toFixed(2)}</span></div>
-                <div class="pad">${sparkline(cpu, { formatY: (v) => v.toFixed(2) })}</div></div>
-            <div class="card flush"><div class="card-head"><h2>RAM</h2><span class="spacer"></span>
-                <span class="num" style="font-size:var(--fs-sm);color:var(--ink-2)">${fmtBytes(m.mem_total_bytes - m.mem_available_bytes)}</span></div>
-                <div class="pad">${sparkline(mem, { formatY: fmtBytes, color: 'var(--info)' })}</div></div>
-        </div>`;
+            ${chart(cpuIsPct ? 'CPU %' : 'CPU load (1m)', cpuSeries, { formatY: (v) => cpuIsPct ? v.toFixed(0) + '%' : v.toFixed(2) }, cpuIsPct ? `${(lastVal(cpuPct) ?? 0).toFixed(0)}%` : m.load[0].toFixed(2))}
+            ${chart('RAM', mem, { formatY: fmtBytes, color: 'var(--info)' }, fmtBytes(m.mem_total_bytes - m.mem_available_bytes))}
+            ${chart('Disk čitanje', dRead, { formatY: bps, color: 'var(--ok)' }, lastVal(dRead) != null ? bps(lastVal(dRead)) : '—')}
+            ${chart('Disk pisanje', dWrite, { formatY: bps, color: 'var(--warn)' }, lastVal(dWrite) != null ? bps(lastVal(dWrite)) : '—')}
+            ${chart('Mreža ↓', netRx, { formatY: bps, color: 'var(--accent)' }, lastVal(netRx) != null ? bps(lastVal(netRx)) : '—')}
+            ${chart('Mreža ↑', netTx, { formatY: bps, color: 'var(--info)' }, lastVal(netTx) != null ? bps(lastVal(netTx)) : '—')}
+        </div>
+        ${svcRows ? `<div class="card mt"><div class="card-head"><h2>${t('mon.services')}</h2></div>
+            <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th></tr></thead>
+            <tbody>${svcRows}</tbody></table></div>` : ''}`;
     } catch {
         main().innerHTML = `${tabsHtml('monitoring', 'monitoring')}<div class="empty">Dostupno administratoru.</div>`;
     }
+}
+
+// ---------------------------------------------------------------- Cloudflare
+async function pageCloudflare() {
+    setActive('protect');
+    main().innerHTML = `${tabsHtml('protect', 'cloudflare')}<div class="empty">${t('common.loading')}</div>`;
+    const acct = await api('/cloudflare/account').catch(() => ({ connected: false }));
+
+    if (!acct.connected) {
+        main().innerHTML = `${tabsHtml('protect', 'cloudflare')}
+        <div class="card" style="max-width:560px">
+            <div class="card-head"><h2>${t('cf.title')}</h2></div>
+            <p class="hint" style="margin:0 0 var(--gap)">${t('cf.intro')}</p>
+            <form id="cff">
+                <div class="field"><label>${t('cf.token')}</label>
+                    <input name="api_token" required class="mono" placeholder="••••••••••••••••" autocomplete="off">
+                    <span class="hint">${t('cf.token_hint')}</span></div>
+                <button class="btn primary">${icon('cloud')}${t('cf.connect')}</button>
+            </form>
+        </div>`;
+        main().querySelector('#cff').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await api('/cloudflare/account', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+                toast(t('cf.connected'), 'ok'); pageCloudflare();
+            } catch (err) { toast(err.message, 'err'); }
+        });
+        return;
+    }
+
+    const [zones, vhosts] = await Promise.all([
+        api('/cloudflare/zones').catch(() => []),
+        api('/vhosts').catch(() => []),
+    ]);
+    const zoneOpts = zones.map((z) => `<option value="${esc(z.id)}">${esc(z.name)}</option>`).join('');
+
+    main().innerHTML = `${tabsHtml('protect', 'cloudflare')}
+    <div class="page-head">
+        <span class="badge ok">${icon('cloud')} ${t('cf.connected')}</span><span class="spacer"></span>
+        <button class="btn danger" id="cfdis">${t('cf.disconnect')}</button>
+    </div>
+    <div class="card"><div class="card-head"><h2>${t('cf.zones')}</h2></div>
+        ${zones.length ? `<table class="data"><thead><tr><th>${t('cf.zone')}</th><th>${t('cf.status')}</th><th class="mono hide-sm">Zone ID</th></tr></thead>
+        <tbody>${zones.map((z) => `<tr><td class="mono">${esc(z.name)}</td>
+            <td><span class="badge ${z.status === 'active' ? 'ok' : 'warn'}">${esc(z.status)}</span></td>
+            <td class="mono hide-sm" style="font-size:var(--fs-sm)">${esc(z.id)}</td></tr>`).join('')}</tbody></table>`
+        : `<div class="empty">${t('cf.zones')}: 0</div>`}</div>
+
+    <div class="card mt"><div class="card-head"><h2>${t('cf.sync')}</h2></div>
+        ${vhosts.length && zones.length ? `<table class="data"><thead><tr><th>${t('vhost.domain')}</th><th>${t('cf.zone')}</th><th></th></tr></thead>
+        <tbody>${vhosts.map((v) => `<tr data-vid="${v.id}">
+            <td class="mono">${esc(v.domain)}</td>
+            <td><select class="mono cf-zone">${zoneOpts}</select>
+                <label class="inline" style="margin-left:8px"><input type="checkbox" class="cf-proxy" checked> ${t('cf.proxy')}</label></td>
+            <td class="num">
+                <button class="btn cf-sync">${t('cf.sync')}</button>
+                <button class="btn cf-purge">${t('cf.purge')}</button></td>
+        </tr>`).join('')}</tbody></table>`
+        : `<div class="empty">${vhosts.length ? t('cf.zones') + ': 0' : t('nav.websites') + ': 0'}</div>`}</div>`;
+
+    main().querySelector('#cfdis').addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api('/cloudflare/account', { method: 'DELETE' }); pageCloudflare(); }
+        catch (err) { toast(err.message, 'err'); }
+    });
+    main().querySelectorAll('tr[data-vid]').forEach((tr) => {
+        const vid = tr.dataset.vid;
+        const zoneId = () => tr.querySelector('.cf-zone').value;
+        tr.querySelector('.cf-sync').addEventListener('click', async (e) => {
+            e.target.disabled = true;
+            try {
+                const r = await api(`/vhosts/${vid}/cloudflare/sync`, { method: 'POST',
+                    body: { zone_id: zoneId(), proxy: tr.querySelector('.cf-proxy').checked } });
+                toast(t('cf.sync_done') + ': ' + (r.created || []).join(', '), 'ok');
+            } catch (err) { toast(err.message, 'err'); } finally { e.target.disabled = false; }
+        });
+        tr.querySelector('.cf-purge').addEventListener('click', async (e) => {
+            e.target.disabled = true;
+            try { await api(`/vhosts/${vid}/cloudflare/purge`, { method: 'POST', body: {} }); toast(t('cf.purge_done'), 'ok'); }
+            catch (err) { toast(err.message, 'err'); } finally { e.target.disabled = false; }
+        });
+    });
 }
 
 // ---------------------------------------------------------------- DNS
@@ -2409,6 +2519,7 @@ const ROUTES = [
     [/^#\/databases$/, pageDatabases],
     [/^#\/mail$/, pageMail],
     [/^#\/dns$/, pageDns],
+    [/^#\/cloudflare$/, pageCloudflare],
     [/^#\/backups$/, pageBackups],
     [/^#\/ssl$/, pageSsl],
     [/^#\/tasks$/, pageTasks],
