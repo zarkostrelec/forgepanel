@@ -21,9 +21,12 @@ final class UsersController extends Controller
         $router->add('GET', '/api/v1/users', $this->index(...));
         $router->add('POST', '/api/v1/users', $this->create(...));
         $router->add('PUT', '/api/v1/users/{id}/status', $this->setStatus(...));
+        $router->add('PUT', '/api/v1/users/{id}', $this->update(...));
         $router->add('DELETE', '/api/v1/users/{id}', $this->delete(...));
         $router->add('GET', '/api/v1/plans', $this->plans(...));
         $router->add('POST', '/api/v1/plans', $this->createPlan(...));
+        $router->add('PUT', '/api/v1/plans/{id}', $this->updatePlan(...));
+        $router->add('DELETE', '/api/v1/plans/{id}', $this->deletePlan(...));
     }
 
     private function index(Request $request): never
@@ -95,6 +98,77 @@ final class UsersController extends Controller
         Response::ok();
     }
 
+    private function update(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'users:write');
+        $ctx->requireRole('admin', 'reseller');
+        $user = $this->targetUser($ctx, (int) $request->param('id'));
+
+        $fields = [];
+        $params = [];
+
+        // E-mail (opcionalno) — provjera formata i jedinstvenosti
+        $email_raw = $request->str('email');
+        if ($email_raw !== null) {
+            $email = strtolower(trim($email_raw));
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                throw new HttpException(422, 'invalid_email');
+            }
+            if ($email !== $user['email']
+                && $this->app->db->one('SELECT 1 FROM users WHERE email = ? AND id <> ?', [$email, $user['id']]) !== null) {
+                throw new HttpException(409, 'email_exists');
+            }
+            $fields[] = 'email = ?';
+            $params[] = $email;
+        }
+
+        // Lozinka (opcionalno) — samo ako je poslana neprazna
+        $password = $request->str('password');
+        if ($password !== null && $password !== '') {
+            if (strlen($password) < 12) {
+                throw new HttpException(422, 'password_too_short');
+            }
+            $fields[] = 'password_hash = ?';
+            $params[] = Auth::hashPassword($password);
+        }
+
+        // Jezik (opcionalno)
+        $lang = $request->str('lang');
+        if ($lang !== null) {
+            if (!in_array($lang, ['hr', 'en'], true)) {
+                throw new HttpException(422, 'invalid_lang');
+            }
+            $fields[] = 'lang = ?';
+            $params[] = $lang;
+        }
+
+        // Rola (opcionalno, samo admin smije mijenjati)
+        $role = $request->str('role');
+        if ($role !== null) {
+            if (!$ctx->isAdmin()) {
+                throw new HttpException(403, 'role_not_allowed');
+            }
+            if (!in_array($role, ['admin', 'reseller', 'client'], true)) {
+                throw new HttpException(422, 'invalid_role');
+            }
+            if ((int) $user['id'] === $ctx->user_id && $role !== 'admin') {
+                throw new HttpException(422, 'cannot_demote_self');
+            }
+            $role_row = $this->app->db->one('SELECT id FROM roles WHERE name = ?', [$role]);
+            $fields[] = 'role_id = ?';
+            $params[] = $role_row['id'];
+        }
+
+        if ($fields === []) {
+            throw new HttpException(422, 'nothing_to_update');
+        }
+
+        $params[] = $user['id'];
+        $this->app->db->run('UPDATE users SET ' . implode(', ', $fields) . ' WHERE id = ?', $params);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'user.update', ['user_id' => (int) $user['id']], $request->ip);
+        Response::ok();
+    }
+
     private function delete(Request $request): never
     {
         $ctx = $this->ctx($request, 'users:write');
@@ -157,6 +231,57 @@ final class UsersController extends Controller
         Response::ok(['id' => $this->app->db->lastId(), 'name' => $name], 201);
     }
 
+    private function updatePlan(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'users:write');
+        $ctx->requireRole('admin', 'reseller');
+        $plan = $this->targetPlan($ctx, (int) $request->param('id'));
+
+        $name = trim($request->str('name') ?? '');
+        if ($name === '' || mb_strlen($name) > 64) {
+            throw new HttpException(422, 'invalid_name');
+        }
+        $php_versions = $request->body['php_versions'] ?? json_decode($plan['php_versions'] ?: '[]', true);
+        if (!is_array($php_versions) || $php_versions === []
+            || array_diff($php_versions, ['8.1', '8.2', '8.3', '8.4', '8.5']) !== []) {
+            throw new HttpException(422, 'invalid_php_versions');
+        }
+
+        $this->app->db->run(
+            'UPDATE plans SET name = ?, disk_bytes = ?, max_domains = ?, max_mailboxes = ?, max_databases = ?, php_versions = ?, features = ?, cpu_quota_pct = ?, memory_max_bytes = ?, tasks_max = ? WHERE id = ?',
+            [
+                $name,
+                max(0, $request->int('disk_bytes', (int) $plan['disk_bytes'])),
+                max(1, $request->int('max_domains', (int) $plan['max_domains'])),
+                max(0, $request->int('max_mailboxes', (int) $plan['max_mailboxes'])),
+                max(0, $request->int('max_databases', (int) $plan['max_databases'])),
+                json_encode(array_values($php_versions)),
+                json_encode($request->body['features'] ?? json_decode($plan['features'] ?: '[]', true)),
+                max(10, min(100, $request->int('cpu_quota_pct', (int) $plan['cpu_quota_pct']))),
+                max(134217728, $request->int('memory_max_bytes', (int) $plan['memory_max_bytes'])),
+                max(32, $request->int('tasks_max', (int) $plan['tasks_max'])),
+                $plan['id'],
+            ]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'plan.update', ['plan_id' => (int) $plan['id'], 'name' => $name], $request->ip);
+        Response::ok(['id' => (int) $plan['id'], 'name' => $name]);
+    }
+
+    private function deletePlan(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'users:write');
+        $ctx->requireRole('admin', 'reseller');
+        $plan = $this->targetPlan($ctx, (int) $request->param('id'));
+
+        // Plan u upotrebi (postoji pretplata) ne smije se brisati
+        if ($this->app->db->one('SELECT 1 FROM subscriptions WHERE plan_id = ?', [$plan['id']]) !== null) {
+            throw new HttpException(409, 'plan_in_use');
+        }
+        $this->app->db->run('DELETE FROM plans WHERE id = ?', [$plan['id']]);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'plan.delete', ['plan_id' => (int) $plan['id']], $request->ip);
+        Response::ok();
+    }
+
     /** Reseller smije dirati samo svoje klijente. @return array<string, mixed> */
     private function targetUser(\ForgePanel\Web\Core\AuthContext $ctx, int $id): array
     {
@@ -168,6 +293,19 @@ final class UsersController extends Controller
             throw new HttpException(404, 'not_found');
         }
         return $user;
+    }
+
+    /** Reseller smije uređivati/brisati samo VLASTITE planove (ne globalne admin planove). @return array<string, mixed> */
+    private function targetPlan(\ForgePanel\Web\Core\AuthContext $ctx, int $id): array
+    {
+        $plan = $this->app->db->one('SELECT * FROM plans WHERE id = ?', [$id]);
+        if ($plan === null) {
+            throw new HttpException(404, 'not_found');
+        }
+        if (!$ctx->isAdmin() && (int) ($plan['owner_user_id'] ?? 0) !== $ctx->user_id) {
+            throw new HttpException(404, 'not_found');
+        }
+        return $plan;
     }
 
     private function assertPlanOwnership(\ForgePanel\Web\Core\AuthContext $ctx, int $plan_id): void

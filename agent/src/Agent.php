@@ -17,6 +17,7 @@ final class Agent
 
     private bool $running = true;
     private float $last_watchdog = 0.0;
+    private float $last_tick_error_log = 0.0;
 
     private readonly Db $db;
 
@@ -51,8 +52,22 @@ final class Agent
                 }
             }
 
-            $worker->tick();
-            $scheduler->tick();
+            // Jedan neuspjeli tick (npr. pad DB konekcije: MariaDB restart,
+            // wait_timeout) NE SMIJE srušiti daemon — inače systemd vrti restart
+            // petlju, a taskovi zauvijek ostaju 'pending'. Logiraj u journald i
+            // nastavi; sljedeći pdo() otvara svježu konekciju.
+            try {
+                $worker->tick();
+            } catch (\Throwable $e) {
+                $this->db->reconnect();
+                $this->logTickError('worker', $e);
+            }
+            try {
+                $scheduler->tick();
+            } catch (\Throwable $e) {
+                $this->db->reconnect();
+                $this->logTickError('scheduler', $e);
+            }
         }
 
         fclose($server);
@@ -136,6 +151,17 @@ final class Agent
             $audit->log('agent', 'op.failed', ['op' => $op_code, 'error' => $e->getMessage()]);
             return ['ok' => false, 'error' => $e->getMessage()];
         }
+    }
+
+    /** Throttle: kod trajno nedostupne DB ne preplavi journald (max 1 zapis / 30 s). */
+    private function logTickError(string $where, \Throwable $e): void
+    {
+        $now = microtime(true);
+        if ($now - $this->last_tick_error_log < 30.0) {
+            return;
+        }
+        $this->last_tick_error_log = $now;
+        error_log("forge-agentd: $where tick error: " . $e->getMessage());
     }
 
     private function watchdogPing(): void
