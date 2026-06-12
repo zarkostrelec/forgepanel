@@ -12,17 +12,22 @@ ExecStart=/usr/local/bin/forgepanel-php /opt/forgepanel/agent/bin/forge-agentd /
 Restart=always
 RestartSec=3
 
-# Watchdog: daemon pinga svakih 10 s, systemd ubija i restarta ako stane
-WatchdogSec=30
+# Watchdog: daemon pinga svakih 10 s. Visok prag jer agent izvršava i dugotrajne
+# operacije (apt install, backup, AI upit) sinkrono u glavnoj petlji — kraći prag
+# bi ga ubio usred legitimnog posla.
+WatchdogSec=1200
 
-# Hardening — agent mora biti root za sistemske operacije, ali sve ostalo stežemo
+# Hardening — agent je root sistemski daemon. Sigurnosna granica je WHITELIST
+# operacija + validacija parametara (poglavlje 3/8), NE filesystem confinement:
+# agent legitimno instalira pakete (apt/dpkg pišu po /usr,/etc,/var/cache,/var/lib)
+# i uređuje confige svih servisa, pa ProtectSystem=strict ga onemogućuje u poslu.
+# Zadržavamo kernel/ostale zaštite.
 RuntimeDirectory=forgepanel
 RuntimeDirectoryMode=0755
-ProtectSystem=strict
-# ReadWritePaths probija ProtectHome za točno ove putanje (Forge AI lokalni mod:
-# claude piše svoj state/cache; '-' = ne-fatalno ako putanja još ne postoji)
-ReadWritePaths=/etc/nginx /etc/php /etc/forgepanel /etc/systemd/system /var/www /run /var/log /home /etc/passwd /etc/shadow /etc/group /etc/gshadow /etc/subuid /etc/subgid /var/backups -/root/.claude -/root/.claude.json -/root/.config -/root/.cache -/root/.npm
+# ProtectHome=read-only čuva /home i /root, ReadWritePaths probija samo za
+# claude state (Forge AI lokalni mod); '-' = ne-fatalno ako putanja ne postoji
 ProtectHome=read-only
+ReadWritePaths=-/root/.claude -/root/.claude.json -/root/.config -/root/.cache -/root/.npm
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true

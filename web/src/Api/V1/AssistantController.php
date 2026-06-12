@@ -48,7 +48,34 @@ final class AssistantController extends Controller
         $router->add('DELETE', '/api/v1/assistant/key', $this->removeKey(...));
         $router->add('POST', '/api/v1/assistant/ask', $this->ask(...));
         $router->add('POST', '/api/v1/assistant/exec', $this->exec(...));
+        $router->add('GET', '/api/v1/assistant/task/{id}', $this->taskResult(...));
         $router->add('POST', '/api/v1/assistant/diagnose/{id}', $this->diagnoseVhost(...));
+    }
+
+    /** Enqueue AI taska (async) — web sloj ne čeka claude, samo upiše red. */
+    private function enqueueTask(int $user_id, string $op, array $params): int
+    {
+        $this->app->db->run(
+            'INSERT INTO tasks (op, params, user_id) VALUES (?, ?, ?)',
+            [$op, json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $user_id]
+        );
+        return (int) $this->app->db->pdo()->lastInsertId();
+    }
+
+    /** Poll rezultata AI taska iz baze (ne dira agenta). */
+    private function taskResult(Request $request): never
+    {
+        $this->admin($request);
+        $id = (int) $request->param('id');
+        $row = $this->app->db->one(
+            "SELECT status, output, error FROM tasks WHERE id = ? AND op IN ('assistant.query', 'assistant.exec')",
+            [$id]
+        ) ?? throw new HttpException(404, 'task_not_found');
+        Response::ok([
+            'status' => $row['status'],
+            'output' => $row['output'] !== null ? trim((string) $row['output']) : null,
+            'error' => $row['error'],
+        ]);
     }
 
     private function status(Request $request): never
@@ -88,8 +115,8 @@ final class AssistantController extends Controller
             throw new HttpException(422, 'invalid_command');
         }
         $this->app->audit->log($ctx->user_id, $ctx->email, 'assistant.exec', ['command' => mb_substr($command, 0, 500)], $request->ip);
-        $result = $this->app->agent->call('assistant.exec', ['command' => $command], 130);
-        Response::ok($result);
+        $task_id = $this->enqueueTask($ctx->user_id, 'assistant.exec', ['command' => $command]);
+        Response::ok(['task_id' => $task_id]);
     }
 
     private function setKey(Request $request): never
@@ -145,13 +172,12 @@ final class AssistantController extends Controller
 
         $local = $this->localStatus();
         if ($local['available'] && $local['logged_in']) {
-            $res = $this->app->agent->call(
-                'assistant.query',
-                ['prompt' => self::SYSTEM_PROMPT . self::LOCAL_SUFFIX . "\n\n--- UPIT ---\n" . $user_message],
-                200
-            );
+            // Async: enqueue task, vrati task_id; UI poll-a rezultat (claude zna trajati).
+            $task_id = $this->enqueueTask($ctx->user_id, 'assistant.query', [
+                'prompt' => self::SYSTEM_PROMPT . self::LOCAL_SUFFIX . "\n\n--- UPIT ---\n" . $user_message,
+            ]);
             $this->app->audit->log($ctx->user_id, $ctx->email, 'assistant.ask', ['mode' => 'local'], $request->ip);
-            Response::ok(['answer' => (string) ($res['answer'] ?? ''), 'mode' => 'local']);
+            Response::ok(['task_id' => $task_id, 'mode' => 'local']);
         }
 
         $answer = $this->client()->ask(self::SYSTEM_PROMPT, $user_message);

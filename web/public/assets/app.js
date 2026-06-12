@@ -549,6 +549,17 @@ function aiMessageHtml(text, canExec) {
     return html || esc(text);
 }
 
+// AI operacije su async taskovi — poll task.output iz baze (ne blokira panel)
+async function pollAiTask(id, { interval = 1500, maxMs = 200000 } = {}) {
+    const start = Date.now();
+    for (;;) {
+        const r = await api(`/assistant/task/${id}`);
+        if (['done', 'failed', 'cancelled'].includes(r.status)) return r;
+        if (Date.now() - start > maxMs) return { status: 'failed', error: 'timeout' };
+        await new Promise((res) => setTimeout(res, interval));
+    }
+}
+
 async function renderAiDrawer() {
     const drawer = document.getElementById('aidrawer');
     if (!drawer) return;
@@ -618,8 +629,9 @@ async function renderAiDrawer() {
         out.textContent = '…';
         try {
             const r = await api('/assistant/exec', { method: 'POST', body: { command: cmd } });
-            out.textContent = (r.stdout || '') + (r.stderr ? '\n' + r.stderr : '') + `\n[exit ${r.exit}]`;
-            out.classList.toggle('err', r.exit !== 0);
+            const res = await pollAiTask(r.task_id);
+            out.textContent = res.status === 'done' ? (res.output || '') : ('✕ ' + (res.error || 'neuspješno'));
+            out.classList.toggle('err', res.status !== 'done' || /\[exit [1-9]/.test(res.output || ''));
         } catch (err) { out.textContent = '✕ ' + err.message; out.classList.add('err'); }
         finally { btn.disabled = false; }
     });
@@ -641,7 +653,14 @@ async function renderAiDrawer() {
         renderThread();
         try {
             const r = await api('/assistant/ask', { method: 'POST', body: { question, context: '' } });
-            state.aiThread[state.aiThread.length - 1] = { who: 'ai', text: r.answer };
+            let text;
+            if (r.task_id) {
+                const res = await pollAiTask(r.task_id);
+                text = res.status === 'done' ? (res.output || '') : ('✕ ' + (res.error || 'neuspješno'));
+            } else {
+                text = r.answer; // API mod (sinkrono)
+            }
+            state.aiThread[state.aiThread.length - 1] = { who: 'ai', text };
         } catch (err) {
             state.aiThread[state.aiThread.length - 1] = { who: 'ai', text: '✕ ' + err.message };
         }

@@ -17,9 +17,10 @@ use ForgePanel\Agent\ValidationException;
  */
 final class AssistantExec extends Operation
 {
+    // Dugotrajno → task queue (komanda može trajati); ne blokira glavnu petlju.
     public function isLongRunning(): bool
     {
-        return false;
+        return true;
     }
 
     public function validate(array $params): void
@@ -34,10 +35,10 @@ final class AssistantExec extends Operation
     {
         $cmd = (string) $params['command'];
         $result = Proc::run(['bash', '-lc', $cmd], timeout_s: 120);
-        return [
-            'exit' => $result->exit_code,
-            'stdout' => mb_substr($result->stdout, 0, 100000),
-            'stderr' => mb_substr($result->stderr, 0, 20000),
-        ];
+        $out = mb_substr($result->stdout, 0, 100000);
+        $err = mb_substr($result->stderr, 0, 20000);
+        // rezultat u task.output → web ga čita pollanjem
+        $context->output($out . ($err !== '' ? "\n" . $err : '') . "\n[exit {$result->exit_code}]");
+        return ['exit' => $result->exit_code, 'stdout' => $out, 'stderr' => $err];
     }
 }

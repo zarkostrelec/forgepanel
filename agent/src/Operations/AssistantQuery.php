@@ -15,9 +15,11 @@ use ForgePanel\Agent\ValidationException;
  */
 final class AssistantQuery extends Operation
 {
+    // Dugotrajno (claude zna trajati desetke sekundi) → task queue, NE sinkroni
+    // socket poziv. Inače bi blokirao agentovu glavnu petlju i web FPM worker.
     public function isLongRunning(): bool
     {
-        return false;
+        return true;
     }
 
     public function validate(array $params): void
@@ -30,7 +32,9 @@ final class AssistantQuery extends Operation
 
     public function execute(array $params, TaskContext $context): array
     {
-        $answer = (new ClaudeCli($this->config))->query((string) $params['prompt']);
+        $answer = (new ClaudeCli($this->config))->query((string) $params['prompt'], 150);
+        // odgovor ide u task.output → web ga čita pollanjem
+        $context->output($answer);
         return ['answer' => $answer];
     }
 }
