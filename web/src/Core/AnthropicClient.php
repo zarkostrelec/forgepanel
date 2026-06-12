@@ -42,7 +42,7 @@ final class AnthropicClient
         ];
 
         $ch = curl_init(self::ENDPOINT);
-        curl_setopt_array($ch, [
+        HttpClient::apply($ch, [
             CURLOPT_POST => true,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 120,

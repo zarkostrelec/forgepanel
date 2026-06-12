@@ -38,9 +38,23 @@ final class Crypto
         return $plain;
     }
 
+    /** Poznata dev/placeholder vrijednost koja se NIKAD ne smije koristiti u produkciji. */
+    private const FORBIDDEN_SECRET = 'forgepanel-dev-secret-change-me';
+    private const MIN_SECRET_LEN = 16;
+
     private function key(): string
     {
+        // app_secret MORA biti konfiguriran (installer ga generira: openssl rand -hex 32).
+        // Nikad ne padaj na poznati default — to bi tiho srozalo svu enkripciju na javno
+        // poznat ključ (Cloudflare/Anthropic tokeni, DB lozinke za pMA bi bili dekriptabilni).
+        $secret = $this->config->get('app_secret', '');
+        if ($secret === '' || $secret === self::FORBIDDEN_SECRET || strlen($secret) < self::MIN_SECRET_LEN) {
+            throw new \RuntimeException(
+                'app_secret nije ispravno konfiguriran (prazan, default ili kraći od '
+                . self::MIN_SECRET_LEN . ' znakova) — enkripcija odbijena.'
+            );
+        }
         // app_secret iz configa → 32-bajtni ključ (BLAKE2b)
-        return sodium_crypto_generichash($this->config->get('app_secret', 'forgepanel-dev-secret-change-me'), '', SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        return sodium_crypto_generichash($secret, '', SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     }
 }

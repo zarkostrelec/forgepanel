@@ -81,12 +81,17 @@ final class Auth
             throw new HttpException(401, 'invalid_session');
         }
         $user = $this->db->one('SELECT * FROM users WHERE id = ?', [$session['user_id']]);
-        if ($user === null || $user['twofa_secret'] === null
-            || !Totp::verify((string) $user['twofa_secret'], $code)
-        ) {
+        if ($user === null) {
+            throw new HttpException(401, 'invalid_session');
+        }
+        // Brute-force zaštita i na drugom faktoru: isti lockout kao kod lozinke.
+        $this->assertNotLocked($user);
+        if ($user['twofa_secret'] === null || !Totp::verify((string) $user['twofa_secret'], $code)) {
+            $this->registerFailure((int) $user['id'], (int) $user['failed_logins']);
             $this->audit->log($session['user_id'] ?? null, (string) ($user['email'] ?? '?'), 'auth.twofa_failed', null, $request->ip);
             throw new HttpException(401, 'invalid_code');
         }
+        $this->db->run('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?', [$user['id']]);
         $this->db->run('UPDATE sessions SET twofa_passed = 1 WHERE id = ?', [$session['id']]);
     }
 
@@ -126,7 +131,11 @@ final class Auth
     public function verifyWebauthnLogin(string $token, array $response, string $rp_id, string $origin, Request $request): void
     {
         $session = $this->sessionRow($token) ?? throw new HttpException(401, 'invalid_session');
-        $email = (string) ($this->db->one('SELECT email FROM users WHERE id = ?', [$session['user_id']])['email'] ?? '?');
+        $user = $this->db->one('SELECT * FROM users WHERE id = ?', [$session['user_id']])
+            ?? throw new HttpException(401, 'invalid_session');
+        $email = (string) ($user['email'] ?? '?');
+        // Brute-force zaštita i na WebAuthn drugom faktoru.
+        $this->assertNotLocked($user);
 
         $challenge = $this->consumeChallenge('webauthn_login_' . $session['id']);
         $credential = $this->db->one(
@@ -148,6 +157,7 @@ final class Auth
                 (int) $credential['sign_count'],
             );
         } catch (\RuntimeException $e) {
+            $this->registerFailure((int) $session['user_id'], (int) $user['failed_logins']);
             $this->audit->log((int) $session['user_id'], $email, 'auth.webauthn_failed', ['reason' => $e->getMessage()], $request->ip);
             throw new HttpException(401, 'invalid_assertion');
         }
@@ -156,6 +166,7 @@ final class Auth
             'UPDATE webauthn_credentials SET sign_count = ?, last_used_at = NOW() WHERE id = ?',
             [$new_count, $credential['id']]
         );
+        $this->db->run('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?', [$user['id']]);
         $this->db->run('UPDATE sessions SET twofa_passed = 1 WHERE id = ?', [$session['id']]);
         $this->audit->log((int) $session['user_id'], $email, 'auth.webauthn_ok', ['key' => $credential['label']], $request->ip);
     }
@@ -261,6 +272,14 @@ final class Auth
             'SELECT * FROM sessions WHERE id = ? AND expires_at > NOW()',
             [hash('sha256', $token)]
         );
+    }
+
+    /** @param array<string, mixed> $user — baca 429 ako je račun trenutno zaključan. */
+    private function assertNotLocked(array $user): void
+    {
+        if ($user['locked_until'] !== null && strtotime((string) $user['locked_until']) > time()) {
+            throw new HttpException(429, 'account_locked');
+        }
     }
 
     private function registerFailure(int $user_id, int $failed_so_far): void

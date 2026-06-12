@@ -30,10 +30,13 @@ final class Response
         header('X-Content-Type-Options: nosniff');
         header('X-Frame-Options: DENY');
         header('Referrer-Policy: same-origin');
-        // style-src 'unsafe-inline': UI koristi inline style atribute (progress width); script-src ostaje strogo 'self'
-        header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
-        header('Strict-Transport-Security: max-age=63072000');
+        // style-src 'unsafe-inline': UI koristi inline style atribute (progress width); script-src ostaje strogo 'self'.
+        // base-uri/form-action 'self' i object-src 'none' zatvaraju injection vektore; upgrade-insecure-requests.
+        header("Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; upgrade-insecure-requests");
+        header('Strict-Transport-Security: max-age=63072000; includeSubDomains; preload');
         header('Cross-Origin-Opener-Policy: same-origin');
-        header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+        header('Cross-Origin-Resource-Policy: same-origin');
+        header('X-Permitted-Cross-Domain-Policies: none');
+        header('Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()');
     }
 }

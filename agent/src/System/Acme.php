@@ -168,6 +168,11 @@ final class Acme
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_HTTPHEADER => ['Content-Type: application/jose+json'],
             CURLOPT_POSTFIELDS => $body,
+            // ACME nad rootom: obavezna TLS verifikacija + samo https (anti-MITM na izdavanje certa)
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
         ]);
         $response = curl_exec($ch);
         if (!is_string($response)) {

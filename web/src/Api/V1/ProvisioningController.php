@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ForgePanel\Web\Api\V1;
 
 use ForgePanel\Web\Core\Auth;
+use ForgePanel\Web\Core\HttpClient;
 use ForgePanel\Web\Core\HttpException;
 use ForgePanel\Web\Core\Request;
 use ForgePanel\Web\Core\Response;
@@ -132,12 +133,13 @@ final class ProvisioningController extends Controller
     {
         $row = $this->app->db->one("SELECT value FROM settings WHERE `key` = 'provisioning_webhook'");
         $url = $row === null ? null : json_decode((string) $row['value'], true);
-        if (!is_string($url) || !str_starts_with($url, 'https://')) {
+        // Anti-SSRF: samo https i samo javne mete (ne loopback/private/metadata IP).
+        if (!is_string($url) || !HttpClient::isSafePublicUrl($url)) {
             return;
         }
         $body = json_encode(['event' => $event, 'data' => $payload, 'ts' => time()], JSON_UNESCAPED_SLASHES);
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        HttpClient::apply($ch, [
             CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10,
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_POSTFIELDS => $body,
