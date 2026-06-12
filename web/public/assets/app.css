@@ -730,3 +730,7 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
     font-size: var(--fs-sm); padding: 4px 11px; border-radius: 7px; cursor: pointer; transition: background 0.12s, color 0.12s; }
 .pill:hover { color: var(--ink); }
 .pill.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); font-weight: 600; }
+
+/* Checkbox redak (npr. PHP verzije u planu) */
+.checkrow { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.chk { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-sm); cursor: pointer; }
