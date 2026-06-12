@@ -26,14 +26,38 @@ final class MonitoringController extends Controller
     private function services(Request $request): never
     {
         $this->ctx($request, 'monitoring:read')->requireRole('admin');
+        $panel_fpm = 'php' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION . '-fpm';
+        // Servisi koje prikazujemo (status + potrošnja iz monitoring_metrics)
+        $list = ['nginx', 'apache2', $panel_fpm, 'mariadb', 'mysql', 'postfix', 'dovecot',
+            'rspamd', 'named', 'proftpd', 'redis-server', 'docker', 'fail2ban', 'forge-agentd'];
+
+        // Zadnja izmjerena potrošnja po servisu (scope service:<name>)
+        $usage = [];
+        foreach ($this->app->db->all(
+            "SELECT scope, metric, value FROM monitoring_metrics m
+             WHERE scope LIKE 'service:%' AND metric IN ('cpu_pct','mem_bytes') AND resolution='minute'
+               AND ts = (SELECT MAX(ts) FROM monitoring_metrics WHERE scope=m.scope AND metric=m.metric)"
+        ) as $row) {
+            $usage[substr((string) $row['scope'], 8)][$row['metric']] = (float) $row['value'];
+        }
+
         $services = [];
-        // panelov FPM servis = verzija na kojoj web sloj radi (runtime, ne hardkodirano)
-        foreach (['nginx', 'mariadb', 'php' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION . '-fpm', 'fail2ban'] as $service) {
+        foreach ($list as $service) {
             try {
-                $services[$service] = $this->app->agent->call('service.status', ['service' => $service]);
+                $status = $this->app->agent->call('service.status', ['service' => $service]);
             } catch (\Throwable) {
-                $services[$service] = ['ActiveState' => 'unknown'];
+                $status = ['ActiveState' => 'unknown'];
             }
+            // servis koji uopće nije instaliran (inactive + bez load patha) preskačemo
+            if (($status['ActiveState'] ?? '') === 'inactive' && ($status['LoadState'] ?? '') === 'not-found') {
+                continue;
+            }
+            $status['cpu_pct'] = $usage[$service]['cpu_pct'] ?? null;
+            // mem iz metrika; fallback na trenutni MemoryCurrent iz systemctl show
+            $mem_current = isset($status['MemoryCurrent']) && ctype_digit((string) $status['MemoryCurrent'])
+                ? (float) $status['MemoryCurrent'] : null;
+            $status['mem_bytes'] = $usage[$service]['mem_bytes'] ?? $mem_current;
+            $services[$service] = $status;
         }
         Response::ok($services);
     }

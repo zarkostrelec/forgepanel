@@ -18,6 +18,10 @@ final class Scheduler
     /** @var array<int, int> probe_id => zadnja provjera (unix ts) */
     private array $probe_last = [];
 
+    /** Delta-uzorci za stope (rate): metrika => [ts(float), kumulativna vrijednost]. */
+    /** @var array<string, array{0: float, 1: float}> */
+    private array $rate_last = [];
+
     public function __construct(
         private readonly Db $db,
         private readonly Config $config,
@@ -233,24 +237,129 @@ final class Scheduler
 
     private function collectMetrics(): void
     {
+        $now = microtime(true);
         $meminfo = [];
-        foreach (explode("\n", (string) file_get_contents('/proc/meminfo')) as $line) {
+        foreach (explode("\n", (string) @file_get_contents('/proc/meminfo')) as $line) {
             if (preg_match('/^(\w+):\s+(\d+)\s*kB/', $line, $m)) {
                 $meminfo[$m[1]] = (int) $m[2] * 1024;
             }
         }
         $load = sys_getloadavg() ?: [0.0];
+        $cpu_count = max(1, preg_match_all('/^processor\s*:/m', (string) @file_get_contents('/proc/cpuinfo')));
+
+        // [scope, metric, value]
         $rows = [
-            ['cpu_load1', $load[0]],
-            ['mem_used_bytes', (float) (($meminfo['MemTotal'] ?? 0) - ($meminfo['MemAvailable'] ?? 0))],
-            ['disk_used_bytes', (float) disk_total_space('/') - (float) disk_free_space('/')],
+            ['server', 'cpu_load1', $load[0]],
+            ['server', 'mem_used_bytes', (float) (($meminfo['MemTotal'] ?? 0) - ($meminfo['MemAvailable'] ?? 0))],
+            ['server', 'disk_used_bytes', (float) disk_total_space('/') - (float) disk_free_space('/')],
         ];
-        foreach ($rows as [$metric, $value]) {
+
+        // Ukupni CPU % iz /proc/stat (delta busy/total između tickova)
+        if (preg_match('/^cpu\s+(.+)$/m', (string) @file_get_contents('/proc/stat'), $m)) {
+            $f = array_map('floatval', preg_split('/\s+/', trim($m[1])));
+            $total = array_sum($f);
+            $idle = ($f[3] ?? 0) + ($f[4] ?? 0); // idle + iowait
+            if (isset($this->rate_last['cpu_total'])) {
+                [$pt, $pidle] = [$this->rate_last['cpu_total'][1], $this->rate_last['cpu_idle'][1]];
+                $dt = $total - $pt;
+                $rows[] = ['server', 'cpu_pct', $dt > 0 ? max(0.0, min(100.0, (1 - ($idle - $pidle) / $dt) * 100)) : 0.0];
+            }
+            $this->rate_last['cpu_total'] = [$now, $total];
+            $this->rate_last['cpu_idle'] = [$now, $idle];
+        }
+
+        // Disk I/O (B/s) iz /proc/diskstats — samo fizički diskovi (sd*, nvme*, vd*, xvd*)
+        $r_sectors = $w_sectors = 0.0;
+        foreach (explode("\n", (string) @file_get_contents('/proc/diskstats')) as $line) {
+            $p = preg_split('/\s+/', trim($line));
+            if (count($p) >= 10 && preg_match('/^(sd[a-z]+|nvme\d+n\d+|vd[a-z]+|xvd[a-z]+)$/', $p[2])) {
+                $r_sectors += (float) $p[5];
+                $w_sectors += (float) $p[9];
+            }
+        }
+        foreach ([['disk_read_bps', $r_sectors * 512], ['disk_write_bps', $w_sectors * 512]] as [$metric, $cumulative]) {
+            if (($rate = $this->rate($metric, $now, $cumulative)) !== null) {
+                $rows[] = ['server', $metric, $rate];
+            }
+        }
+
+        // Mreža (B/s) iz /proc/net/dev — sve osim loopbacka
+        $rx = $tx = 0.0;
+        foreach (explode("\n", (string) @file_get_contents('/proc/net/dev')) as $line) {
+            if (preg_match('/^\s*([^:]+):\s*(\d+)(?:\s+\d+){7}\s+(\d+)/', $line, $m) && trim($m[1]) !== 'lo') {
+                $rx += (float) $m[2];
+                $tx += (float) $m[3];
+            }
+        }
+        foreach ([['net_rx_bps', $rx], ['net_tx_bps', $tx]] as [$metric, $cumulative]) {
+            if (($rate = $this->rate($metric, $now, $cumulative)) !== null) {
+                $rows[] = ['server', $metric, $rate];
+            }
+        }
+
+        // Per-servis CPU % (od ukupnog hosta) + RAM, iz cgroup v2 (system.slice)
+        foreach ($this->trackedServices() as $unit) {
+            $cg = "/sys/fs/cgroup/system.slice/{$unit}.service";
+            if (!is_dir($cg)) {
+                continue;
+            }
+            $scope = 'service:' . preg_replace('/\.service$/', '', $unit);
+            $mem = (int) trim((string) @file_get_contents("$cg/memory.current"));
+            if ($mem > 0) {
+                $rows[] = [$scope, 'mem_bytes', (float) $mem];
+            }
+            if (preg_match('/usage_usec\s+(\d+)/', (string) @file_get_contents("$cg/cpu.stat"), $cm)) {
+                $key = "cpu:$scope";
+                if (isset($this->rate_last[$key])) {
+                    $dt = $now - $this->rate_last[$key][0];
+                    $dusec = (float) $cm[1] - $this->rate_last[$key][1];
+                    if ($dt > 0 && $dusec >= 0) {
+                        $rows[] = [$scope, 'cpu_pct', min(100.0, ($dusec / 1e6) / $dt / $cpu_count * 100)];
+                    }
+                }
+                $this->rate_last[$key] = [$now, (float) $cm[1]];
+            }
+        }
+
+        // Batch insert
+        $values = [];
+        $params = [];
+        foreach ($rows as [$scope, $metric, $value]) {
+            $values[] = '(?, ?, ?, NOW())';
+            array_push($params, $scope, $metric, $value);
+        }
+        if ($values !== []) {
             $this->db->run(
-                "INSERT INTO monitoring_metrics (scope, metric, resolution, value, ts) VALUES ('server', ?, 'minute', ?, NOW())",
-                [$metric, $value]
+                "INSERT INTO monitoring_metrics (scope, metric, value, ts) VALUES " . implode(', ', $values),
+                $params
             );
         }
+    }
+
+    /** Stopa (jedinica/s) iz kumulativnog brojača; null pri prvom uzorku ili reset/overflow. */
+    private function rate(string $metric, float $now, float $cumulative): ?float
+    {
+        $prev = $this->rate_last[$metric] ?? null;
+        $this->rate_last[$metric] = [$now, $cumulative];
+        if ($prev === null) {
+            return null;
+        }
+        $dt = $now - $prev[0];
+        $delta = $cumulative - $prev[1];
+        return ($dt > 0 && $delta >= 0) ? $delta / $dt : null;
+    }
+
+    /** Servisi koje pratimo po cgroupu — fiksni set + sve prisutne php*-fpm verzije. */
+    private function trackedServices(): array
+    {
+        $base = [
+            'nginx', 'apache2', 'mariadb', 'mysql', 'postfix', 'dovecot', 'rspamd',
+            'named', 'proftpd', 'fail2ban', 'redis-server', 'docker', 'forge-agentd',
+        ];
+        foreach (glob('/sys/fs/cgroup/system.slice/php*-fpm.service') ?: [] as $path) {
+            $base[] = basename($path, '.service');
+        }
+        return $base;
     }
 
     private function aggregate(): void
