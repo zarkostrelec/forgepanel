@@ -131,9 +131,10 @@ final class DashboardController extends Controller
             ];
         }
 
-        // Disk pun
-        $disk_total = (float) disk_total_space('/');
-        $disk_free = (float) disk_free_space('/');
+        // Disk pun — stat panelovog direktorija (unutar open_basedira, isti root FS);
+        // '/' bi pao na open_basedir restrikciju web sloja
+        $disk_total = (float) @disk_total_space(__DIR__);
+        $disk_free = (float) @disk_free_space(__DIR__);
         if ($disk_total > 0 && $disk_free / $disk_total < 0.15) {
             $pct = round((1 - $disk_free / $disk_total) * 100);
             $items[] = [
