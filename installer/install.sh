@@ -576,6 +576,8 @@ EOF
     install -d -o fpanel -g fpanel -m 700 "$pma_dir/tmp"
     chown root:fpanel "$pma_dir/config.inc.php"
     chmod 640 "$pma_dir/config.inc.php"
+    # Zastavica u DB — web sloj (open_basedir) ne može stat-ati /opt/forgepanel/phpmyadmin
+    sql forgepanel -e "INSERT INTO components (name, status, packages) VALUES ('phpmyadmin', 'installed', '[]') ON DUPLICATE KEY UPDATE status='installed';" 2>/dev/null || true
     log "  phpMyAdmin spreman na https://${PANEL_FQDN}:8443/pma/ (auto-login iz panela)"
 }
 

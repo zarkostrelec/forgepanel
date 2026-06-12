@@ -202,7 +202,16 @@ final class DatabasesController extends Controller
     private function pmaStatus(Request $request): never
     {
         $this->ctx($request, 'databases:read');
-        Response::ok(['installed' => is_dir('/opt/forgepanel/phpmyadmin') && is_file('/opt/forgepanel/phpmyadmin/index.php')]);
+        Response::ok(['installed' => $this->pmaInstalled()]);
+    }
+
+    /**
+     * Web sloj ima open_basedir (bez /opt/forgepanel/phpmyadmin), pa is_dir() tamo
+     * uvijek faila — status čitamo iz DB zastavice koju agent postavi pri instalaciji.
+     */
+    private function pmaInstalled(): bool
+    {
+        return $this->app->db->one("SELECT 1 FROM components WHERE name = 'phpmyadmin' AND status = 'installed'") !== null;
     }
 
     /** Naknadna instalacija phpMyAdmina iz panela (admin). */
@@ -231,7 +240,7 @@ final class DatabasesController extends Controller
         $ctx = $this->ctx($request, 'databases:read');
         $database = $this->databaseOr404($ctx, (int) $request->param('id'));
 
-        if (!is_dir('/opt/forgepanel/phpmyadmin')) {
+        if (!$this->pmaInstalled()) {
             throw new HttpException(503, 'pma_not_installed');
         }
         $db_user = $this->app->db->one(
