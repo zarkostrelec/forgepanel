@@ -195,6 +195,23 @@ suite_for() {
     fi
 }
 
+pick_mirror() {
+    # Geo-redirectori (deb.mariadb.org) preusmjeravaju SVAKI zahtjev iznova i znaju
+    # poslati apt na mrtav mirror usred downloada — zato se bira prvi KONKRETAN
+    # mirror koji ima resolute (ili noble) suite, redirector je tek zadnja opcija.
+    local uri
+    for uri in "$@"; do
+        if curl -fsI --max-time 15 "${uri}/dists/${UBUNTU_SUITE}/Release" >/dev/null 2>&1 \
+        || curl -fsI --max-time 15 "${uri}/dists/${FALLBACK_SUITE}/Release" >/dev/null 2>&1; then
+            echo "$uri"
+            return 0
+        fi
+        # na stderr — stdout ove funkcije se hvata u command substitution
+        log "  mirror nedostupan, preskačem: $uri" >&2
+    done
+    return 1
+}
+
 add_repo() {
     # add_repo <ime> <uri> <key_url> <components>
     local name="$1" uri="$2" key_url="$3" components="$4"
@@ -246,8 +263,15 @@ bootstrap_repos() {
         "https://nginx.org/keys/nginx_signing.key" \
         "nginx"
     if [[ "$DB_ENGINE" == "mariadb" ]]; then
+        local mariadb_uri
+        mariadb_uri=$(pick_mirror \
+            "https://mirror.netcologne.de/mariadb/repo/11.8/ubuntu" \
+            "https://ftp.nluug.nl/db/mariadb/repo/11.8/ubuntu" \
+            "https://mirror.kumi.systems/mariadb/repo/11.8/ubuntu" \
+            "https://deb.mariadb.org/11.8/ubuntu") \
+            || die "Nijedan MariaDB mirror nije dostupan — provjeri izlaz prema internetu."
         add_repo "mariadb" \
-            "https://deb.mariadb.org/11.8/ubuntu" \
+            "$mariadb_uri" \
             "https://mariadb.org/mariadb_release_signing_key.pgp" \
             "main"
     fi

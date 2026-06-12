@@ -178,6 +178,7 @@ bash installer/install.sh --uninstall
 |---|---|
 | Installer odbija start | Pročitaj poruku — preflight točno kaže što ne valja (OS, RAM, FQDN, konflikt...) |
 | Instalacija stala | `tail -50 /var/log/forgepanel-install.log` |
+| apt ne može skinuti pakete (`Unable to connect to …`) | Mirror je pao — zamijeni `URIs:` u `/etc/apt/sources.list.d/forgepanel-*.sources` drugim mirrorom, `apt-get update`, pa ponovno pokreni installer (checkpointi nastavljaju gdje je stalo) |
 | Panel ne odgovara na :8443 | `systemctl status nginx php8.4-fpm` · `curl -k https://127.0.0.1:8443` lokalno · vanjski firewall providera? |
 | Taskovi stoje u "pending" | `systemctl status forge-agentd` · `journalctl -u forge-agentd -n 50` |
 | AutoSSL ne izdaje cert | DNS zapis resolva na server? Port 80 otvoren izvana? Detalji u tasku (SSL stranica) |
