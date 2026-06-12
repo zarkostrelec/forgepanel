@@ -103,8 +103,11 @@ final class WebmailSetup extends Operation
         user = www-data
         group = www-data
         listen = /run/php/fpm-webmail.sock
-        listen.owner = www-data
+        ; socket vlasnik = nginx (panelov web user) da se izbjegne 502 (EACCES);
+        ; FPM worker ostaje www-data (vlasnik Roundcube fileova)
+        listen.owner = nginx
         listen.group = www-data
+        listen.mode = 0660
         pm = ondemand
         pm.max_children = 8
         pm.process_idle_timeout = 30s
