@@ -1238,7 +1238,13 @@ async function pageWebsiteDetail(id) {
         box.innerHTML = `<div class="empty">${t('assistant.thinking')}</div>`;
         try {
             const r = await api(`/assistant/diagnose/${id}`, { method: 'POST' });
-            box.innerHTML = `<div class="task-output" style="white-space:pre-wrap">${esc(r.answer)}</div>`;
+            let answer = r.answer;
+            if (r.task_id) { // lokalni mod (claude CLI) — async, pollaj task
+                const res = await pollAiTask(r.task_id);
+                if (res.status !== 'done') throw new Error(res.error || 'assistant_failed');
+                answer = res.output;
+            }
+            box.innerHTML = `<div class="task-output" style="white-space:pre-wrap">${esc(answer)}</div>`;
         } catch (err) {
             if (err.message === 'assistant_not_configured') {
                 box.innerHTML = `<div class="alert warn">${t('assistant.not_configured')}

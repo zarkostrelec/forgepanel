@@ -223,12 +223,22 @@ final class AssistantController extends Controller
         } catch (\Throwable) {
         }
 
-        $answer = $this->client()->ask(
-            self::SYSTEM_PROMPT,
-            "Zašto bi stranica {$vhost['domain']} mogla biti spora ili imati problema? Analiziraj kontekst i predloži korake.\n\n--- KONTEKST ---\n$context"
-        );
-        $this->app->audit->log($ctx->user_id, $ctx->email, 'assistant.diagnose', ['domain' => $vhost['domain']], $request->ip);
-        Response::ok(['answer' => $answer]);
+        $question = "Zašto bi stranica {$vhost['domain']} mogla biti spora ili imati problema? Analiziraj kontekst i predloži korake.\n\n--- KONTEKST ---\n$context";
+
+        // Lokalni Claude CLI (preko agenta) ima prednost — ne treba API ključ.
+        // Async kao i ask(): enqueue task, UI poll-a rezultat (claude zna trajati).
+        $local = $this->localStatus();
+        if ($local['available'] && $local['logged_in']) {
+            $task_id = $this->enqueueTask($ctx->user_id, 'assistant.query', [
+                'prompt' => self::SYSTEM_PROMPT . self::LOCAL_SUFFIX . "\n\n--- UPIT ---\n" . $question,
+            ]);
+            $this->app->audit->log($ctx->user_id, $ctx->email, 'assistant.diagnose', ['domain' => $vhost['domain'], 'mode' => 'local'], $request->ip);
+            Response::ok(['task_id' => $task_id, 'mode' => 'local']);
+        }
+
+        $answer = $this->client()->ask(self::SYSTEM_PROMPT, $question);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'assistant.diagnose', ['domain' => $vhost['domain'], 'mode' => 'api'], $request->ip);
+        Response::ok(['answer' => $answer, 'mode' => 'api']);
     }
 
     private function client(): AnthropicClient
