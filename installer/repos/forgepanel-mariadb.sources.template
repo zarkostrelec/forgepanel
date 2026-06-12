@@ -1,6 +1,8 @@
 # MariaDB 11.x LTS — mariadb.org
+# {URI} installer popunjava prvim zdravim KONKRETNIM mirrorom (pick_mirror) —
+# geo-redirector deb.mariadb.org zna apt poslati na mrtav mirror, pa je zadnja opcija.
 Types: deb
-URIs: https://deb.mariadb.org/11.8/ubuntu
+URIs: {URI}
 Suites: {SUITE}
 Components: main
 Signed-By: /etc/apt/keyrings/mariadb.gpg
