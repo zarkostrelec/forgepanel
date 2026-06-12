@@ -169,72 +169,70 @@ final class MailConf
 
     private function configureDovecot(string $mail_db_pass, \Closure $log): void
     {
-        $log("Dovecot konfiguracija (SQL auth, LMTP, quota)\n");
-        file_put_contents('/etc/dovecot/dovecot-sql.conf.ext', <<<CONF
-        driver = mysql
-        connect = host=127.0.0.1 dbname=forgepanel user=forgepanel_mail password={$mail_db_pass}
-        default_pass_scheme = SHA512-CRYPT
-        password_query = SELECT CONCAT(m.local_part, '@', d.domain) AS user, m.password_hash AS password \\
-            FROM mailboxes m JOIN mail_domains d ON d.id = m.mail_domain_id \\
-            WHERE m.local_part = '%n' AND d.domain = '%d' AND m.status = 'active'
-        user_query = SELECT 'vmail' AS uid, 'vmail' AS gid, \\
-            CONCAT('/var/vmail/', d.domain, '/', m.local_part) AS home, \\
-            CONCAT('*:bytes=', m.quota_bytes) AS quota_rule \\
-            FROM mailboxes m JOIN mail_domains d ON d.id = m.mail_domain_id \\
-            WHERE m.local_part = '%n' AND d.domain = '%d' AND m.status = 'active'
-        CONF . "\n");
-        chmod('/etc/dovecot/dovecot-sql.conf.ext', 0o600);
+        $log("Dovecot 2.4 konfiguracija (inline SQL auth, LMTP)\n");
+
+        // Stari 2.3 SQL fajl ukloni ako je zaostao (2.4 ga ne koristi)
+        @unlink('/etc/dovecot/dovecot-sql.conf.ext');
 
         $has_v6 = is_readable('/proc/net/if_inet6') && trim((string) file_get_contents('/proc/net/if_inet6')) !== '';
         $listen = $has_v6 ? '*, ::' : '*';
 
-        file_put_contents('/etc/dovecot/conf.d/99-forgepanel.conf', "listen = {$listen}\n" . <<<'CONF'
-        # ForgePanel mail — virtualni mailboxi iz panel baze
+        // Dovecot 2.4: mail_location → mail_driver/mail_path/mail_home,
+        // dovecot-sql.conf.ext ukinut (SQL inline), varijable %{user|...},
+        // ssl_cert/ssl_key → ssl_server_cert_file/ssl_server_key_file.
+        $conf = <<<CONF
+        # ForgePanel mail (Dovecot 2.4) — virtualni mailboxi iz panel baze
+        listen = {$listen}
         protocols = imap pop3 lmtp
-        mail_location = maildir:/var/vmail/%d/%n/Maildir
+
+        mail_uid = vmail
+        mail_gid = vmail
         mail_privileged_group = vmail
-        first_valid_uid = 1
+        mail_home = /var/vmail/%{user | domain}/%{user | username}
+        mail_driver = maildir
+        mail_path = ~/Maildir
 
         ssl = yes
-        ssl_cert = </etc/forgepanel/ssl/panel/fullchain.pem
-        ssl_key = </etc/forgepanel/ssl/panel/privkey.pem
+        ssl_server_cert_file = /etc/forgepanel/ssl/panel/fullchain.pem
+        ssl_server_key_file = /etc/forgepanel/ssl/panel/privkey.pem
 
         auth_mechanisms = plain login
-        disable_plaintext_auth = yes
+        auth_username_format = %{user | lower}
 
-        passdb {
-            driver = sql
-            args = /etc/dovecot/dovecot-sql.conf.ext
-        }
-        userdb {
-            driver = sql
-            args = /etc/dovecot/dovecot-sql.conf.ext
+        sql_driver = mysql
+        mysql /run/mysqld/mysqld.sock {
+          user = forgepanel_mail
+          password = {$mail_db_pass}
+          dbname = forgepanel
         }
 
-        mail_plugins = $mail_plugins quota
-        plugin {
-            quota = count:User quota
-            quota_vsizes = yes
+        passdb sql {
+          query = SELECT CONCAT(m.local_part, '@', d.domain) AS user, m.password_hash AS password FROM mailboxes m JOIN mail_domains d ON d.id = m.mail_domain_id WHERE m.local_part = '%{user | username}' AND d.domain = '%{user | domain}' AND m.status = 'active'
+          default_password_scheme = SHA512-CRYPT
         }
-        protocol imap {
-            mail_plugins = $mail_plugins imap_quota
+        userdb sql {
+          query = SELECT 'vmail' AS uid, 'vmail' AS gid FROM mailboxes m JOIN mail_domains d ON d.id = m.mail_domain_id WHERE m.local_part = '%{user | username}' AND d.domain = '%{user | domain}' AND m.status = 'active'
         }
 
         service lmtp {
-            unix_listener /var/spool/postfix/private/dovecot-lmtp {
-                mode = 0600
-                user = postfix
-                group = postfix
-            }
+          unix_listener /var/spool/postfix/private/dovecot-lmtp {
+            mode = 0600
+            user = postfix
+            group = postfix
+          }
         }
         service auth {
-            unix_listener /var/spool/postfix/private/auth {
-                mode = 0660
-                user = postfix
-                group = postfix
-            }
+          unix_listener /var/spool/postfix/private/auth {
+            mode = 0660
+            user = postfix
+            group = postfix
+          }
         }
-        CONF . "\n");
+        CONF;
+        file_put_contents('/etc/dovecot/conf.d/99-forgepanel.conf', $conf . "\n");
+        // sadrži DB lozinku → samo root + dovecot grupa
+        @chgrp('dovecot', '/etc/dovecot/conf.d/99-forgepanel.conf');
+        chmod('/etc/dovecot/conf.d/99-forgepanel.conf', 0o640);
 
         $check = Proc::run(['doveconf', '-n']);
         if (!$check->ok()) {
