@@ -42,6 +42,19 @@ const fmtDate = (s) => {
     const d = new Date(String(s).replace(' ', 'T'));
     return new Intl.DateTimeFormat('hr-HR', { dateStyle: 'short', timeStyle: 'short' }).format(d);
 };
+const fmtTime = (s) => {
+    if (!s) return '—';
+    const d = new Date(String(s).replace(' ', 'T'));
+    return new Intl.DateTimeFormat('hr-HR', { timeStyle: 'medium' }).format(d);
+};
+const timeAgo = (s) => {
+    if (!s) return '—';
+    const sec = Math.max(0, (Date.now() - new Date(String(s).replace(' ', 'T'))) / 1000);
+    if (sec < 60) return 'sad';
+    if (sec < 3600) return `prije ${Math.floor(sec / 60)} min`;
+    if (sec < 86400) return `prije ${Math.floor(sec / 3600)} h`;
+    return `prije ${Math.floor(sec / 86400)} d`;
+};
 const fmtBytes = (n) => {
     n = Number(n) || 0;
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -698,6 +711,8 @@ async function renderAiDrawer() {
         }
         renderThread();
     };
+    state.aiAsk = ask; // omogući "Otvori analizu" s dashboarda da postavi upit
+    if (state.aiPending) { const q = state.aiPending; state.aiPending = null; ask(q); }
     drawer.querySelector('#aiform').addEventListener('submit', (e) => {
         e.preventDefault();
         const q = input.value.trim();
@@ -741,114 +756,165 @@ const metricCard = ({ label, value, unit = '', sub = '', sparkHtml = '' }) => `
         </div>${sparkHtml}</div>
     </div>`;
 
-async function pageDashboard() {
-    setActive('dashboard');
-    main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+// uptime servisa iz ActiveEnterTimestamp ("Day YYYY-MM-DD HH:MM:SS TZ")
+function svcUptime(props) {
+    const ts = props.ActiveEnterTimestamp;
+    if (!ts || ts === '0' || props.ActiveState !== 'active') return '—';
+    const m = String(ts).match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/);
+    if (!m) return '—';
+    const sec = (Date.now() - new Date(m[1].replace(' ', 'T'))) / 1000;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+    return `${Math.floor(sec / 86400)}d`;
+}
 
-    const isAdmin = state.me.role === 'admin';
-    const [vhosts, certs, metrics, services, tasks, cpuHist, memHist] = await Promise.all([
+const SEV = { ok: 'var(--ok)', err: 'var(--danger)', warn: 'var(--warn)', info: 'var(--info)' };
+
+async function refreshDashboard(cfConnected) {
+    const body = document.getElementById('dashbody');
+    if (!body) return;
+    const [vhosts, metrics, services, feed, insights] = await Promise.all([
         api('/vhosts').catch(() => []),
-        api('/ssl').catch(() => []),
-        isAdmin ? api('/monitoring/now').catch(() => null) : null,
-        isAdmin ? api('/monitoring/services').catch(() => null) : null,
-        api('/tasks').catch(() => []),
-        isAdmin ? api('/monitoring/history?metric=cpu_load1').catch(() => []) : [],
-        isAdmin ? api('/monitoring/history?metric=mem_used_bytes').catch(() => []) : [],
+        api('/monitoring/now').catch(() => null),
+        api('/monitoring/services').catch(() => ({})),
+        api('/dashboard/feed').catch(() => ({ events: [], deploys: [] })),
+        api('/dashboard/insights').catch(() => ({ items: [] })),
+    ]);
+    const [cpuHist, memHist, netRx] = await Promise.all([
+        api('/monitoring/history?metric=cpu_pct&range=1h').catch(() => []),
+        api('/monitoring/history?metric=mem_used_bytes&range=1h').catch(() => []),
+        api('/monitoring/history?metric=net_rx_bps&range=1h').catch(() => []),
     ]);
 
-    const expiring = certs.filter((c) => new Date(String(c.expires_at).replace(' ', 'T')) - Date.now() < 30 * 864e5);
     const upCount = vhosts.filter((v) => v.status === 'active').length;
+    const sv = Object.entries(services);
+    const healthy = sv.filter(([, p]) => p.ActiveState === 'active').length;
 
-    const cards = [];
+    // KPI kartice (pravi podaci)
+    const kpis = [];
     if (metrics) {
-        cards.push(metricCard({
-            label: 'CPU', value: metrics.load[0].toFixed(2), unit: `/ ${metrics.cpu_count}`,
+        const cpuPct = metrics.cpu_pct ?? Math.min(100, metrics.load[0] / metrics.cpu_count * 100);
+        kpis.push(metricCard({ label: 'CPU', value: Math.round(cpuPct), unit: '%',
             sub: `load ${metrics.load.map((l) => l.toFixed(2)).join(' · ')}`,
-            sparkHtml: spark(cpuHist.slice(-40).map((p) => Number(p.value))),
-        }));
-        cards.push(metricCard({
-            label: 'RAM', value: fmtBytes(metrics.mem_total_bytes - metrics.mem_available_bytes),
-            unit: `/ ${fmtBytes(metrics.mem_total_bytes)}`,
-            sub: `${Math.round((1 - metrics.mem_available_bytes / metrics.mem_total_bytes) * 100)}% iskorišteno`,
-            sparkHtml: spark(memHist.slice(-40).map((p) => Number(p.value)), { color: 'var(--info)' }),
-        }));
-        cards.push(metricCard({
-            label: 'Disk', value: fmtBytes(metrics.disk_total_bytes - metrics.disk_free_bytes),
-            unit: `/ ${fmtBytes(metrics.disk_total_bytes)}`,
-            sub: `${fmtBytes(metrics.disk_free_bytes)} slobodno`,
-        }));
-        cards.push(metricCard({
-            label: 'Uptime', value: `${Math.floor(metrics.uptime_s / 86400)}d ${Math.floor((metrics.uptime_s % 86400) / 3600)}h`,
-        }));
+            sparkHtml: spark(cpuHist.slice(-44).map((p) => Number(p.value))) }));
+        kpis.push(metricCard({ label: 'RAM', value: fmtBytes(metrics.mem_total_bytes - metrics.mem_available_bytes).replace(/ .*/, ''),
+            unit: `/ ${fmtBytes(metrics.mem_total_bytes)}`, sub: `${Math.round((1 - metrics.mem_available_bytes / metrics.mem_total_bytes) * 100)}% iskorišteno`,
+            sparkHtml: spark(memHist.slice(-44).map((p) => Number(p.value)), { color: 'var(--info)' }) }));
+        kpis.push(metricCard({ label: 'Disk', value: fmtBytes(metrics.disk_total_bytes - metrics.disk_free_bytes).replace(/ .*/, ''),
+            unit: `/ ${fmtBytes(metrics.disk_total_bytes)}`, sub: `${Math.round((1 - metrics.disk_free_bytes / metrics.disk_total_bytes) * 100)}% · ${fmtBytes(metrics.disk_free_bytes)} slobodno` }));
+        kpis.push(metricCard({ label: 'Mreža', value: lastVal(netRx) != null ? fmtBytes(lastVal(netRx)).replace(/ .*/, '') : '—',
+            unit: lastVal(netRx) != null ? fmtBytes(lastVal(netRx)).replace(/^[\d.,]+ /, '') + '/s' : '', sub: 'dolazni promet',
+            sparkHtml: spark(netRx.slice(-44).map((p) => Number(p.value)), { color: 'var(--ok)' }) }));
     }
-    cards.push(metricCard({
-        label: t('nav.websites'), value: vhosts.length,
-        sub: `${upCount} ${t('vhost.status.active')}`,
-    }));
-    if (!metrics) cards.push(metricCard({ label: 'SSL < 30 dana', value: expiring.length }));
+    kpis.push(metricCard({ label: t('nav.websites'), value: vhosts.length, sub: `${upCount} aktivnih` }));
 
-    const recentTasks = tasks.slice(0, 6);
+    body.innerHTML = `
+    <div class="grid cols-5" style="margin-bottom:var(--gap)">${kpis.slice(0, 5).join('')}</div>
 
-    main().innerHTML = `
-    <div class="grid cols-5" style="margin-bottom:var(--gap)">${cards.slice(0, 5).join('')}</div>
-
-    ${expiring.length ? `
-    <div class="ai-box" style="margin-bottom:var(--gap)">
-        <span class="mark">${icon('lock')}</span>
-        <div style="min-width:0">
-            <div style="font-weight:650;margin-bottom:3px">SSL · ${expiring.length} ${t('dash.ssl_expiring')}</div>
-            <div style="font-size:var(--fs-sm);color:var(--ink-2)" class="mono">${expiring.slice(0, 4).map((c) => esc(c.hostname)).join(' · ')}${expiring.length > 4 ? ' …' : ''}</div>
-            <div style="margin-top:9px"><a class="btn small primary" href="#/ssl">${icon('refresh')}${t('ssl.renew_le')}</a></div>
+    ${insights.items.length ? `
+    <div class="ai-box dash-ai" style="margin-bottom:var(--gap)">
+        <span class="mark">${icon('sparkle')}</span>
+        <div style="min-width:0;flex:1">
+            <div style="font-weight:650;margin-bottom:5px">Forge AI · ${insights.items.length} ${insights.items.length === 1 ? 'preporuka' : 'preporuke'}</div>
+            ${insights.items.map((it) => `<div class="dash-ai-row">
+                ${dot(it.severity)}<span>${esc(it.text)}</span></div>`).join('')}
+            <div style="margin-top:10px;display:flex;gap:8px">
+                ${insights.items.find((i) => i.ai_prompt) ? `<button class="btn small primary" id="dashai">${icon('sparkle')}${t('dash.open_analysis')}</button>` : ''}
+            </div>
         </div>
     </div>` : ''}
 
     <div class="grid split">
         <div style="display:flex;flex-direction:column;gap:var(--gap);min-width:0">
-            ${services ? `
+            <div class="card flush">
+                <div class="card-head"><h2>${t('dash.topology')}</h2><span class="spacer"></span>
+                    <span class="badge ${healthy === sv.length ? 'ok' : 'warn'}">${healthy}/${sv.length} ${t('dash.healthy')}</span></div>
+                <div class="topo">
+                    <span class="topo-node">${dot('ok')} Internet</span>
+                    ${cfConnected ? `<span class="topo-link"></span><span class="topo-node">${icon('cloud')} Cloudflare</span>` : ''}
+                    <span class="topo-link"></span><span class="topo-node">${dot(serviceUp(services, 'nginx') ? 'ok' : 'err')} nginx</span>
+                    <span class="topo-link"></span><span class="topo-stack">
+                        ${sv.filter(([n]) => /fpm|apache2/.test(n)).map(([n, p]) => `<span class="topo-node sm">${dot(p.ActiveState === 'active' ? 'ok' : 'err')} ${esc(n.replace('-fpm', ''))}</span>`).join('') || `<span class="topo-node sm">${dot('warn')} php-fpm</span>`}
+                    </span>
+                    <span class="topo-link"></span><span class="topo-stack">
+                        ${sv.filter(([n]) => /maria|mysql|redis/.test(n)).map(([n, p]) => `<span class="topo-node sm">${dot(p.ActiveState === 'active' ? 'ok' : 'err')} ${esc(n)}</span>`).join('') || `<span class="topo-node sm">${dot('warn')} db</span>`}
+                    </span>
+                </div>
+                <div class="topo-foot mono">uptime ${metrics ? Math.floor(metrics.uptime_s / 86400) + 'd ' + Math.floor((metrics.uptime_s % 86400) / 3600) + 'h' : '—'} · Ubuntu 26.04 LTS</div>
+            </div>
             <div class="card flush">
                 <div class="card-head"><h2>${t('dash.services')}</h2><span class="spacer"></span>
-                    <span class="badge ${Object.values(services).every((p) => p.ActiveState === 'active') ? 'ok' : 'warn'}">
-                        ${Object.values(services).filter((p) => p.ActiveState === 'active').length}/${Object.keys(services).length} ${t('dash.healthy')}</span></div>
-                <table class="data"><tbody>
-                ${Object.entries(services).map(([name, props]) => `
-                    <tr><td><span style="display:flex;align-items:center;gap:8px;font-weight:550">
-                        ${dot(props.ActiveState === 'active' ? 'ok' : 'err')}${esc(name)}</span></td>
-                    <td><span class="badge ${props.ActiveState === 'active' ? 'ok' : 'err'}">${esc(props.ActiveState ?? '?')}</span></td>
-                    <td class="mono num hide-sm">${props.MemoryCurrent && props.MemoryCurrent !== '[not set]' ? fmtBytes(props.MemoryCurrent) : ''}</td></tr>`).join('')}
+                    <a class="btn small" href="#/monitoring">${t('dash.all')} ${icon('chevR')}</a></div>
+                <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th></tr></thead><tbody>
+                ${sv.map(([name, p]) => `<tr>
+                    <td><span style="display:flex;align-items:center;gap:8px;font-weight:550">${dot(p.ActiveState === 'active' ? 'ok' : p.ActiveState === 'failed' ? 'err' : 'warn')}<span class="mono">${esc(name)}</span></span></td>
+                    <td><span class="badge ${p.ActiveState === 'active' ? 'ok' : p.ActiveState === 'failed' ? 'err' : ''}">${esc(p.SubState || p.ActiveState || '?')}</span></td>
+                    <td class="mono num">${p.cpu_pct != null ? p.cpu_pct.toFixed(1) + '%' : '—'}</td>
+                    <td class="mono num">${p.mem_bytes != null ? fmtBytes(p.mem_bytes) : '—'}</td>
+                    <td class="mono num hide-sm">${svcUptime(p)}</td></tr>`).join('')}
                 </tbody></table>
-            </div>` : ''}
-            <div class="card flush">
-                <div class="card-head"><h2>${t('nav.websites')}</h2><span class="spacer"></span>
-                    <a class="btn small" href="#/websites">${t('dash.all')} ${icon('chevR')}</a></div>
-                ${vhostTable(vhosts.slice(0, 8))}
             </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:var(--gap);min-width:0">
             <div class="card flush">
-                <div class="card-head"><h2>${t('dash.recent_tasks')}</h2><span class="spacer"></span>
-                    <a class="btn small" href="#/tasks">${t('dash.all')} ${icon('chevR')}</a></div>
-                ${recentTasks.length ? recentTasks.map((task) => `
-                <div style="display:flex;align-items:center;gap:9px;padding:8px 14px;border-bottom:1px solid var(--line-2)">
-                    <span style="color:${task.status === 'done' ? 'var(--ok)' : task.status === 'failed' ? 'var(--danger)' : 'var(--info)'}">
-                        ${icon(task.status === 'done' ? 'check' : task.status === 'failed' ? 'x' : 'clock')}</span>
-                    <span class="mono" style="font-size:var(--fs-sm);font-weight:550;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(task.op)}</span>
-                    <span style="margin-left:auto;font-size:var(--fs-xs);color:var(--ink-3);white-space:nowrap">${fmtDate(task.created_at)}</span>
-                </div>`).join('') : `<div class="empty">${t('nav.tasks')}: 0</div>`}
+                <div class="card-head"><h2>${t('dash.live_events')}</h2><span class="spacer"></span>
+                    <span class="live-dot">${dot('ok', true)} live</span></div>
+                <div class="feed">${feed.events.length ? feed.events.map((e) => `
+                    <div class="feed-row">
+                        <span class="feed-time mono">${fmtTime(e.ts)}</span>
+                        <span class="feed-ico" style="color:${SEV[e.severity] || 'var(--ink-3)'}">${icon(feedIcon(e.kind, e.severity))}</span>
+                        <span class="feed-text">${esc(e.text)}</span>
+                    </div>`).join('') : `<div class="empty">Nema događaja u zadnja 24 h</div>`}</div>
             </div>
             <div class="card flush">
-                <div class="card-head"><h2>SSL</h2></div>
-                ${certs.slice(0, 6).map((c) => {
-                    const days = Math.floor((new Date(String(c.expires_at).replace(' ', 'T')) - Date.now()) / 864e5);
-                    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line-2)">
-                        ${icon('lock')}
-                        <span class="mono" style="font-size:var(--fs-sm);min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(c.hostname)}</span>
-                        <span style="margin-left:auto"><span class="badge ${days < 14 ? 'err' : days < 30 ? 'warn' : 'ok'}">${days} d</span></span>
-                    </div>`;
-                }).join('') || `<div class="empty">${t('nav.ssl')}: 0</div>`}
+                <div class="card-head"><h2>${t('dash.recent_deploys')}</h2></div>
+                ${feed.deploys.length ? feed.deploys.map((d) => `
+                    <div class="feed-row">
+                        <span class="feed-ico" style="color:var(--ok)">${icon('check')}</span>
+                        <span class="mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(d.domain)}</span>
+                        <span class="mono hide-sm" style="color:var(--ink-3);font-size:var(--fs-xs)">${esc(d.branch || '')} ${d.last_commit ? esc(String(d.last_commit).slice(0, 7)) : ''}</span>
+                        <span style="margin-left:auto;color:var(--ink-3);font-size:var(--fs-xs);white-space:nowrap">${timeAgo(d.last_deploy_at)}</span>
+                    </div>`).join('') : `<div class="empty">Nema deploya</div>`}
             </div>
         </div>
     </div>`;
 
+    const aibtn = document.getElementById('dashai');
+    if (aibtn) aibtn.addEventListener('click', () => {
+        state.aiPending = insights.items.find((i) => i.ai_prompt)?.ai_prompt || null;
+        toggleAiDrawer(true); // renderAiDrawer pokupi state.aiPending kad se učita
+    });
+}
+
+const serviceUp = (services, name) => Object.entries(services).some(([n, p]) => n.startsWith(name) && p.ActiveState === 'active');
+const feedIcon = (kind, sev) => sev === 'err' ? 'x' : sev === 'ok' ? 'check' : kind === 'uptime' ? 'globe' : kind === 'audit' ? 'shield' : 'activity';
+
+async function pageDashboard() {
+    setActive('dashboard');
+    const isAdmin = state.me.role === 'admin';
+    if (!isAdmin) { return pageDashboardClient(); }
+    main().innerHTML = `<div id="dashbody"><div class="empty">${t('common.loading')}</div></div>`;
+    const cf = await api('/cloudflare/account').catch(() => ({ connected: false }));
+    await refreshDashboard(cf.connected);
+    // live auto-refresh feeda + KPI svakih 10 s (čisti se u route() pri navigaciji)
+    state.monTimer = setInterval(() => refreshDashboard(cf.connected), 10000);
+    bindVhostRows();
+}
+
+// klijentski dashboard (bez admin metrika) — zadrži jednostavan prikaz
+async function pageDashboardClient() {
+    main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+    const [vhosts, certs] = await Promise.all([api('/vhosts').catch(() => []), api('/ssl').catch(() => [])]);
+    const upCount = vhosts.filter((v) => v.status === 'active').length;
+    main().innerHTML = `
+    <div class="grid cols-4" style="margin-bottom:var(--gap)">
+        ${metricCard({ label: t('nav.websites'), value: vhosts.length, sub: `${upCount} aktivnih` })}
+        ${metricCard({ label: t('nav.ssl'), value: certs.length })}
+    </div>
+    <div class="card flush">
+        <div class="card-head"><h2>${t('nav.websites')}</h2></div>
+        ${vhostTable(vhosts.slice(0, 12))}
+    </div>`;
     bindVhostRows();
 }
 
@@ -857,19 +923,24 @@ const statusBadge = (s) => {
     return `<span class="badge ${kind}">${t('vhost.status.' + s) !== 'vhost.status.' + s ? t('vhost.status.' + s) : esc(s)}</span>`;
 };
 
+const sslBadge = (days) => days == null ? '<span class="mono" style="color:var(--ink-3)">—</span>'
+    : `<span class="badge ${days < 7 ? 'err' : days < 21 ? 'warn' : 'ok'}">${days}d</span>`;
+
 const vhostTable = (vhosts, selectable = false) => vhosts.length ? `
     <table class="data"><thead><tr>
         ${selectable ? '<th><input type="checkbox" id="selall"></th>' : ''}
-        <th>${t('vhost.domain')}</th><th>PHP</th><th class="hide-sm">Backend</th><th>Status</th><th class="hide-sm">Kreirano</th>
+        <th>${t('vhost.domain')}</th><th class="hide-sm">Stack</th>
+        ${selectable ? '' : '<th>SSL</th><th class="hide-sm">Deploy</th>'}
+        <th>Status</th>
     </tr></thead><tbody>
     ${vhosts.map((v) => `
         <tr class="${selectable ? '' : 'row-link'}" data-vhost="${v.id}">
             ${selectable ? `<td><input type="checkbox" class="vsel" value="${v.id}"></td>` : ''}
-            <td class="mono">${esc(v.domain)}</td>
-            <td class="mono">${esc(v.php_version)}</td>
-            <td class="mono hide-sm">${esc(v.web_backend)}</td>
+            <td><span class="mono" style="font-weight:600">${esc(v.domain)}</span></td>
+            <td class="mono hide-sm" style="color:var(--ink-2)">PHP ${esc(v.php_version)} · ${esc(v.web_backend === 'nginx_apache' ? 'apache' : 'nginx')}</td>
+            ${selectable ? '' : `<td>${sslBadge(v.ssl_days)}</td>
+            <td class="mono hide-sm" style="color:var(--ink-2)">${v.git_branch ? esc(v.git_branch) + ' · ' + timeAgo(v.git_last_deploy) : '—'}</td>`}
             <td>${statusBadge(v.status)}</td>
-            <td class="hide-sm">${fmtDate(v.created_at)}</td>
         </tr>`).join('')}
     </tbody></table>` : `<div class="empty">${t('nav.websites')}: 0</div>`;
 
@@ -1625,7 +1696,7 @@ function sparkline(points, { height = 130, formatY = (v) => String(v), color = '
 const bps = (v) => `${fmtBytes(v)}/s`;
 const lastVal = (arr) => (arr.length ? Number(arr.at(-1).value) : null);
 
-const MON_RANGES = ['2h', '24h', '7d', '30d'];
+const MON_RANGES = ['15m', '1h', '6h', '24h', '7d', '30d'];
 const MON_REFRESH = ['0', '5', '10', '30', '60']; // sekunde; 0 = isključeno
 
 async function refreshMonitoring() {
@@ -1634,25 +1705,50 @@ async function refreshMonitoring() {
     const r = state.monRange;
     const h = (metric) => api(`/monitoring/history?metric=${metric}&range=${r}`).catch(() => []);
     try {
-        const [m, services, cpuPct, cpuLoad, mem, dRead, dWrite, netRx, netTx] = await Promise.all([
+        const [m, services, top, cpuPct, cpuLoad, mem, dRead, dWrite, netRx, netTx] = await Promise.all([
             api('/monitoring/now'),
             api('/monitoring/services').catch(() => ({})),
+            api('/monitoring/top').catch(() => ({ processes: [] })),
             h('cpu_pct'), h('cpu_load1'), h('mem_used_bytes'),
             h('disk_read_bps'), h('disk_write_bps'), h('net_rx_bps'), h('net_tx_bps'),
         ]);
         const cpuIsPct = cpuPct.length >= 2;
         const cpuSeries = cpuIsPct ? cpuPct : cpuLoad;
-        const memPct = Math.round((1 - m.mem_available_bytes / m.mem_total_bytes) * 100);
+        const cpuNow = m.cpu_pct ?? (lastVal(cpuPct) ?? 0);
+
+        // per-core trake
+        const coresHtml = (m.cores || []).map((c, i) => `
+            <div class="core"><div class="core-head"><span class="mono">c${i}</span><span class="mono">${c.toFixed(0)}%</span></div>
+                <div class="core-bar"><div class="core-fill" style="width:${c}%;background:${c > 80 ? 'var(--danger)' : c > 50 ? 'var(--warn)' : 'var(--accent)'}"></div></div></div>`).join('');
+
+        // memorijska razrada
+        const tot = m.mem_total_bytes || 1;
+        const apps = m.mem_apps_bytes ?? (m.mem_total_bytes - m.mem_available_bytes);
+        const cache = m.mem_cache_bytes ?? 0;
+        const free = m.mem_free_bytes ?? m.mem_available_bytes;
+        const memBar = `<div class="membar">
+            <span style="width:${apps / tot * 100}%;background:var(--info)" title="${t('mon.apps')}"></span>
+            <span style="width:${cache / tot * 100}%;background:var(--accent)" title="${t('mon.cache')}"></span>
+        </div><div class="memlegend">
+            <span><i style="background:var(--info)"></i>${t('mon.apps')} ${fmtBytes(apps)}</span>
+            <span><i style="background:var(--accent)"></i>${t('mon.cache')} ${fmtBytes(cache)}</span>
+            <span><i style="background:var(--line-strong)"></i>${t('mon.free')} ${fmtBytes(free)}</span></div>`;
 
         const svcRows = Object.entries(services).map(([name, s]) => {
             const st = s.ActiveState || 'unknown';
-            return `<tr>
-                <td class="mono">${esc(name)}</td>
+            return `<tr><td class="mono">${esc(name)}</td>
                 <td><span class="badge ${st === 'active' ? 'ok' : (st === 'failed' ? 'err' : '')}">${esc(s.SubState || st)}</span></td>
                 <td class="mono num">${s.cpu_pct != null ? s.cpu_pct.toFixed(1) + '%' : '—'}</td>
                 <td class="mono num">${s.mem_bytes != null ? fmtBytes(s.mem_bytes) : '—'}</td>
-            </tr>`;
+                <td class="mono num hide-sm">${svcUptime(s)}</td></tr>`;
         }).join('');
+
+        const procRows = (top.processes || []).map((p) => `<tr>
+            <td class="mono num">${p.pid}</td>
+            <td class="mono" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.args)}">${esc(p.comm)}</td>
+            <td class="mono hide-sm">${esc(p.user)}</td>
+            <td class="mono num">${p.cpu_pct.toFixed(1)}%</td>
+            <td class="mono num">${fmtBytes(p.rss_bytes)}</td></tr>`).join('');
 
         const chart = (title, series, opts, now) => `
             <div class="card flush"><div class="card-head"><h2>${title}</h2><span class="spacer"></span>
@@ -1660,23 +1756,29 @@ async function refreshMonitoring() {
                 <div class="pad">${sparkline(series, opts)}</div></div>`;
 
         data.innerHTML = `
-        <div class="grid cols-4" style="margin-bottom:var(--gap)">
-            ${metricCard({ label: 'Load 1/5/15', value: m.load.map((l) => l.toFixed(2)).join(' '), sub: `${m.cpu_count} jezgri` })}
-            ${metricCard({ label: 'RAM', value: fmtBytes(m.mem_total_bytes - m.mem_available_bytes), unit: `/ ${fmtBytes(m.mem_total_bytes)}`, sub: `${memPct}% iskorišteno` })}
-            ${metricCard({ label: 'Disk', value: fmtBytes(m.disk_total_bytes - m.disk_free_bytes), unit: `/ ${fmtBytes(m.disk_total_bytes)}`, sub: `${fmtBytes(m.disk_free_bytes)} slobodno` })}
-            ${metricCard({ label: 'Uptime', value: `${Math.floor(m.uptime_s / 86400)}d ${Math.floor((m.uptime_s % 86400) / 3600)}h` })}
-        </div>
         <div class="grid cols-2">
-            ${chart(cpuIsPct ? 'CPU %' : 'CPU load (1m)', cpuSeries, { formatY: (v) => cpuIsPct ? v.toFixed(0) + '%' : v.toFixed(2) }, cpuIsPct ? `${(lastVal(cpuPct) ?? 0).toFixed(0)}%` : m.load[0].toFixed(2))}
-            ${chart('RAM', mem, { formatY: fmtBytes, color: 'var(--info)' }, fmtBytes(m.mem_total_bytes - m.mem_available_bytes))}
+            <div class="card flush"><div class="card-head"><h2>CPU</h2><span class="spacer"></span>
+                <span class="num" style="font-size:var(--fs-sm);color:var(--ink-2)">${cpuNow.toFixed(0)}% · load ${m.load[0].toFixed(2)}</span></div>
+                <div class="pad">${sparkline(cpuIsPct ? cpuSeries : cpuSeries, { formatY: (v) => (cpuIsPct ? v.toFixed(0) + '%' : v.toFixed(2)) })}</div>
+                ${coresHtml ? `<div class="cores">${coresHtml}</div>` : ''}</div>
+            <div class="card flush"><div class="card-head"><h2>${t('mon.membreak')}</h2><span class="spacer"></span>
+                <span class="num" style="font-size:var(--fs-sm);color:var(--ink-2)">${fmtBytes(m.mem_total_bytes - m.mem_available_bytes)} / ${fmtBytes(m.mem_total_bytes)}</span></div>
+                <div class="pad">${sparkline(mem, { formatY: fmtBytes, color: 'var(--info)' })}</div>
+                ${memBar}</div>
             ${chart('Disk čitanje', dRead, { formatY: bps, color: 'var(--ok)' }, lastVal(dRead) != null ? bps(lastVal(dRead)) : '—')}
             ${chart('Disk pisanje', dWrite, { formatY: bps, color: 'var(--warn)' }, lastVal(dWrite) != null ? bps(lastVal(dWrite)) : '—')}
             ${chart('Mreža ↓', netRx, { formatY: bps, color: 'var(--accent)' }, lastVal(netRx) != null ? bps(lastVal(netRx)) : '—')}
             ${chart('Mreža ↑', netTx, { formatY: bps, color: 'var(--info)' }, lastVal(netTx) != null ? bps(lastVal(netTx)) : '—')}
         </div>
-        ${svcRows ? `<div class="card mt"><div class="card-head"><h2>${t('mon.services')}</h2></div>
-            <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th></tr></thead>
-            <tbody>${svcRows}</tbody></table></div>` : ''}`;
+        <div class="grid split mt">
+            <div class="card flush"><div class="card-head"><h2>${t('mon.top')}</h2><span class="spacer"></span>
+                <span class="num" style="font-size:var(--fs-xs);color:var(--ink-3)">ps · CPU</span></div>
+                <table class="data"><thead><tr><th>PID</th><th>${t('mon.service')}</th><th class="hide-sm">${t('mon.user')}</th><th class="num">CPU</th><th class="num">RAM</th></tr></thead>
+                <tbody>${procRows || `<tr><td colspan="5" class="empty">—</td></tr>`}</tbody></table></div>
+            <div class="card flush"><div class="card-head"><h2>${t('mon.services')}</h2></div>
+                <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th></tr></thead>
+                <tbody>${svcRows}</tbody></table></div>
+        </div>`;
     } catch {
         data.innerHTML = `<div class="empty">Dostupno administratoru.</div>`;
     }
@@ -1690,28 +1792,31 @@ function scheduleMonitoring() {
 
 async function pageMonitoring() {
     setActive('monitoring');
-    const rangeOpt = (v) => `<option value="${v}" ${state.monRange === v ? 'selected' : ''}>${v}</option>`;
+    if (!MON_RANGES.includes(state.monRange)) state.monRange = '1h';
+    const pills = MON_RANGES.map((v) => `<button class="pill ${state.monRange === v ? 'active' : ''}" data-range="${v}">${v}</button>`).join('');
     const refOpt = (v) => `<option value="${v}" ${state.monRefresh === v ? 'selected' : ''}>${v === '0' ? t('mon.off') : v + 's'}</option>`;
     main().innerHTML = `
         ${tabsHtml('monitoring', 'monitoring')}
-        <div class="page-head" style="gap:14px;align-items:center">
+        <div class="page-head" style="gap:12px;align-items:center">
+            <div class="pillbar">${pills}</div>
             <span class="spacer"></span>
-            <label class="inline mono" style="gap:6px">${t('mon.range')}
-                <select id="monrange" class="mono">${MON_RANGES.map(rangeOpt).join('')}</select></label>
+            <span class="live-dot">${Number(state.monRefresh) > 0 ? dot('ok', true) + ' streaming · ' + state.monRefresh + 's' : 'pauzirano'}</span>
             <label class="inline mono" style="gap:6px">${t('mon.refresh')}
                 <select id="monref" class="mono">${MON_REFRESH.map(refOpt).join('')}</select></label>
         </div>
         <div id="mondata"><div class="empty">${t('common.loading')}</div></div>`;
 
-    document.getElementById('monrange').addEventListener('change', (e) => {
-        state.monRange = e.target.value;
+    main().querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => {
+        state.monRange = b.dataset.range;
         localStorage.setItem('fp_mon_range', state.monRange);
+        main().querySelectorAll('[data-range]').forEach((x) => x.classList.toggle('active', x === b));
         refreshMonitoring();
-    });
+    }));
     document.getElementById('monref').addEventListener('change', (e) => {
         state.monRefresh = e.target.value;
         localStorage.setItem('fp_mon_refresh', state.monRefresh);
         scheduleMonitoring();
+        pageMonitoring(); // osvježi "streaming" indikator
     });
 
     await refreshMonitoring();

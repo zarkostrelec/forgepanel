@@ -15,6 +15,14 @@ final class MonitoringController extends Controller
         $router->add('GET', '/api/v1/monitoring/now', $this->now(...));
         $router->add('GET', '/api/v1/monitoring/services', $this->services(...));
         $router->add('GET', '/api/v1/monitoring/history', $this->history(...));
+        $router->add('GET', '/api/v1/monitoring/top', $this->top(...));
+    }
+
+    /** Top procesi po CPU-u (ps preko agenta). */
+    private function top(Request $request): never
+    {
+        $this->ctx($request, 'monitoring:read')->requireRole('admin');
+        Response::ok($this->app->agent->call('system.top'));
     }
 
     private function now(Request $request): never
@@ -72,14 +80,18 @@ final class MonitoringController extends Controller
         $metric = preg_match('/^[a-z][a-z0-9_]{0,31}$/', (string) ($_GET['metric'] ?? '')) ? $_GET['metric'] : 'cpu_load1';
 
         // Period → rezolucija (poštuje retenciju: minute ~2h, sat ~7d, dan ~400d)
+        // [rezolucija, minute unatrag] — poštuje retenciju (minute ~2h, sat ~7d, dan ~400d)
         $ranges = [
-            '2h' => ['minute', 2],
-            '24h' => ['hour', 24],
-            '7d' => ['hour', 168],
-            '30d' => ['day', 720],
+            '15m' => ['minute', 15],
+            '1h' => ['minute', 60],
+            '2h' => ['minute', 120],
+            '6h' => ['hour', 360],
+            '24h' => ['hour', 1440],
+            '7d' => ['hour', 10080],
+            '30d' => ['day', 43200],
         ];
-        $range = (string) ($_GET['range'] ?? '2h');
-        [$resolution, $hours] = $ranges[$range] ?? $ranges['2h'];
+        $range = (string) ($_GET['range'] ?? '1h');
+        [$resolution, $minutes] = $ranges[$range] ?? $ranges['1h'];
         // resolution param i dalje podržan kao override (npr. dashboard)
         $res_override = (string) ($_GET['resolution'] ?? '');
         if (in_array($res_override, ['minute', 'hour', 'day'], true)) {
@@ -88,9 +100,9 @@ final class MonitoringController extends Controller
 
         Response::ok($this->app->db->all(
             'SELECT value, ts FROM monitoring_metrics
-             WHERE scope = ? AND metric = ? AND resolution = ? AND ts > DATE_SUB(NOW(), INTERVAL ? HOUR)
+             WHERE scope = ? AND metric = ? AND resolution = ? AND ts > DATE_SUB(NOW(), INTERVAL ? MINUTE)
              ORDER BY ts',
-            [(string) $scope, (string) $metric, $resolution, $hours]
+            [(string) $scope, (string) $metric, $resolution, $minutes]
         ));
     }
 }
