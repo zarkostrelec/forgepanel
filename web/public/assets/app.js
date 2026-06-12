@@ -526,6 +526,29 @@ function toggleAiDrawer(forceOpen = null) {
     if (state.aiOpen) renderAiDrawer();
 }
 
+// AI odgovor → HTML: ```sh/```bash blokovi postaju kartice s "Izvrši" (samo lokalni mod)
+function aiMessageHtml(text, canExec) {
+    const parts = String(text).split(/```(\w*)\n?([\s\S]*?)```/g);
+    let html = '';
+    for (let i = 0; i < parts.length; i += 3) {
+        const prose = parts[i];
+        if (prose) html += `<div class="ai-prose">${esc(prose).replace(/\n/g, '<br>')}</div>`;
+        const lang = parts[i + 1];
+        const code = parts[i + 2];
+        if (code == null) continue;
+        const cmd = code.replace(/\n+$/, '');
+        const isShell = /^(sh|bash|shell|console|)$/i.test(lang || '') && cmd.trim() !== '';
+        if (isShell && canExec) {
+            html += `<div class="ai-cmd"><pre class="mono">${esc(cmd)}</pre>
+                <button class="btn sm" data-exec="${encodeURIComponent(cmd)}">${icon('arrowUR')}${t('ai.run')}</button>
+                <div class="ai-cmd-out" hidden></div></div>`;
+        } else {
+            html += `<pre class="mono ai-code">${esc(cmd)}</pre>`;
+        }
+    }
+    return html || esc(text);
+}
+
 async function renderAiDrawer() {
     const drawer = document.getElementById('aidrawer');
     if (!drawer) return;
@@ -544,6 +567,7 @@ async function renderAiDrawer() {
     let status;
     try { status = await api('/assistant/status'); }
     catch (err) { drawer.querySelector('#aithread').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; return; }
+    state.aiMode = status.mode || null;
 
     if (!status.configured) {
         drawer.querySelector('#aithread').innerHTML = `
@@ -571,19 +595,39 @@ async function renderAiDrawer() {
         return;
     }
 
+    const canExec = state.aiMode === 'local';
     const threadEl = drawer.querySelector('#aithread');
     const renderThread = () => {
         threadEl.innerHTML = state.aiThread.length
-            ? state.aiThread.map((m) => `<div class="${m.who === 'user' ? 'ai-msg-user' : 'ai-msg-ai'}">${esc(m.text)}</div>`).join('')
-            : `<div class="ai-msg-ai">${t('ai.welcome')}</div>`;
+            ? state.aiThread.map((m) => m.who === 'user'
+                ? `<div class="ai-msg-user">${esc(m.text)}</div>`
+                : `<div class="ai-msg-ai">${aiMessageHtml(m.text, canExec)}</div>`).join('')
+            : `<div class="ai-msg-ai">${t('ai.welcome')}${canExec ? ' <span class="badge ok">lokalni Claude</span>' : ''}</div>`;
         threadEl.scrollTop = threadEl.scrollHeight;
     };
     renderThread();
 
+    // Izvrši (samo lokalni mod): pokreni potvrđenu komandu preko agenta
+    threadEl.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-exec]');
+        if (!btn) return;
+        const cmd = decodeURIComponent(btn.dataset.exec);
+        const out = btn.parentElement.querySelector('.ai-cmd-out');
+        btn.disabled = true;
+        out.hidden = false;
+        out.textContent = '…';
+        try {
+            const r = await api('/assistant/exec', { method: 'POST', body: { command: cmd } });
+            out.textContent = (r.stdout || '') + (r.stderr ? '\n' + r.stderr : '') + `\n[exit ${r.exit}]`;
+            out.classList.toggle('err', r.exit !== 0);
+        } catch (err) { out.textContent = '✕ ' + err.message; out.classList.add('err'); }
+        finally { btn.disabled = false; }
+    });
+
     drawer.querySelector('#aifoot').innerHTML = `
         <div class="ai-sugg">${[t('ai.sugg1'), t('ai.sugg2'), t('ai.sugg3')].map((s) =>
             `<button type="button" data-sugg="${esc(s)}">${esc(s)}</button>`).join('')}
-            <button type="button" data-disconnect title="${esc(status.model)}">⚙ ${t('assistant.disconnect')}</button></div>
+            ${status.mode === 'api' ? `<button type="button" data-disconnect title="${esc(status.model)}">⚙ ${t('assistant.disconnect')}</button>` : ''}</div>
         <form class="ai-inputrow" id="aiform">
             <input name="q" placeholder="${t('assistant.placeholder')}" autocomplete="off">
             <button class="btn primary icon" aria-label="${t('assistant.send')}">${icon('arrowUR')}</button>
@@ -610,7 +654,7 @@ async function renderAiDrawer() {
         ask(q);
     });
     drawer.querySelectorAll('[data-sugg]').forEach((b) => b.addEventListener('click', () => ask(b.dataset.sugg)));
-    drawer.querySelector('[data-disconnect]').addEventListener('click', async () => {
+    drawer.querySelector('[data-disconnect]')?.addEventListener('click', async () => {
         if (!confirm(t('assistant.confirm_disconnect'))) return;
         try { await api('/assistant/key', { method: 'DELETE' }); state.aiThread = []; renderAiDrawer(); }
         catch (err) { toast(err.message, 'err'); }
