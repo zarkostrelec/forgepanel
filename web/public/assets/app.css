@@ -734,3 +734,63 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 /* Checkbox redak (npr. PHP verzije u planu) */
 .checkrow { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .chk { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-sm); cursor: pointer; }
+
+/* ───────────────────────── Siteovi: master-detail ───────────────────────── */
+.sites-head { display: flex; align-items: center; gap: 12px; }
+.sites-count { color: var(--ink-3); font-size: var(--fs-sm); white-space: nowrap; }
+
+/* Filter tabovi (Svi / Live / Problemi) */
+.tabs { display: inline-flex; gap: 2px; background: var(--surface-3); border-radius: var(--radius-sm); padding: 3px; }
+.tab { appearance: none; border: 0; background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-sm);
+    padding: 5px 12px; border-radius: calc(var(--radius-sm) - 2px); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.tab:hover { color: var(--ink); }
+.tab.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.06); font-weight: 600; }
+.tab-count { background: var(--danger-soft); color: var(--danger-deep); border-radius: 99px; font-size: var(--fs-xs);
+    min-width: 16px; height: 16px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Layout: lista + desni panel */
+.sites-layout { display: grid; grid-template-columns: 1fr 340px; gap: 14px; align-items: start; }
+.sites-layout.bulk { grid-template-columns: 1fr; }
+.sites-list { padding: 4px 4px 0; overflow: hidden; }
+.mb { margin-bottom: 12px; }
+
+/* Lista redci */
+.site-cell { display: flex; align-items: center; gap: 10px; }
+.status-dot { width: 8px; height: 8px; border-radius: 99px; flex-shrink: 0; background: var(--ink-3); }
+.status-dot.ok { background: var(--ok); } .status-dot.warn { background: var(--warn); }
+.status-dot.info { background: var(--info); } .status-dot.err { background: var(--danger-deep, #e5484d); }
+.site-name { font-weight: 600; }
+.sites-table .sub { color: var(--ink-3); font-size: var(--fs-xs); margin-top: 1px; }
+.sites-table .sub2 { color: var(--ink-2); }
+.sites-table .num { text-align: right; }
+
+/* Desni panel */
+.site-panel { position: sticky; top: 14px; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+.sp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.sp-title { font-weight: 600; font-size: var(--fs-base); word-break: break-all; }
+.sp-sub { color: var(--ink-3); font-size: var(--fs-xs); margin-top: 2px; }
+.sp-spark { background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 12px; }
+.spark-line { height: 40px; border-radius: 4px;
+    background: linear-gradient(180deg, var(--accent-glow), transparent);
+    -webkit-mask: repeating-linear-gradient(90deg, #000 0 1px, transparent 1px 5px); mask: repeating-linear-gradient(90deg, #000 0 1px, transparent 1px 5px);
+    opacity: .5; }
+.sp-spark-cap { color: var(--ink-3); font-size: var(--fs-xs); margin-top: 8px; }
+.sp-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sp-stat { background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 9px 10px; }
+.sp-stat .k { display: block; color: var(--ink-3); font-size: var(--fs-xs); }
+.sp-stat .vv { display: block; font-weight: 600; font-size: var(--fs-base); margin-top: 2px; }
+.sp-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.sp-actions .btn.sm { flex: 1; justify-content: center; padding: 6px 8px; font-size: var(--fs-sm); }
+.sp-card { border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 4px; }
+.sp-card-h { color: var(--ink-3); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; padding: 7px 8px 5px; font-weight: 600; }
+.sp-domain { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; font-size: var(--fs-sm); }
+.sp-qa { display: flex; align-items: center; gap: 9px; width: 100%; appearance: none; border: 0; background: transparent; color: var(--ink);
+    font: inherit; font-size: var(--fs-sm); padding: 8px; border-radius: var(--radius-sm); cursor: pointer; text-decoration: none; }
+.sp-qa:hover { background: var(--surface-2); }
+.sp-qa span { flex: 1; text-align: left; }
+.sp-qa svg:last-child { color: var(--ink-3); }
+
+@media (max-width: 900px) {
+    .sites-layout { grid-template-columns: 1fr; }
+    .site-panel { position: static; }
+}

@@ -67,6 +67,9 @@ CREATE TABLE vhosts (
     web_backend     ENUM('nginx','nginx_apache') NOT NULL DEFAULT 'nginx',
     docroot         VARCHAR(512) NOT NULL,
     status          ENUM('active','suspended','creating','error') NOT NULL DEFAULT 'creating',
+    disk_bytes      BIGINT UNSIGNED NULL,                  -- du -sb vhost roota (osvježava agent periodički)
+    app_type        VARCHAR(32) NULL,                      -- detekcija aplikacije (wordpress/woocommerce/laravel/node/astro/static/php)
+    stats_at        DATETIME NULL,                         -- zadnje osvježavanje disk_bytes/app_type
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

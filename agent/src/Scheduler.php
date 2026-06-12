@@ -39,6 +39,24 @@ final class Scheduler
         $this->every('updates_scan', 4 * 3600, $this->enqueueUpdatesScan(...));
         $this->every('updates_auto', 900, $this->enqueueAutoUpdates(...));
         $this->every('suite_watch', 24 * 3600, $this->watchSuites(...));
+        $this->every('vhost_stats', 1800, $this->refreshVhostStats(...));
+    }
+
+    /** Svakih 30 min: osvježi disk (du) i tip aplikacije po aktivnom vhostu (Siteovi lista). */
+    private function refreshVhostStats(): void
+    {
+        $vhosts = $this->db->all("SELECT id, domain, docroot FROM vhosts WHERE status = 'active'");
+        foreach ($vhosts as $v) {
+            try {
+                [$disk, $app] = System\VhostStats::collect(Validator::VHOST_ROOT . '/' . $v['domain'], (string) $v['docroot']);
+                $this->db->run(
+                    'UPDATE vhosts SET disk_bytes = ?, app_type = ?, stats_at = NOW() WHERE id = ?',
+                    [$disk, $app, (int) $v['id']]
+                );
+            } catch (\Throwable $e) {
+                error_log('forge-agentd vhost_stats [' . $v['domain'] . ']: ' . $e->getMessage());
+            }
+        }
     }
 
     /** Svaka 4 h: scan dostupnih updatea (kao task — vidljivo u UI-ju). */

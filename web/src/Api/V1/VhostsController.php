@@ -55,7 +55,8 @@ final class VhostsController extends Controller
                         (SELECT DATEDIFF(MIN(c.expires_at), NOW()) FROM ssl_certs c
                           WHERE c.vhost_id = v.id AND c.status = 'active') AS ssl_days,
                         (SELECT g.branch FROM git_repos g WHERE g.vhost_id = v.id LIMIT 1) AS git_branch,
-                        (SELECT g.last_deploy_at FROM git_repos g WHERE g.vhost_id = v.id LIMIT 1) AS git_last_deploy
+                        (SELECT g.last_deploy_at FROM git_repos g WHERE g.vhost_id = v.id LIMIT 1) AS git_last_deploy,
+                        (SELECT COUNT(*) FROM vhost_aliases a WHERE a.vhost_id = v.id) AS alias_count
                  FROM vhosts v ORDER BY v.domain"
             ));
         }
@@ -75,7 +76,8 @@ final class VhostsController extends Controller
             Response::ok([]);
         }
         Response::ok($this->app->db->all(
-            'SELECT * FROM vhosts WHERE ' . implode(' OR ', $conditions) . ' ORDER BY domain',
+            'SELECT *, (SELECT COUNT(*) FROM vhost_aliases a WHERE a.vhost_id = vhosts.id) AS alias_count
+             FROM vhosts WHERE ' . implode(' OR ', $conditions) . ' ORDER BY domain',
             $args
         ));
     }

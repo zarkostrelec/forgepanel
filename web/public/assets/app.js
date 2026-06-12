@@ -947,32 +947,145 @@ const vhostTable = (vhosts, selectable = false) => vhosts.length ? `
 const bindVhostRows = () => main().querySelectorAll('[data-vhost]').forEach((tr) =>
     tr.addEventListener('click', () => { location.hash = `#/websites/${tr.dataset.vhost}`; }));
 
+// ---- Siteovi: master-detail (lista + detalj panel) ----
+const dotKind = (v) => v.status === 'active' ? 'ok' : v.status === 'error' ? 'err' : v.status === 'suspended' ? 'warn' : 'info';
+const appLabel = (a) => ({ wordpress: 'WordPress', woocommerce: 'WooCommerce', laravel: 'Laravel', node: 'Node.js', nextjs: 'Next.js', astro: 'Astro', static: 'Static', php: 'PHP' }[a] || '');
+const stackText = (v) => `PHP ${esc(v.php_version)} · ${v.web_backend === 'nginx_apache' ? 'apache' : 'nginx'}`;
+
+const sitesList = (vhosts, selectedId) => vhosts.length ? `
+    <table class="data sites-table"><thead><tr>
+        <th>${t('sites.col_site')}</th>
+        <th class="hide-sm">${t('sites.col_stack')}</th>
+        <th class="hide-md num">${t('sites.col_traffic')}</th>
+        <th>SSL</th>
+        <th class="hide-md">${t('sites.col_deploy')}</th>
+        <th class="num">${t('sites.col_disk')}</th>
+    </tr></thead><tbody>
+    ${vhosts.map((v) => `
+        <tr class="row-link ${v.id === selectedId ? 'selected' : ''}" data-vhost="${v.id}">
+            <td><div class="site-cell"><span class="status-dot ${dotKind(v)}"></span>
+                <div><span class="mono site-name">${esc(v.domain)}</span>
+                ${appLabel(v.app_type) ? `<div class="sub">${appLabel(v.app_type)}</div>` : ''}</div></div></td>
+            <td class="mono hide-sm sub2">${stackText(v)}</td>
+            <td class="mono hide-md num sub2">—</td>
+            <td>${sslBadge(v.ssl_days)}</td>
+            <td class="mono hide-md sub2">${v.git_branch ? esc(v.git_branch) + ' · ' + timeAgo(v.git_last_deploy) : '—'}</td>
+            <td class="num mono sub2">${v.disk_bytes != null ? fmtBytes(Number(v.disk_bytes)) : '—'}</td>
+        </tr>`).join('')}
+    </tbody></table>` : `<div class="empty">${t('nav.websites')}: 0</div>`;
+
+const sitePanel = (v) => !v ? `<div class="empty">${t('sites.select')}</div>` : `
+    <div class="sp-head">
+        <div class="sp-titles"><div class="sp-title mono">${esc(v.domain)}</div>
+            <div class="sp-sub">${stackText(v)}${appLabel(v.app_type) ? ' · ' + appLabel(v.app_type) : ''}</div></div>
+        <a class="btn ghost icon" href="#/websites/${v.id}" title="${t('sites.open')}">${icon('arrowUR')}</a>
+    </div>
+    <div class="sp-spark"><div class="spark-line"></div><div class="sp-spark-cap">${t('sites.visits_24h')} · —</div></div>
+    <div class="sp-stats">
+        <div class="sp-stat"><span class="k">${t('sites.col_traffic')}</span><span class="vv mono">—</span></div>
+        <div class="sp-stat"><span class="k">Trend</span><span class="vv mono">—</span></div>
+        <div class="sp-stat"><span class="k">PHP</span><span class="vv mono">${esc(v.php_version)}</span></div>
+        <div class="sp-stat"><span class="k">${t('sites.col_disk')}</span><span class="vv mono">${v.disk_bytes != null ? fmtBytes(Number(v.disk_bytes)) : '—'}</span></div>
+    </div>
+    <div class="sp-actions">
+        <a class="btn primary sm" href="#/websites/${v.id}">${icon('zap')}Deploy</a>
+        <a class="btn sm" href="#/websites/${v.id}">${icon('folder')}${t('nav.files')}</a>
+        ${state.me.role === 'admin' ? `<a class="btn sm" href="#/websites/${v.id}">${icon('terminal')}SSH</a>` : ''}
+    </div>
+    <div class="sp-card">
+        <div class="sp-card-h">${t('sites.domains_ssl')}</div>
+        <div class="sp-domain"><span class="mono">${esc(v.domain)}</span><span class="badge ok">${t('sites.active')}</span></div>
+        <div class="sp-domain"><span class="mono">www.${esc(v.domain)}</span><span class="badge ok">${t('sites.active')}</span></div>
+    </div>
+    <div class="sp-card">
+        <div class="sp-card-h">${t('sites.quick_actions')}</div>
+        <button class="sp-qa" data-qa="backup">${icon('archive')}<span>${t('sites.qa_backup')}</span>${icon('chevR', 14)}</button>
+        <button class="sp-qa" data-qa="ssl">${icon('refresh')}<span>${t('sites.qa_ssl')}</span>${icon('chevR', 14)}</button>
+        <a class="sp-qa" href="#/websites/${v.id}">${icon('gear')}<span>${t('sites.qa_settings')}</span>${icon('chevR', 14)}</a>
+    </div>`;
+
 async function pageWebsites() {
     setActive('websites');
+    main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+    const vhosts = await api('/vhosts');
+    const domainCount = vhosts.reduce((n, v) => n + 1 + (Number(v.alias_count) || 0), 0);
+    const isProblem = (v) => v.status === 'error' || v.status === 'suspended' || (v.ssl_days != null && v.ssl_days < 7);
+    let filter = 'all';
+    let bulkMode = false;
+    let selectedId = (vhosts.find((v) => v.status === 'active') ?? vhosts[0])?.id ?? null;
+
     main().innerHTML = `
-    <div class="page-head">
-        <button class="btn" id="bulkbtn">${t('bulk.title')}</button>
+    <div class="page-head sites-head">
+        <div class="tabs" id="filters">
+            <button class="tab active" data-f="all">${t('sites.all')}</button>
+            <button class="tab" data-f="live">${t('sites.live')}</button>
+            <button class="tab" data-f="problems">${t('sites.problems')}<span class="tab-count" id="pc"></span></button>
+        </div>
         <div class="spacer"></div>
-        <button class="btn primary" id="new">${icon('plus')}${t('vhost.create')}</button></div>
-    <div id="bulkbar" hidden class="card" style="margin-bottom:12px"></div>
-    <div class="card">${t('common.loading')}</div>`;
+        <span class="sites-count mono">${vhosts.length} ${t('sites.sites')} · ${domainCount} ${t('sites.domains')}</span>
+        <button class="btn" id="bulkbtn">${t('bulk.title')}</button>
+        <button class="btn primary" id="new">${icon('plus')}${t('vhost.create')}</button>
+    </div>
+    <div id="bulkbar" hidden class="card mb"></div>
+    <div class="sites-layout" id="layout">
+        <div class="card sites-list" id="list"></div>
+        <aside class="card site-panel" id="panel"></aside>
+    </div>`;
+
+    const probCount = vhosts.filter(isProblem).length;
+    const pc = document.getElementById('pc');
+    if (probCount) pc.textContent = probCount; else pc.remove();
     document.getElementById('new').addEventListener('click', createVhostModal);
 
-    const vhosts = await api('/vhosts');
-    let bulkMode = false;
-    const render = () => {
-        main().querySelector('.card:last-child').innerHTML = vhostTable(vhosts, bulkMode);
-        if (bulkMode) {
-            main().querySelector('#selall')?.addEventListener('change', (e) =>
-                main().querySelectorAll('.vsel').forEach((c) => { c.checked = e.target.checked; }));
-        } else {
-            bindVhostRows();
-        }
+    const filtered = () => vhosts.filter((v) => filter === 'all' ? true : filter === 'live' ? v.status === 'active' : isProblem(v));
+
+    const renderPanel = () => {
+        const v = vhosts.find((x) => x.id === selectedId);
+        const panel = document.getElementById('panel');
+        panel.innerHTML = sitePanel(v);
+        if (!v) return;
+        panel.querySelector('[data-qa="backup"]')?.addEventListener('click', async () => {
+            try { const r = await api(`/vhosts/${v.id}/backups`, { method: 'POST', body: {} }); watchTask(r.task_id, `backup ${v.domain}`); }
+            catch (err) { toast(err.message, 'err'); }
+        });
+        panel.querySelector('[data-qa="ssl"]')?.addEventListener('click', async () => {
+            try { const r = await api(`/vhosts/${v.id}/ssl/renew`, { method: 'POST' }); watchTask(r.task_id, `ssl.issue ${v.domain}`); }
+            catch (err) { toast(err.message, 'err'); }
+        });
     };
-    render();
+
+    const renderList = () => {
+        const list = document.getElementById('list');
+        const rows = filtered();
+        if (bulkMode) {
+            list.innerHTML = vhostTable(rows, true);
+            list.querySelector('#selall')?.addEventListener('change', (e) =>
+                list.querySelectorAll('.vsel').forEach((c) => { c.checked = e.target.checked; }));
+            return;
+        }
+        list.innerHTML = sitesList(rows, selectedId);
+        list.querySelectorAll('[data-vhost]').forEach((tr) => tr.addEventListener('click', () => {
+            selectedId = Number(tr.dataset.vhost);
+            list.querySelectorAll('.row-link').forEach((r) => r.classList.toggle('selected', Number(r.dataset.vhost) === selectedId));
+            renderPanel();
+        }));
+    };
+
+    renderList();
+    renderPanel();
+
+    document.querySelectorAll('#filters .tab').forEach((b) => b.addEventListener('click', () => {
+        filter = b.dataset.f;
+        document.querySelectorAll('#filters .tab').forEach((x) => x.classList.toggle('active', x === b));
+        if (!filtered().some((v) => v.id === selectedId)) selectedId = filtered()[0]?.id ?? null;
+        renderList();
+        renderPanel();
+    }));
 
     document.getElementById('bulkbtn').addEventListener('click', () => {
         bulkMode = !bulkMode;
+        document.getElementById('layout').classList.toggle('bulk', bulkMode);
+        document.getElementById('panel').hidden = bulkMode;
         const bar = document.getElementById('bulkbar');
         bar.hidden = !bulkMode;
         if (bulkMode) {
@@ -1007,7 +1120,7 @@ async function pageWebsites() {
                 } catch (err) { toast(err.message, 'err'); }
             });
         }
-        render();
+        renderList();
     });
 }
 

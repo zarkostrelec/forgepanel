@@ -91,6 +91,15 @@ final class VhostCreate extends Operation
             NginxConf::vhostTemplate($domain, $docroot, $php_version, $sys_user)
         );
         $this->db->run("UPDATE vhosts SET status = 'active' WHERE id = ?", [$vhost_id]);
+
+        // Inicijalne statistike (disk + tip aplikacije) za Siteovi listu — best-effort
+        try {
+            [$disk, $app] = \ForgePanel\Agent\System\VhostStats::collect($vhost_root, $docroot);
+            $this->db->run('UPDATE vhosts SET disk_bytes = ?, app_type = ?, stats_at = NOW() WHERE id = ?', [$disk, $app, $vhost_id]);
+        } catch (\Throwable) {
+            // statistike nisu kritične za kreiranje vhosta
+        }
+
         $context->progress(100);
         $context->output("Vhost $domain kreiran.");
 
