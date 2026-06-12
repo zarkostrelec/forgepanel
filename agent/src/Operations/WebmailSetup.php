@@ -49,6 +49,11 @@ final class WebmailSetup extends Operation
         );
         Apt::install(['roundcube-core', 'roundcube-mysql', 'php' . self::PANEL_PHP . '-fpm'], $context->output(...));
 
+        // PHP 8.5 je uveo native array_first(); pakirani Roundcube (26.04 universe)
+        // ga redeklarira bez zaštite → "Cannot redeclare function array_first" (HTTP 500).
+        // Zamotaj deklaraciju u function_exists guard (idempotentno).
+        $this->patchRoundcubePhp85($context);
+
         $context->output("Roundcube baza + DB user\n");
         $context->progress(40);
         $rc_pass = bin2hex(random_bytes(24));
@@ -147,6 +152,34 @@ final class WebmailSetup extends Operation
         $context->progress(100);
         $context->output("Webmail spreman: https://$hostname (cert izdaje AutoSSL task)\n");
         return ['hostname' => $hostname];
+    }
+
+    /**
+     * PHP 8.5 native array_first() vs. Roundcubeova nezaštićena deklaracija → 500.
+     * Zamota deklaraciju u if (!function_exists(...)) {...}. Idempotentno; tiho preskače
+     * ako je već zakrpano ili ako se predložak ne podudara (novi paket bez problema).
+     */
+    private function patchRoundcubePhp85(TaskContext $context): void
+    {
+        $file = '/usr/share/roundcube/program/lib/Roundcube/bootstrap.php';
+        if (!is_file($file)) {
+            return;
+        }
+        $src = (string) file_get_contents($file);
+        if (str_contains($src, "function_exists('array_first')")) {
+            return;
+        }
+        $patched = preg_replace(
+            '/(function array_first\(\$array\)\n\{\n.*?\n\}\n)/s',
+            "if (!function_exists('array_first')) {\n\$1}\n",
+            $src,
+            1,
+            $count
+        );
+        if (is_string($patched) && $count === 1) {
+            file_put_contents($file, $patched);
+            $context->output("Roundcube bootstrap.php zakrpan za PHP 8.5 (array_first guard)\n");
+        }
     }
 
     public static function nginxTemplate(string $hostname): string
