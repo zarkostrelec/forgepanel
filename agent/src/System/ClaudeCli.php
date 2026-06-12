@@ -62,16 +62,21 @@ final class ClaudeCli
     {
         $bin = $this->bin() ?? throw new \RuntimeException('Claude CLI nije instaliran na serveru.');
         // env HOME=… → claude nalazi OAuth credentialse; --allowedTools ograničava
-        // na čitanje (write/bash/edit su auto-odbijeni u -p modu).
+        // na čitanje (write/bash/edit su auto-odbijeni u -p modu). 'timeout' jamči
+        // da claude ne visi zauvijek (npr. trust/network) — ubije ga prije Proca.
         $result = Proc::run([
             'env', 'HOME=' . $this->home(),
+            'timeout', '-k', '5', (string) $timeout_s,
             $bin, '-p',
             '--allowedTools', 'Read,Grep,Glob',
             '--output-format', 'text',
             $prompt,
-        ], timeout_s: $timeout_s);
+        ], timeout_s: $timeout_s + 20);
 
         if (!$result->ok()) {
+            if ($result->exit_code === 124 || $result->exit_code === 137) {
+                throw new \RuntimeException("Claude CLI istekao nakon {$timeout_s}s (moguć trust/network problem).");
+            }
             throw new \RuntimeException('Claude CLI: ' . trim($result->stderr ?: $result->stdout ?: 'nepoznata greška'));
         }
         return trim($result->stdout);

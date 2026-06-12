@@ -17,13 +17,78 @@ final class TaskWorker
     ) {
     }
 
+    /** Serijski (1 task → bez dpkg utrka), ali u djetetu da glavna petlja ostane živa. */
+    private const MAX_CONCURRENT = 1;
+
+    /** @var array<int, int> pid => task_id */
+    private array $children = [];
+    private bool $recovered = false;
+
     public function tick(): void
     {
+        $this->recoverOrphans();
+        $this->reap();
+        if (count($this->children) >= self::MAX_CONCURRENT) {
+            return;
+        }
         $task = $this->claimNext();
         if ($task === null) {
             return;
         }
-        $this->process($task);
+
+        // Forkamo: dugotrajni task (apt install, AI upit) izvršava dijete, a
+        // agentova glavna petlja ostaje responzivna (socket, scheduler, watchdog).
+        $pid = function_exists('pcntl_fork') ? pcntl_fork() : -1;
+        if ($pid === -1) {
+            $this->process($task); // fallback: sinkrono (degradirano)
+            return;
+        }
+        if ($pid === 0) {
+            // DIJETE: svjež DB handle (PDO se ne smije dijeliti preko forka)
+            $this->db->reconnect();
+            try {
+                $this->process($task);
+            } catch (\Throwable) {
+                // process() već bilježi failed; spriječi propagaciju
+            }
+            exit(0);
+        }
+        // RODITELJ: napusti dijeljenu konekciju i prati dijete
+        $this->db->reconnect();
+        $this->children[$pid] = (int) $task['id'];
+    }
+
+    /** Pokupi završenu djecu; crash/kill prije finish() → failed. */
+    private function reap(): void
+    {
+        foreach ($this->children as $pid => $task_id) {
+            $res = pcntl_waitpid($pid, $status, WNOHANG);
+            if ($res === 0) {
+                continue;
+            }
+            unset($this->children[$pid]);
+            $clean = $res > 0 && pcntl_wifexited($status) && pcntl_wexitstatus($status) === 0;
+            if (!$clean) {
+                $this->db->run(
+                    "UPDATE tasks SET status = 'failed', error = COALESCE(error, 'task proces prekinut'),
+                     finished_at = NOW() WHERE id = ? AND status = 'running'",
+                    [$task_id]
+                );
+            }
+        }
+    }
+
+    /** Nakon (re)starta agenta: 'running' taskovi nemaju živo dijete → failed. */
+    private function recoverOrphans(): void
+    {
+        if ($this->recovered) {
+            return;
+        }
+        $this->recovered = true;
+        $this->db->run(
+            "UPDATE tasks SET status = 'failed', error = 'agent restartan tijekom izvršavanja',
+             finished_at = NOW() WHERE status = 'running'"
+        );
     }
 
     /** @return array<string, mixed>|null */
