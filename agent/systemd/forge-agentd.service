@@ -19,7 +19,9 @@ WatchdogSec=30
 RuntimeDirectory=forgepanel
 RuntimeDirectoryMode=0755
 ProtectSystem=strict
-ReadWritePaths=/etc/nginx /etc/php /etc/forgepanel /etc/systemd/system /var/www /run /var/log /home /etc/passwd /etc/shadow /etc/group /etc/gshadow /etc/subuid /etc/subgid /var/backups
+# ReadWritePaths probija ProtectHome za točno ove putanje (Forge AI lokalni mod:
+# claude piše svoj state/cache; '-' = ne-fatalno ako putanja još ne postoji)
+ReadWritePaths=/etc/nginx /etc/php /etc/forgepanel /etc/systemd/system /var/www /run /var/log /home /etc/passwd /etc/shadow /etc/group /etc/gshadow /etc/subuid /etc/subgid /var/backups -/root/.claude -/root/.claude.json -/root/.config -/root/.cache -/root/.npm
 ProtectHome=read-only
 PrivateTmp=true
 ProtectKernelTunables=true
@@ -31,7 +33,8 @@ ProtectControlGroups=false
 RestrictSUIDSGID=false
 RestrictRealtime=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# MemoryDenyWriteExecute namjerno ISKLJUČEN: blokira W^X (JIT) — rušio bi
+# Forge AI lokalni claude (Node/V8 JIT) i već je gasio PCRE JIT u panelovom PHP-u
 SystemCallArchitectures=native
 
 [Install]
