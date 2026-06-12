@@ -588,6 +588,20 @@ create_admin() {
 INSERT INTO users (email, password_hash, role_id, lang)
 SELECT '${ADMIN_EMAIL}', '${admin_hash}', id, 'hr' FROM roles WHERE name = 'admin'
 ON DUPLICATE KEY UPDATE email = email;
+
+-- Globalni "Admin" plan + aktivna pretplata: bez toga admin ne može kreirati
+-- prvi resurs (model plan→pretplata→resurs). Idempotentno (repair ne duplicira).
+INSERT INTO plans (owner_user_id, name, disk_bytes, max_domains, max_mailboxes,
+                   max_databases, php_versions, features, cpu_quota_pct, memory_max_bytes, tasks_max)
+SELECT NULL, 'Admin', 1099511627776, 10000, 10000, 10000,
+       '["8.1","8.2","8.3","8.4","8.5"]', '{}', 400, 4294967296, 1024
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Admin' AND owner_user_id IS NULL);
+
+INSERT INTO subscriptions (user_id, plan_id, status)
+SELECT u.id, p.id, 'active'
+FROM users u, plans p
+WHERE u.email = '${ADMIN_EMAIL}' AND p.name = 'Admin' AND p.owner_user_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.status = 'active');
 SQL
 
     cat > "$FP_CREDS" <<EOF
