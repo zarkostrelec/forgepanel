@@ -14,11 +14,22 @@ final class TaskContext
     private ?\Closure $on_progress;
     /** @var ?\Closure(string): void */
     private ?\Closure $on_output;
+    /** @var ?\Closure(string): void */
+    private ?\Closure $on_output_raw;
 
-    public function __construct(?\Closure $on_progress = null, ?\Closure $on_output = null)
+    public function __construct(?\Closure $on_progress = null, ?\Closure $on_output = null, ?\Closure $on_output_raw = null)
     {
         $this->on_progress = $on_progress;
         $this->on_output = $on_output;
+        $this->on_output_raw = $on_output_raw;
+    }
+
+    /** Doslovan dodatak u output (bez rtrim/newline) — za live streaming (npr. claude tokeni). */
+    public function outputRaw(string $chunk): void
+    {
+        if ($this->on_output_raw !== null) {
+            ($this->on_output_raw)($chunk);
+        }
     }
 
     public function progress(int $percent): void

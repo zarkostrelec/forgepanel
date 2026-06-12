@@ -70,16 +70,27 @@ final class MonitoringController extends Controller
             $scope = 'server'; // klijent dobiva samo agregat servera ili svoje vhostove
         }
         $metric = preg_match('/^[a-z][a-z0-9_]{0,31}$/', (string) ($_GET['metric'] ?? '')) ? $_GET['metric'] : 'cpu_load1';
-        $resolution = (string) ($_GET['resolution'] ?? 'minute');
-        if (!in_array($resolution, ['minute', 'hour', 'day'], true)) {
-            $resolution = 'minute';
+
+        // Period → rezolucija (poštuje retenciju: minute ~2h, sat ~7d, dan ~400d)
+        $ranges = [
+            '2h' => ['minute', 2],
+            '24h' => ['hour', 24],
+            '7d' => ['hour', 168],
+            '30d' => ['day', 720],
+        ];
+        $range = (string) ($_GET['range'] ?? '2h');
+        [$resolution, $hours] = $ranges[$range] ?? $ranges['2h'];
+        // resolution param i dalje podržan kao override (npr. dashboard)
+        $res_override = (string) ($_GET['resolution'] ?? '');
+        if (in_array($res_override, ['minute', 'hour', 'day'], true)) {
+            $resolution = $res_override;
         }
 
         Response::ok($this->app->db->all(
             'SELECT value, ts FROM monitoring_metrics
-             WHERE scope = ? AND metric = ? AND resolution = ? AND ts > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+             WHERE scope = ? AND metric = ? AND resolution = ? AND ts > DATE_SUB(NOW(), INTERVAL ? HOUR)
              ORDER BY ts',
-            [(string) $scope, (string) $metric, $resolution]
+            [(string) $scope, (string) $metric, $resolution, $hours]
         ));
     }
 }

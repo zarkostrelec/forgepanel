@@ -8,8 +8,12 @@ const state = {
     langCode: localStorage.getItem('fp_lang') ?? 'hr',
     theme: localStorage.getItem('fp_theme') ?? 'light',
     activeTasks: new Map(),
-    aiThread: [],
+    aiThread: (() => { try { return JSON.parse(localStorage.getItem('fp_ai_thread') || '[]'); } catch { return []; } })(),
     aiOpen: false,
+    railExpanded: localStorage.getItem('fp_rail') === '1',
+    monTimer: null,
+    monRange: localStorage.getItem('fp_mon_range') || '2h',
+    monRefresh: localStorage.getItem('fp_mon_refresh') || '0',
 };
 
 const $app = document.getElementById('app');
@@ -96,6 +100,7 @@ const ICONS = {
     box: '<path d="M12 2.5 21 7v10l-9 4.5L3 17V7z"/><path d="M3 7l9 4.5L21 7M12 11.5V21.5"/>',
     wall: '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 9h18M3 14h18M8 4v5M16 9v5M8 14v6"/>',
     cloud: '<path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.3A3.5 3.5 0 0 1 17 18z"/>',
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
     history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c1-3.3 3.2-5 6-5s5 1.7 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.8M18 20c-.3-2-1-3.5-2-4.5"/>',
     archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
@@ -428,19 +433,23 @@ function renderShell() {
     const isAdmin = state.me.role === 'admin';
     $app.innerHTML = `
     <div class="shell">
-        <nav class="rail" aria-label="Glavna navigacija">
+        <nav class="rail${state.railExpanded ? ' expanded' : ''}" aria-label="Glavna navigacija">
+            <div class="rail-item">
+                <button class="rail-btn rail-toggle" id="railtoggle" aria-label="${t('nav.toggle')}">${icon('menu')}<span class="rail-label">${t('nav.collapse')}</span></button>
+                <span class="rail-tip">${t('nav.toggle')}</span>
+            </div>
             <div class="rail-logo" title="${esc(brandName())}">${state.branding?.logo_url
                 ? `<img src="${esc(state.branding.logo_url)}" alt="${esc(brandName())}">`
-                : icon('zap')}</div>
+                : icon('zap')}<span class="rail-label">${esc(brandName())}</span></div>
             ${RAIL.filter(railVisible).map((r) => `
             <div class="rail-item">
-                <button class="rail-btn" data-rail="${r.id}" data-go="#/${r.pages[0]}" aria-label="${t(r.label)}">${icon(r.icon)}</button>
+                <button class="rail-btn" data-rail="${r.id}" data-go="#/${r.pages[0]}" aria-label="${t(r.label)}">${icon(r.icon)}<span class="rail-label">${t(r.label)}</span></button>
                 <span class="rail-tip">${t(r.label)} <span class="kbd-hint">G ${r.key.toUpperCase()}</span></span>
             </div>`).join('')}
             <div class="rail-spacer"></div>
             <div class="rail-sep"></div>
             <div class="rail-item">
-                <button class="rail-btn" data-go="#/profile" data-rail="profile" aria-label="${t('profile.title')}">${icon('key')}</button>
+                <button class="rail-btn" data-go="#/profile" data-rail="profile" aria-label="${t('profile.title')}">${icon('key')}<span class="rail-label">${t('profile.title')}</span></button>
                 <span class="rail-tip">${t('profile.title')}</span>
             </div>
             <button class="rail-avatar" aria-label="${esc(state.me.email)}">${esc(initials)}</button>
@@ -464,6 +473,11 @@ function renderShell() {
     </div>`;
 
     $app.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { location.hash = b.dataset.go; }));
+    $app.querySelector('#railtoggle').addEventListener('click', () => {
+        state.railExpanded = !state.railExpanded;
+        localStorage.setItem('fp_rail', state.railExpanded ? '1' : '0');
+        $app.querySelector('.rail').classList.toggle('expanded', state.railExpanded);
+    });
     $app.querySelector('.search-btn').addEventListener('click', () => palette.open());
     $app.querySelector('#aibtn')?.addEventListener('click', () => toggleAiDrawer());
     $app.querySelector('.theme-btn').addEventListener('click', (e) => {
@@ -560,6 +574,19 @@ async function pollAiTask(id, { interval = 1500, maxMs = 200000 } = {}) {
     }
 }
 
+// Kao pollAiTask, ali zove onPartial(output) dok task traje (live ispis)
+async function pollAiTaskLive(id, onPartial, { interval = 800, maxMs = 200000 } = {}) {
+    const start = Date.now();
+    let last = '';
+    for (;;) {
+        const r = await api(`/assistant/task/${id}`);
+        if (['done', 'failed', 'cancelled'].includes(r.status)) return r;
+        if (r.output && r.output !== last) { last = r.output; onPartial(r.output); }
+        if (Date.now() - start > maxMs) return { status: 'failed', error: 'timeout' };
+        await new Promise((res) => setTimeout(res, interval));
+    }
+}
+
 async function renderAiDrawer() {
     const drawer = document.getElementById('aidrawer');
     if (!drawer) return;
@@ -612,9 +639,12 @@ async function renderAiDrawer() {
         threadEl.innerHTML = state.aiThread.length
             ? state.aiThread.map((m) => m.who === 'user'
                 ? `<div class="ai-msg-user">${esc(m.text)}</div>`
-                : `<div class="ai-msg-ai">${aiMessageHtml(m.text, canExec)}</div>`).join('')
+                // exec gumbi tek kad je odgovor gotov (ne na djelomičnom streamu)
+                : `<div class="ai-msg-ai${m.pending ? ' pending' : ''}">${aiMessageHtml(m.text, canExec && !m.pending)}</div>`).join('')
             : `<div class="ai-msg-ai">${t('ai.welcome')}${canExec ? ' <span class="badge ok">lokalni Claude</span>' : ''}</div>`;
         threadEl.scrollTop = threadEl.scrollHeight;
+        // perzistiraj povijest (bez in-flight placeholdera) — preživi refresh
+        try { localStorage.setItem('fp_ai_thread', JSON.stringify(state.aiThread.filter((m) => !m.pending).slice(-40))); } catch {}
     };
     renderThread();
 
@@ -639,6 +669,7 @@ async function renderAiDrawer() {
     drawer.querySelector('#aifoot').innerHTML = `
         <div class="ai-sugg">${[t('ai.sugg1'), t('ai.sugg2'), t('ai.sugg3')].map((s) =>
             `<button type="button" data-sugg="${esc(s)}">${esc(s)}</button>`).join('')}
+            <button type="button" data-clear>${t('ai.clear')}</button>
             ${status.mode === 'api' ? `<button type="button" data-disconnect title="${esc(status.model)}">⚙ ${t('assistant.disconnect')}</button>` : ''}</div>
         <form class="ai-inputrow" id="aiform">
             <input name="q" placeholder="${t('assistant.placeholder')}" autocomplete="off">
@@ -649,20 +680,21 @@ async function renderAiDrawer() {
     const ask = async (question) => {
         if (!question) return;
         state.aiThread.push({ who: 'user', text: question });
-        state.aiThread.push({ who: 'ai', text: t('assistant.thinking') });
+        const idx = state.aiThread.push({ who: 'ai', text: t('assistant.thinking'), pending: true }) - 1;
         renderThread();
         try {
             const r = await api('/assistant/ask', { method: 'POST', body: { question, context: '' } });
-            let text;
             if (r.task_id) {
-                const res = await pollAiTask(r.task_id);
-                text = res.status === 'done' ? (res.output || '') : ('✕ ' + (res.error || 'neuspješno'));
+                // live: prikazuj djelomičan odgovor kako stiže
+                const res = await pollAiTaskLive(r.task_id, (partial) => {
+                    if (partial) { state.aiThread[idx] = { who: 'ai', text: partial, pending: true }; renderThread(); }
+                });
+                state.aiThread[idx] = { who: 'ai', text: res.status === 'done' ? (res.output || '') : ('✕ ' + (res.error || 'neuspješno')) };
             } else {
-                text = r.answer; // API mod (sinkrono)
+                state.aiThread[idx] = { who: 'ai', text: r.answer }; // API mod (sinkrono)
             }
-            state.aiThread[state.aiThread.length - 1] = { who: 'ai', text };
         } catch (err) {
-            state.aiThread[state.aiThread.length - 1] = { who: 'ai', text: '✕ ' + err.message };
+            state.aiThread[idx] = { who: 'ai', text: '✕ ' + err.message };
         }
         renderThread();
     };
@@ -673,9 +705,14 @@ async function renderAiDrawer() {
         ask(q);
     });
     drawer.querySelectorAll('[data-sugg]').forEach((b) => b.addEventListener('click', () => ask(b.dataset.sugg)));
+    drawer.querySelector('[data-clear]')?.addEventListener('click', () => {
+        state.aiThread = [];
+        localStorage.removeItem('fp_ai_thread');
+        renderThread();
+    });
     drawer.querySelector('[data-disconnect]')?.addEventListener('click', async () => {
         if (!confirm(t('assistant.confirm_disconnect'))) return;
-        try { await api('/assistant/key', { method: 'DELETE' }); state.aiThread = []; renderAiDrawer(); }
+        try { await api('/assistant/key', { method: 'DELETE' }); state.aiThread = []; localStorage.removeItem('fp_ai_thread'); renderAiDrawer(); }
         catch (err) { toast(err.message, 'err'); }
     });
     input.focus();
@@ -1582,17 +1619,21 @@ function sparkline(points, { height = 130, formatY = (v) => String(v), color = '
         <polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.8"
             vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
     </svg>
-    <div class="chart-meta mono">max ${formatY(max / 1.1)} · ${points.length} točaka · 24 h</div>`;
+    <div class="chart-meta mono">max ${formatY(max / 1.1)} · ${points.length} točaka</div>`;
 }
 
 const bps = (v) => `${fmtBytes(v)}/s`;
 const lastVal = (arr) => (arr.length ? Number(arr.at(-1).value) : null);
 
-async function pageMonitoring() {
-    setActive('monitoring');
-    main().innerHTML = `${tabsHtml('monitoring', 'monitoring')}<div class="empty">${t('common.loading')}</div>`;
+const MON_RANGES = ['2h', '24h', '7d', '30d'];
+const MON_REFRESH = ['0', '5', '10', '30', '60']; // sekunde; 0 = isključeno
+
+async function refreshMonitoring() {
+    const data = document.getElementById('mondata');
+    if (!data) return;
+    const r = state.monRange;
+    const h = (metric) => api(`/monitoring/history?metric=${metric}&range=${r}`).catch(() => []);
     try {
-        const h = (metric) => api(`/monitoring/history?metric=${metric}`).catch(() => []);
         const [m, services, cpuPct, cpuLoad, mem, dRead, dWrite, netRx, netTx] = await Promise.all([
             api('/monitoring/now'),
             api('/monitoring/services').catch(() => ({})),
@@ -1618,8 +1659,7 @@ async function pageMonitoring() {
                 <span class="num" style="font-size:var(--fs-sm);color:var(--ink-2)">${now}</span></div>
                 <div class="pad">${sparkline(series, opts)}</div></div>`;
 
-        main().innerHTML = `
-        ${tabsHtml('monitoring', 'monitoring')}
+        data.innerHTML = `
         <div class="grid cols-4" style="margin-bottom:var(--gap)">
             ${metricCard({ label: 'Load 1/5/15', value: m.load.map((l) => l.toFixed(2)).join(' '), sub: `${m.cpu_count} jezgri` })}
             ${metricCard({ label: 'RAM', value: fmtBytes(m.mem_total_bytes - m.mem_available_bytes), unit: `/ ${fmtBytes(m.mem_total_bytes)}`, sub: `${memPct}% iskorišteno` })}
@@ -1638,8 +1678,44 @@ async function pageMonitoring() {
             <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th></tr></thead>
             <tbody>${svcRows}</tbody></table></div>` : ''}`;
     } catch {
-        main().innerHTML = `${tabsHtml('monitoring', 'monitoring')}<div class="empty">Dostupno administratoru.</div>`;
+        data.innerHTML = `<div class="empty">Dostupno administratoru.</div>`;
     }
+}
+
+function scheduleMonitoring() {
+    if (state.monTimer) { clearInterval(state.monTimer); state.monTimer = null; }
+    const sec = Number(state.monRefresh);
+    if (sec > 0) state.monTimer = setInterval(refreshMonitoring, sec * 1000);
+}
+
+async function pageMonitoring() {
+    setActive('monitoring');
+    const rangeOpt = (v) => `<option value="${v}" ${state.monRange === v ? 'selected' : ''}>${v}</option>`;
+    const refOpt = (v) => `<option value="${v}" ${state.monRefresh === v ? 'selected' : ''}>${v === '0' ? t('mon.off') : v + 's'}</option>`;
+    main().innerHTML = `
+        ${tabsHtml('monitoring', 'monitoring')}
+        <div class="page-head" style="gap:14px;align-items:center">
+            <span class="spacer"></span>
+            <label class="inline mono" style="gap:6px">${t('mon.range')}
+                <select id="monrange" class="mono">${MON_RANGES.map(rangeOpt).join('')}</select></label>
+            <label class="inline mono" style="gap:6px">${t('mon.refresh')}
+                <select id="monref" class="mono">${MON_REFRESH.map(refOpt).join('')}</select></label>
+        </div>
+        <div id="mondata"><div class="empty">${t('common.loading')}</div></div>`;
+
+    document.getElementById('monrange').addEventListener('change', (e) => {
+        state.monRange = e.target.value;
+        localStorage.setItem('fp_mon_range', state.monRange);
+        refreshMonitoring();
+    });
+    document.getElementById('monref').addEventListener('change', (e) => {
+        state.monRefresh = e.target.value;
+        localStorage.setItem('fp_mon_refresh', state.monRefresh);
+        scheduleMonitoring();
+    });
+
+    await refreshMonitoring();
+    scheduleMonitoring();
 }
 
 // ---------------------------------------------------------------- Cloudflare
@@ -2598,6 +2674,8 @@ const ROUTES = [
 
 async function route() {
     if (!state.me) return;
+    // počisti monitoring auto-refresh pri svakoj navigaciji (izbjegni curenje)
+    if (state.monTimer) { clearInterval(state.monTimer); state.monTimer = null; }
     const hash = location.hash || '#/dashboard';
     for (const [re, page] of ROUTES) {
         const m = hash.match(re);

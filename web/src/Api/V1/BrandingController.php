@@ -75,6 +75,15 @@ final class BrandingController extends Controller
                 'contact_email' => $this->app->config->get('acme_email', $ctx->email),
             ], $ctx->user_id);
         }
+        // Veži i na host kojim admin TRENUTNO pristupa — inače current() (čita po
+        // hostu) ne nađe branding pa se na refreshu boja vrati na default.
+        $current_host = strtolower(preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? ''));
+        if ($current_host !== '' && $current_host !== $panel_host) {
+            $this->app->db->run(
+                "INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
+                ['branding_host_' . $current_host, json_encode($branding)]
+            );
+        }
         $this->app->audit->log($ctx->user_id, $ctx->email, 'branding.update', ['panel_name' => $panel_name, 'host' => $panel_host], $request->ip);
         Response::ok($branding);
     }

@@ -58,20 +58,26 @@ final class ClaudeCli
      * Pokreni claude u read-only "propose" modu. Vraća tekstualni odgovor.
      * @throws \RuntimeException ako CLI nije dostupan ili padne
      */
-    public function query(string $prompt, int $timeout_s = 180): string
+    public function query(string $prompt, int $timeout_s = 180, ?\Closure $on_chunk = null): string
     {
         $bin = $this->bin() ?? throw new \RuntimeException('Claude CLI nije instaliran na serveru.');
         // env HOME=… → claude nalazi OAuth credentialse; --allowedTools ograničava
-        // na čitanje (write/bash/edit su auto-odbijeni u -p modu).
+        // na čitanje (write/bash/edit su auto-odbijeni u -p modu). 'timeout' jamči
+        // da claude ne visi zauvijek (npr. trust/network) — ubije ga prije Proca.
+        // $on_chunk: live streaming stdout chunkova (UI ih prikazuje kako stižu).
         $result = Proc::run([
             'env', 'HOME=' . $this->home(),
+            'timeout', '-k', '5', (string) $timeout_s,
             $bin, '-p',
             '--allowedTools', 'Read,Grep,Glob',
             '--output-format', 'text',
             $prompt,
-        ], timeout_s: $timeout_s);
+        ], timeout_s: $timeout_s + 20, on_line: $on_chunk);
 
         if (!$result->ok()) {
+            if ($result->exit_code === 124 || $result->exit_code === 137) {
+                throw new \RuntimeException("Claude CLI istekao nakon {$timeout_s}s (moguć trust/network problem).");
+            }
             throw new \RuntimeException('Claude CLI: ' . trim($result->stderr ?: $result->stdout ?: 'nepoznata greška'));
         }
         return trim($result->stdout);

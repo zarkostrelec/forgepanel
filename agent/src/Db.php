@@ -12,6 +12,12 @@ final class Db
     {
     }
 
+    /** Odbaci konekciju (sljedeći pdo() otvara svježu) — nužno u djetetu nakon pcntl_fork. */
+    public function reconnect(): void
+    {
+        $this->pdo = null;
+    }
+
     public function pdo(): \PDO
     {
         if ($this->pdo === null) {
