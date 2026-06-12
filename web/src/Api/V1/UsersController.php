@@ -128,8 +128,9 @@ final class UsersController extends Controller
         if ($name === '' || mb_strlen($name) > 64) {
             throw new HttpException(422, 'invalid_name');
         }
-        $php_versions = $request->body['php_versions'] ?? ['8.4'];
-        if (!is_array($php_versions) || array_diff($php_versions, ['8.1', '8.2', '8.3', '8.4']) !== []) {
+        $php_versions = $request->body['php_versions'] ?? ['8.5'];
+        if (!is_array($php_versions) || $php_versions === []
+            || array_diff($php_versions, ['8.1', '8.2', '8.3', '8.4', '8.5']) !== []) {
             throw new HttpException(422, 'invalid_php_versions');
         }
 

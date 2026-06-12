@@ -2371,12 +2371,17 @@ function planModal() {
                 <div class="field"><label>Max mailboxa</label><input name="max_mailboxes" type="number" value="10" class="mono"></div>
                 <div class="field"><label>Max baza</label><input name="max_databases" type="number" value="5" class="mono"></div>
             </div>
+            <div class="field"><label>PHP verzije</label>
+                <div class="checkrow">${['8.1', '8.2', '8.3', '8.4', '8.5'].map((v) =>
+                    `<label class="chk"><input type="checkbox" name="php" value="${v}" ${v === '8.4' || v === '8.5' ? 'checked' : ''}> ${v}</label>`).join('')}</div></div>
             <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
                 <button class="btn primary">${t('common.create')}</button></div>
         </form>`);
     modal.querySelector('#pf').addEventListener('submit', async (e) => {
         e.preventDefault();
         const f = Object.fromEntries(new FormData(e.target));
+        const php = [...e.target.querySelectorAll('input[name="php"]:checked')].map((c) => c.value);
+        if (php.length === 0) return toast(t('plan.pick_php') || 'Odaberi bar jednu PHP verziju', 'err');
         try {
             await api('/plans', { method: 'POST', body: {
                 name: f.name,
@@ -2384,7 +2389,7 @@ function planModal() {
                 max_domains: Number(f.max_domains),
                 max_mailboxes: Number(f.max_mailboxes),
                 max_databases: Number(f.max_databases),
-                php_versions: ['8.5', '8.4', '8.3'],
+                php_versions: php,
             } });
             modal.close(); pageUsers();
         } catch (err) { toast(err.message, 'err'); }
