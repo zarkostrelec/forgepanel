@@ -667,3 +667,13 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
     .topbar-host .host-name { display: initial; }
     .dialog { padding: 14px; }
 }
+
+/* Forge AI — predložene komande (predloži → potvrdi → izvrši) */
+.ai-prose { white-space: normal; }
+.ai-code, .ai-cmd pre { background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 6px;
+    padding: 8px 10px; margin: 6px 0; font-size: var(--fs-sm); overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+.ai-cmd { margin: 8px 0; }
+.ai-cmd .btn.sm { margin-top: 4px; }
+.ai-cmd-out { margin-top: 6px; padding: 8px 10px; background: var(--bg-2); border-radius: 6px;
+    font-family: var(--mono); font-size: var(--fs-sm); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; }
+.ai-cmd-out.err { color: var(--danger-deep); }

@@ -31,19 +31,65 @@ final class AssistantController extends Controller
         - Odgovaraj na hrvatskom jeziku.
         PROMPT;
 
+    /** Dodatak za lokalni CLI mod: predložene komande u ```sh blokovima (panel nudi "Izvrši"). */
+    private const LOCAL_SUFFIX = <<<'PROMPT'
+
+        DODATNO (lokalni mod):
+        - Imaš read-only pristup serveru (smiješ čitati fileove, ali ne mijenjati).
+        - Kad predlažeš promjenu, napiši svaku komandu u zasebnom ```sh bloku, jednu komandu po bloku.
+        - Administrator vidi tvoj prijedlog i ručno klikne "Izvrši" za svaku komandu.
+        - NE tvrdi da si nešto pokrenuo — ti samo predlažeš; izvršava čovjek.
+        PROMPT;
+
     public function register(Router $router): void
     {
         $router->add('GET', '/api/v1/assistant/status', $this->status(...));
         $router->add('POST', '/api/v1/assistant/key', $this->setKey(...));
         $router->add('DELETE', '/api/v1/assistant/key', $this->removeKey(...));
         $router->add('POST', '/api/v1/assistant/ask', $this->ask(...));
+        $router->add('POST', '/api/v1/assistant/exec', $this->exec(...));
         $router->add('POST', '/api/v1/assistant/diagnose/{id}', $this->diagnoseVhost(...));
     }
 
     private function status(Request $request): never
     {
         $this->admin($request);
-        Response::ok(['configured' => $this->apiKey() !== null, 'model' => $this->model()]);
+        $local = $this->localStatus();
+        if ($local['available'] && $local['logged_in']) {
+            Response::ok(['configured' => true, 'mode' => 'local', 'model' => 'claude-cli']);
+        }
+        $hasKey = $this->apiKey() !== null;
+        Response::ok(['configured' => $hasKey, 'mode' => $hasKey ? 'api' : null, 'model' => $this->model()]);
+    }
+
+    /** Status lokalnog Claude CLI-ja preko agenta (dostupan + prijavljen). */
+    private function localStatus(): array
+    {
+        try {
+            $s = $this->app->agent->call('assistant.status');
+            return ['available' => (bool) ($s['available'] ?? false), 'logged_in' => (bool) ($s['logged_in'] ?? false)];
+        } catch (\Throwable) {
+            return ['available' => false, 'logged_in' => false];
+        }
+    }
+
+    /**
+     * Izvrši komandu koju je admin POTVRDIO (Forge AI predloži → potvrdi → izvrši).
+     * Samo lokalni mod; admin-only; svaka komanda u audit_log.
+     */
+    private function exec(Request $request): never
+    {
+        $ctx = $this->admin($request);
+        if (!$this->localStatus()['available']) {
+            throw new HttpException(409, 'local_assistant_unavailable');
+        }
+        $command = trim($request->str('command') ?? '');
+        if ($command === '' || mb_strlen($command) > 4000) {
+            throw new HttpException(422, 'invalid_command');
+        }
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'assistant.exec', ['command' => mb_substr($command, 0, 500)], $request->ip);
+        $result = $this->app->agent->call('assistant.exec', ['command' => $command], 130);
+        Response::ok($result);
     }
 
     private function setKey(Request $request): never
@@ -97,9 +143,20 @@ final class AssistantController extends Controller
             $user_message .= "\n\n--- KONTEKST ---\n" . mb_substr($context, 0, 12000);
         }
 
+        $local = $this->localStatus();
+        if ($local['available'] && $local['logged_in']) {
+            $res = $this->app->agent->call(
+                'assistant.query',
+                ['prompt' => self::SYSTEM_PROMPT . self::LOCAL_SUFFIX . "\n\n--- UPIT ---\n" . $user_message],
+                200
+            );
+            $this->app->audit->log($ctx->user_id, $ctx->email, 'assistant.ask', ['mode' => 'local'], $request->ip);
+            Response::ok(['answer' => (string) ($res['answer'] ?? ''), 'mode' => 'local']);
+        }
+
         $answer = $this->client()->ask(self::SYSTEM_PROMPT, $user_message);
-        $this->app->audit->log($ctx->user_id, $ctx->email, 'assistant.ask', null, $request->ip);
-        Response::ok(['answer' => $answer]);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'assistant.ask', ['mode' => 'api'], $request->ip);
+        Response::ok(['answer' => $answer, 'mode' => 'api']);
     }
 
     /** "Zašto je site spor?" — asistent dobiva metrike, FPM status, error log vhosta. */

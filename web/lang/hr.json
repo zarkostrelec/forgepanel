@@ -258,5 +258,6 @@
     "cf.sync_done": "DNS sinkroniziran",
     "cf.no_account": "Cloudflare još nije povezan.",
     "cf.proxy": "Proxy",
-    "cf.records": "Zapisi"
+    "cf.records": "Zapisi",
+    "ai.run": "Izvrši"
 }

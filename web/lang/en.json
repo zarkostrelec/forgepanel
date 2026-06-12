@@ -258,5 +258,6 @@
     "cf.sync_done": "DNS synced",
     "cf.no_account": "Cloudflare not connected yet.",
     "cf.proxy": "Proxy",
-    "cf.records": "Records"
+    "cf.records": "Records",
+    "ai.run": "Run"
 }
