@@ -26,6 +26,7 @@ HOSTNAME_FLAG=""
 DB_ENGINE="mariadb"
 COMPONENTS="web"
 DO_UNINSTALL=0
+PANEL_PHP=""   # odabire se u install_panel_stack (8.4 iz ondreja ili distro verzija)
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -76,6 +77,7 @@ save_env() {
         echo "DB_ENGINE=$(printf '%q' "$DB_ENGINE")"
         echo "COMPONENTS=$(printf '%q' "$COMPONENTS")"
         echo "PANEL_FQDN=$(printf '%q' "${PANEL_FQDN:-}")"
+        echo "PANEL_PHP=$(printf '%q' "${PANEL_PHP:-}")"
     } > "${FP_STATE}.env"
     chmod 600 "${FP_STATE}.env"
 }
@@ -250,14 +252,23 @@ bootstrap_repos() {
         add-apt-repository -y universe
     fi
 
-    add_repo "ondrej-php" \
-        "https://ppa.launchpadcontent.net/ondrej/php/ubuntu" \
-        "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x71daeaab4ad4cab6" \
-        "main"
-    add_repo "ondrej-apache2" \
-        "https://ppa.launchpadcontent.net/ondrej/apache2/ubuntu" \
-        "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x71daeaab4ad4cab6" \
-        "main"
+    # ondrej PPA: noble fallback NE radi za PHP/Apache pakete — buildovi ovise o
+    # noble libovima (libicu74, libzip4t64, stari libxml2) kojih u 26.04 nema, a
+    # apt bi ih preferirao i blokirao i distro PHP. Bez pravog suite-a PPA se NE
+    # dodaje: panel ide na distro PHP, suite watcher (modul updates) dodaje PPA
+    # kad ondrej objavi resolute.
+    if [[ "$(suite_for 'https://ppa.launchpadcontent.net/ondrej/php/ubuntu')" == "$UBUNTU_SUITE" ]]; then
+        add_repo "ondrej-php" \
+            "https://ppa.launchpadcontent.net/ondrej/php/ubuntu" \
+            "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x71daeaab4ad4cab6" \
+            "main"
+        add_repo "ondrej-apache2" \
+            "https://ppa.launchpadcontent.net/ondrej/apache2/ubuntu" \
+            "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x71daeaab4ad4cab6" \
+            "main"
+    else
+        log "  ondrej PPA još nema '$UBUNTU_SUITE' suite — preskačem (panel koristi distro PHP)"
+    fi
     add_repo "nginx" \
         "https://nginx.org/packages/mainline/ubuntu" \
         "https://nginx.org/keys/nginx_signing.key" \
@@ -283,6 +294,22 @@ bootstrap_repos() {
     fi
 
     apt-get update -q
+}
+
+# Uvijek se izvršava (i kod repair/nastavka): starije verzije installera su ondrej
+# dodale s noble fallbackom — ti paketi su neinstalabilni na 26.04 i blokiraju apt
+# resolver (apt preferira višu sury verziju pa i distro PHP postane neinstalabilan).
+repo_sanity() {
+    local want="${FORGEPANEL_FORCE_SUITE:-$UBUNTU_SUITE}" f changed=0
+    for f in /etc/apt/sources.list.d/forgepanel-ondrej-*.sources; do
+        [[ -f "$f" ]] || continue
+        if ! grep -qxF "Suites: ${want}" "$f"; then
+            log "  uklanjam $f (suite nije '${want}' — neinstalabilni paketi)"
+            rm -f "$f"; changed=1
+        fi
+    done
+    [[ $changed -eq 1 ]] && apt-get update -q
+    return 0
 }
 
 # ---------------------------------------------------------------- 4. panel stack
@@ -365,9 +392,25 @@ SQL
 
 install_panel_stack() {
     export DEBIAN_FRONTEND=noninteractive
-    # Panelov vlastiti PHP 8.4 — update hostanih PHP-ova ne dira panel
-    apt-get install -y -q php8.4-cli php8.4-fpm php8.4-mysql php8.4-curl \
-        php8.4-mbstring php8.4-xml php8.4-zip php8.4-intl
+    # Panelov vlastiti PHP — update hostanih PHP-ova ne dira panel.
+    # Preferira se 8.4 (ondrej PPA); ako ondrej još nema suite za 26.04,
+    # distro PHP (resolute nosi 8.5). apt -s simulacija = provjera instalabilnosti.
+    if [[ -z "$PANEL_PHP" ]]; then
+        local v
+        for v in 8.4 8.5; do
+            if apt-get -s install "php${v}-cli" "php${v}-fpm" >/dev/null 2>&1; then
+                PANEL_PHP="$v"; break
+            fi
+        done
+        [[ -n "$PANEL_PHP" ]] || die "Ni PHP 8.4 ni 8.5 nisu instalabilni — provjeri apt repoe ($FP_LOG)."
+        save_env
+    fi
+    log "  panel PHP verzija: ${PANEL_PHP}"
+    apt-get install -y -q "php${PANEL_PHP}-cli" "php${PANEL_PHP}-fpm" "php${PANEL_PHP}-mysql" \
+        "php${PANEL_PHP}-curl" "php${PANEL_PHP}-mbstring" "php${PANEL_PHP}-xml" \
+        "php${PANEL_PHP}-zip" "php${PANEL_PHP}-intl"
+    # Stabilan interpreter path — agent servis i skripte ne ovise o verziji u imenu
+    ln -sf "/usr/bin/php${PANEL_PHP}" /usr/local/bin/forgepanel-php
     apt-get install -y -q nginx
     # Git deploy modul treba git + ssh klijent
     apt-get install -y -q git openssh-client
@@ -376,7 +419,7 @@ install_panel_stack() {
     id fpanel &>/dev/null || useradd --system --shell /usr/sbin/nologin --home-dir "$FP_HOME" fpanel
 
     # PHP-FPM pool panela (zaseban, user fpanel)
-    cat > /etc/php/8.4/fpm/pool.d/forgepanel.conf <<'EOF'
+    cat > "/etc/php/${PANEL_PHP}/fpm/pool.d/forgepanel.conf" <<'EOF'
 [forgepanel]
 user = fpanel
 group = fpanel
@@ -393,10 +436,10 @@ php_admin_value[post_max_size] = 68M
 php_admin_value[open_basedir] = /opt/forgepanel/web:/opt/forgepanel/modules:/etc/forgepanel/web.ini:/tmp
 php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,pcntl_exec
 EOF
-    php-fpm8.4 -t
+    "php-fpm${PANEL_PHP}" -t
     install -d /run/php
-    systemctl enable --now php8.4-fpm 2>/dev/null || true
-    systemctl reload php8.4-fpm 2>/dev/null || true
+    systemctl enable --now "php${PANEL_PHP}-fpm" 2>/dev/null || true
+    systemctl reload "php${PANEL_PHP}-fpm" 2>/dev/null || true
 
     # Panel nginx na :8443 (self-signed do AutoSSL-a)
     install -d -m 700 "$FP_ETC/ssl/panel"
@@ -526,7 +569,7 @@ EOF
 create_admin() {
     local admin_pass admin_hash
     admin_pass=$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)
-    admin_hash=$(php8.4 -r 'echo password_hash($argv[1], PASSWORD_ARGON2ID, ["memory_cost" => 65536, "time_cost" => 4, "threads" => 2]);' "$admin_pass")
+    admin_hash=$(/usr/local/bin/forgepanel-php -r 'echo password_hash($argv[1], PASSWORD_ARGON2ID, ["memory_cost" => 65536, "time_cost" => 4, "threads" => 2]);' "$admin_pass")
 
     sql forgepanel <<SQL
 INSERT INTO users (email, password_hash, role_id, lang)
@@ -626,7 +669,7 @@ SQL
 # ---------------------------------------------------------------- health check
 verify_install() {
     local fail=0
-    php8.4 -v >/dev/null || { log "FAIL: php8.4"; fail=1; }
+    /usr/local/bin/forgepanel-php -v >/dev/null || { log "FAIL: panel PHP (forgepanel-php)"; fail=1; }
     nginx -t >/dev/null 2>&1 || { log "FAIL: nginx config"; fail=1; }
     sql forgepanel -e "SELECT COUNT(*) FROM users" >/dev/null || { log "FAIL: panel baza"; fail=1; }
     if systemctl is-active --quiet forge-agentd 2>/dev/null; then
@@ -652,8 +695,12 @@ main() {
     preflight
     resolve_repo_root
     step "bootstrap_repos"     bootstrap_repos
+    repo_sanity
     step "install_database"    install_database
-    step "install_panel_code"  install_panel_code
+    # namjerno bez checkpointa: kopiranje koda je idempotentno, a repair s novijim
+    # kodom mora osvježiti i /opt/forgepanel (service file, agent, web)
+    log "→ install_panel_code (uvijek se osvježava)"
+    install_panel_code
     step "install_panel_stack" install_panel_stack
     step "setup_panel_db"      setup_panel_db
     step "install_agent"       install_agent

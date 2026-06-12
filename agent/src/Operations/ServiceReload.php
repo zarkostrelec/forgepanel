@@ -19,6 +19,7 @@ final class ServiceReload extends Operation
         'php8.2-fpm' => ['php-fpm8.2', '-t'],
         'php8.3-fpm' => ['php-fpm8.3', '-t'],
         'php8.4-fpm' => ['php-fpm8.4', '-t'],
+        'php8.5-fpm' => ['php-fpm8.5', '-t'],
         'named' => ['named-checkconf'],
     ];
 

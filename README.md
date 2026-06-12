@@ -89,9 +89,9 @@ Za prvi test preporučujem samo `--components web` — mail, DNS i FTP dodaš ka
 Installer redom, s checkpointom nakon svakog koraka:
 
 1. **Preflight** — OS 26.04, root, čist sustav, ≥2 GB RAM / ≥20 GB disk, FQDN, DNS resolver, NTP
-2. **Repoi** — universe + nginx.org, ondrej/php, ondrej/apache2, mariadb.org (deb822 format, ključevi u `/etc/apt/keyrings/`); ako third-party repo još nema `resolute` suite, automatski fallback na binarno kompatibilan `noble` (panel kasnije sam migrira natrag)
+2. **Repoi** — universe + nginx.org, ondrej/php, ondrej/apache2, mariadb.org (deb822 format, ključevi u `/etc/apt/keyrings/`); ako repo još nema `resolute` suite: nginx/mariadb/docker padaju na `noble` (binarno kompatibilni), a **ondrej PPA se preskače** (noble PHP buildovi nisu instalabilni na 26.04) — panel tada koristi distro PHP 8.5, a PPA se dodaje automatski kad objavi `resolute`
 3. **Baza** — MariaDB/MySQL + zasebna `forgepanel` baza s vlastitim userom
-4. **Panel stack** — kod u `/opt/forgepanel`, vlastiti PHP-FPM 8.4 pool (user `fpanel`), panel nginx na :8443 (privremeni self-signed cert)
+4. **Panel stack** — kod u `/opt/forgepanel`, vlastiti PHP-FPM pool (user `fpanel`; PHP 8.4 iz ondrej PPA ako ima suite za 26.04, inače distro PHP 8.5), panel nginx na :8443 (privremeni self-signed cert)
 5. **Agent** — `forge-agentd` systemd servis (root, hardening direktive, UNIX socket)
 6. **phpMyAdmin** — u panelov stack na `/pma/`, login isključivo kroz panelov jednokratni token
 7. **Admin račun** — generirana lozinka
@@ -179,7 +179,7 @@ bash installer/install.sh --uninstall
 | Installer odbija start | Pročitaj poruku — preflight točno kaže što ne valja (OS, RAM, FQDN, konflikt...) |
 | Instalacija stala | `tail -50 /var/log/forgepanel-install.log` |
 | apt ne može skinuti pakete (`Unable to connect to …`) | Mirror je pao — zamijeni `URIs:` u `/etc/apt/sources.list.d/forgepanel-*.sources` drugim mirrorom, `apt-get update`, pa ponovno pokreni installer (checkpointi nastavljaju gdje je stalo) |
-| Panel ne odgovara na :8443 | `systemctl status nginx php8.4-fpm` · `curl -k https://127.0.0.1:8443` lokalno · vanjski firewall providera? |
+| Panel ne odgovara na :8443 | `systemctl status nginx 'php*-fpm'` · `curl -k https://127.0.0.1:8443` lokalno · vanjski firewall providera? |
 | Taskovi stoje u "pending" | `systemctl status forge-agentd` · `journalctl -u forge-agentd -n 50` |
 | AutoSSL ne izdaje cert | DNS zapis resolva na server? Port 80 otvoren izvana? Detalji u tasku (SSL stranica) |
 | Mail se ne šalje | Provider blokira port 25? (čest slučaj — traži unblock ili koristi relay) |

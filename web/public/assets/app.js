@@ -816,7 +816,7 @@ async function pageWebsites() {
                             <option value="unsuspend">${t('bulk.unsuspend')}</option>
                         </select></div>
                     <div class="field" id="phpwrap"><label>PHP</label>
-                        <select id="bphp" class="mono">${['8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
+                        <select id="bphp" class="mono">${['8.5', '8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
                     <div class="field"><label>&nbsp;</label><button class="btn primary" id="barun">${t('bulk.run')}</button></div>
                 </div>`;
             bar.querySelector('#ba').addEventListener('change', (e) => {
@@ -847,7 +847,7 @@ function createVhostModal() {
                 <input name="domain" required placeholder="example.com" class="mono" autocomplete="off">
                 <span class="hint">Bez www — alias se dodaje automatski (AutoSSL pokriva oba).</span></div>
             <div class="field"><label>${t('vhost.php_version')}</label>
-                <select name="php_version">${['8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
+                <select name="php_version">${['8.5', '8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
             <div class="dialog-foot">
                 <button type="button" class="btn" data-close>${t('common.cancel')}</button>
                 <button class="btn primary">${t('common.create')}</button>
@@ -894,7 +894,7 @@ async function pageWebsiteDetail(id) {
             <h2>Postavke</h2>
             <table class="data"><tbody>
                 <tr><td>${t('vhost.php_version')}</td><td>
-                    <select id="php" class="mono">${['8.1', '8.2', '8.3', '8.4'].map((v) =>
+                    <select id="php" class="mono">${['8.1', '8.2', '8.3', '8.4', '8.5'].map((v) =>
                         `<option ${v === vhost.php_version ? 'selected' : ''}>${v}</option>`).join('')}</select></td></tr>
                 <tr><td>Backend</td><td>
                     <select id="backend" class="mono">
@@ -2030,7 +2030,7 @@ function planModal() {
                 max_domains: Number(f.max_domains),
                 max_mailboxes: Number(f.max_mailboxes),
                 max_databases: Number(f.max_databases),
-                php_versions: ['8.4', '8.3'],
+                php_versions: ['8.5', '8.4', '8.3'],
             } });
             modal.close(); pageUsers();
         } catch (err) { toast(err.message, 'err'); }

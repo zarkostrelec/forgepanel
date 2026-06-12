@@ -14,7 +14,7 @@ final class ServiceStatus extends Operation
     public const SERVICES = [
         'nginx', 'apache2', 'mariadb', 'mysql', 'postfix', 'dovecot', 'rspamd',
         'named', 'proftpd', 'fail2ban', 'redis-server', 'docker', 'clamav-daemon',
-        'php8.1-fpm', 'php8.2-fpm', 'php8.3-fpm', 'php8.4-fpm',
+        'php8.1-fpm', 'php8.2-fpm', 'php8.3-fpm', 'php8.4-fpm', 'php8.5-fpm',
     ];
 
     public function validate(array $params): void
