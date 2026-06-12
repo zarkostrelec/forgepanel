@@ -172,7 +172,22 @@ h2 {
     content: ""; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 2.5px;
     border-radius: 99px; background: var(--accent);
 }
-.rail-btn svg { width: 18px; height: 18px; }
+.rail-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+.rail-label { display: none; }
+
+/* Prošireni rail: prikaži nazive izbornika */
+.rail.expanded { width: 200px; align-items: stretch; padding-left: 8px; padding-right: 8px; }
+.rail.expanded .rail-item { width: 100%; }
+.rail.expanded .rail-btn { width: 100%; justify-content: flex-start; gap: 10px; padding: 0 10px;
+    grid-template-columns: none; display: flex; align-items: center; }
+.rail.expanded .rail-btn.active::before { left: -8px; }
+.rail.expanded .rail-label { display: inline; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail.expanded .rail-tip { display: none !important; }
+.rail.expanded .rail-logo { width: auto; height: 32px; gap: 8px; margin: 0 0 14px; padding: 0 6px;
+    background: transparent; box-shadow: none; color: var(--accent); justify-content: flex-start; display: flex; align-items: center; }
+.rail.expanded .rail-logo svg { width: 22px; height: 22px; }
+.rail.expanded .rail-logo .rail-label { color: var(--chrome-ink); font-weight: 700; font-size: var(--fs); }
+.rail.expanded .rail-avatar { align-self: flex-start; margin-left: 6px; }
 .rail-tip {
     position: absolute; left: 50px; top: 6px; z-index: 99;
     background: var(--chrome-2); color: var(--chrome-ink);

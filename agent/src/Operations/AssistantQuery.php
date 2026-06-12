@@ -32,9 +32,13 @@ final class AssistantQuery extends Operation
 
     public function execute(array $params, TaskContext $context): array
     {
-        $answer = (new ClaudeCli($this->config))->query((string) $params['prompt'], 150);
-        // odgovor ide u task.output → web ga čita pollanjem
-        $context->output($answer);
+        // Stream chunkova u task.output kako stižu → UI prikazuje odgovor live.
+        // (Ako claude bufferira, on_line svejedno dobije sve odjednom na kraju.)
+        $answer = (new ClaudeCli($this->config))->query(
+            (string) $params['prompt'],
+            150,
+            fn (string $chunk) => $context->outputRaw($chunk),
+        );
         return ['answer' => $answer];
     }
 }

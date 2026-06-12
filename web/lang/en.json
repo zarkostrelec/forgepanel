@@ -259,5 +259,12 @@
     "cf.no_account": "Cloudflare not connected yet.",
     "cf.proxy": "Proxy",
     "cf.records": "Records",
-    "ai.run": "Run"
+    "ai.run": "Run",
+    "nav.toggle": "Collapse/expand menu",
+    "nav.collapse": "Menu",
+    "mon.refresh": "Auto-refresh",
+    "mon.range": "Range",
+    "mon.off": "off",
+    "ai.clear": "Clear",
+    "ai.live": "live"
 }

@@ -129,12 +129,14 @@ final class TaskWorker
             return;
         }
 
+        $append = fn (string $s) => $this->db->run(
+            "UPDATE tasks SET output = CONCAT(COALESCE(output, ''), ?) WHERE id = ?",
+            [$s, $task_id]
+        );
         $context = new TaskContext(
             on_progress: fn (int $p) => $this->db->run('UPDATE tasks SET progress = ? WHERE id = ?', [$p, $task_id]),
-            on_output: fn (string $line) => $this->db->run(
-                "UPDATE tasks SET output = CONCAT(COALESCE(output, ''), ?) WHERE id = ?",
-                [$line, $task_id]
-            ),
+            on_output: $append,      // TaskContext::output već formatira (rtrim+\n)
+            on_output_raw: $append,  // live streaming (claude tokeni) — doslovno, bez manglinga
         );
 
         try {

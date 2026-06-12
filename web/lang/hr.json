@@ -259,5 +259,12 @@
     "cf.no_account": "Cloudflare još nije povezan.",
     "cf.proxy": "Proxy",
     "cf.records": "Zapisi",
-    "ai.run": "Izvrši"
+    "ai.run": "Izvrši",
+    "nav.toggle": "Skupi/raširi izbornik",
+    "nav.collapse": "Izbornik",
+    "mon.refresh": "Auto-osvježi",
+    "mon.range": "Period",
+    "mon.off": "isključeno",
+    "ai.clear": "Očisti",
+    "ai.live": "live"
 }
