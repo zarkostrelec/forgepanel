@@ -29,6 +29,7 @@ final class Scheduler
         $this->every('metrics', 60, $this->collectMetrics(...));
         $this->every('aggregate', 3600, $this->aggregate(...));
         $this->every('ssl_renew', 6 * 3600, $this->enqueueSslRenewals(...));
+        $this->every('panel_cert', 900, $this->ensurePanelCert(...));
         $this->every('cleanup', 3600, $this->cleanup(...));
         $this->every('uptime', 30, $this->runUptimeProbes(...));
         $this->every('updates_scan', 4 * 3600, $this->enqueueUpdatesScan(...));
@@ -282,9 +283,48 @@ final class Scheduler
         );
     }
 
+    /**
+     * Panel hostname (:8443) mora dobiti pravi cert čim DNS/port 80 prorade —
+     * installer ostavlja self-signed, a ovo se vrti svakih 15 min dok ne uspije.
+     * Self-healing: pad (DNS još ne resolva, port 80 zatvoren) se ponavlja s
+     * 1 h backoffa, bez ručne intervencije.
+     */
+    private function ensurePanelCert(): void
+    {
+        $fqdn = (string) $this->config->get('panel_fqdn', '');
+        if ($fqdn === '') {
+            return;
+        }
+        $cert_file = '/etc/forgepanel/ssl/panel/fullchain.pem';
+        $needs = true;
+        if (is_file($cert_file)) {
+            $parsed = openssl_x509_parse((string) file_get_contents($cert_file));
+            if (is_array($parsed)) {
+                $self_signed = ($parsed['issuer'] ?? []) === ($parsed['subject'] ?? []);
+                $expiring = (int) ($parsed['validTo_time_t'] ?? 0) < time() + 30 * 86400;
+                $needs = $self_signed || $expiring;
+            }
+        }
+        if (!$needs) {
+            return;
+        }
+        $blocked = $this->db->one(
+            "SELECT 1 FROM tasks
+             WHERE op = 'ssl.panel_issue'
+               AND (status IN ('pending', 'running')
+                    OR (status = 'failed' AND finished_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)))
+             LIMIT 1"
+        );
+        if ($blocked !== null) {
+            return;
+        }
+        $this->db->run("INSERT INTO tasks (op, params) VALUES ('ssl.panel_issue', '{}')");
+    }
+
     private function enqueueSslRenewals(): void
     {
         $contact = $this->config->get('acme_email', 'admin@localhost.localdomain');
+        $panel_fqdn = (string) $this->config->get('panel_fqdn', '');
         $due = $this->db->all(
             "SELECT c.id, c.hostname, c.vhost_id
              FROM ssl_certs c
@@ -292,6 +332,10 @@ final class Scheduler
                AND c.expires_at < DATE_ADD(NOW(), INTERVAL 30 DAY)"
         );
         foreach ($due as $cert) {
+            // panel cert obnavlja ensurePanelCert (drugi path + bez 'www.' prefiksa)
+            if ($cert['vhost_id'] === null && $cert['hostname'] === $panel_fqdn) {
+                continue;
+            }
             $already = $this->db->one(
                 "SELECT 1 FROM tasks
                  WHERE op = 'ssl.issue' AND status IN ('pending', 'running')

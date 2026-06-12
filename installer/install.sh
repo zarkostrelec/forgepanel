@@ -460,12 +460,23 @@ add_header X-Frame-Options SAMEORIGIN always;
 EOF
 
     # IPv6 listen samo ako sustav ima IPv6 (minimal VM-ovi ga znaju imati isključen)
-    local LISTEN_V6=""
+    local LISTEN_V6="" LISTEN_V6_80=""
     if [[ -s /proc/net/if_inet6 ]]; then
         LISTEN_V6="    listen [::]:8443 ssl;"
+        LISTEN_V6_80="    listen [::]:80 default_server;"
     fi
 
     cat > /etc/nginx/conf.d/forgepanel-panel.conf <<EOF
+# ACME HTTP-01 catch-all — bez ovoga nginx prije prvog vhosta uopće ne sluša
+# na :80 pa Let's Encrypt ne može validirati panel hostname. Vhostovi imaju
+# vlastite server blokove (specifičan server_name pobjeđuje default_server).
+server {
+    listen 80 default_server;
+${LISTEN_V6_80}
+    server_name _;
+    location /.well-known/acme-challenge/ { root /var/www/forgepanel-acme; }
+    location / { return 404; }
+}
 # ForgePanel — panel UI/API na :8443, izoliran od hostanih stranica
 server {
     listen 8443 ssl;
@@ -522,6 +533,8 @@ install_agent() {
     cp "$FP_HOME/agent/systemd/forge-agentd.service" /etc/systemd/system/forge-agentd.service
     systemctl daemon-reload 2>/dev/null || true
     systemctl enable --now forge-agentd 2>/dev/null || true
+    # repair s novim kodom: agent mora učitati nove operacije/scheduler
+    systemctl try-restart forge-agentd 2>/dev/null || true
 }
 
 install_phpmyadmin() {
@@ -666,6 +679,22 @@ SQL
     done < "${FP_STATE}.suites"
 }
 
+# Panel AutoSSL odmah (scheduler bi ga svejedno pokrenuo unutar 15 min) — samo
+# ako je trenutni cert još self-signed i task već ne čeka. Bez checkpointa:
+# idempotentno, repair smije ponoviti.
+enqueue_panel_ssl() {
+    local crt="$FP_ETC/ssl/panel/fullchain.pem" subj issuer
+    [[ -f "$crt" ]] || return 0
+    subj=$(openssl x509 -in "$crt" -noout -subject 2>/dev/null) || return 0
+    issuer=$(openssl x509 -in "$crt" -noout -issuer 2>/dev/null) || return 0
+    [[ "${subj#subject=}" == "${issuer#issuer=}" ]] || return 0
+    log "→ panel AutoSSL task (Let's Encrypt za ${PANEL_FQDN})"
+    sql forgepanel -e "INSERT INTO tasks (op, params)
+        SELECT 'ssl.panel_issue', '{}' FROM DUAL
+        WHERE NOT EXISTS (SELECT 1 FROM tasks WHERE op = 'ssl.panel_issue' AND status IN ('pending','running'));" \
+        || log "UPOZORENJE: enqueue panel SSL taska nije uspio — scheduler će ga svejedno pokrenuti."
+}
+
 # ---------------------------------------------------------------- health check
 verify_install() {
     local fail=0
@@ -697,18 +726,22 @@ main() {
     step "bootstrap_repos"     bootstrap_repos
     repo_sanity
     step "install_database"    install_database
-    # namjerno bez checkpointa: kopiranje koda je idempotentno, a repair s novijim
-    # kodom mora osvježiti i /opt/forgepanel (service file, agent, web)
+    # namjerno bez checkpointa: idempotentni koraci — repair s novijim kodom mora
+    # osvježiti /opt/forgepanel, panelov nginx/FPM config i agent servis (apt na
+    # već instaliranim paketima je no-op; self-signed cert se NE regenerira)
     log "→ install_panel_code (uvijek se osvježava)"
     install_panel_code
-    step "install_panel_stack" install_panel_stack
+    log "→ install_panel_stack (uvijek se osvježava)"
+    install_panel_stack
     step "setup_panel_db"      setup_panel_db
-    step "install_agent"       install_agent
+    log "→ install_agent (uvijek se osvježava)"
+    install_agent
     step "install_phpmyadmin"  install_phpmyadmin
     step "create_admin"        create_admin
     step "optional_components" optional_components
     step "hardening"           hardening
     step "register_components" register_components
+    enqueue_panel_ssl
     verify_install
 
     log ""

@@ -63,6 +63,7 @@ final class OperationRegistry
         'service.status'    => Operations\ServiceStatus::class,
         'service.reload'    => Operations\ServiceReload::class,
         'ssl.issue'         => Operations\SslIssue::class,
+        'ssl.panel_issue'   => Operations\PanelSslIssue::class,
         'ssl.install_custom' => Operations\SslInstallCustom::class,
         'system.metrics'    => Operations\SystemMetrics::class,
     ];
