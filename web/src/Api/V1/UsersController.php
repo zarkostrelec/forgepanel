@@ -23,6 +23,7 @@ final class UsersController extends Controller
         $router->add('PUT', '/api/v1/users/{id}/status', $this->setStatus(...));
         $router->add('PUT', '/api/v1/users/{id}', $this->update(...));
         $router->add('DELETE', '/api/v1/users/{id}', $this->delete(...));
+        $router->add('GET', '/api/v1/subscriptions', $this->subscriptions(...));
         $router->add('GET', '/api/v1/plans', $this->plans(...));
         $router->add('POST', '/api/v1/plans', $this->createPlan(...));
         $router->add('PUT', '/api/v1/plans/{id}', $this->updatePlan(...));
@@ -180,6 +181,27 @@ final class UsersController extends Controller
         $this->app->db->run('DELETE FROM users WHERE id = ?', [$user['id']]);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'user.delete', ['user_id' => $user['id']], $request->ip);
         Response::ok();
+    }
+
+    /**
+     * Aktivne pretplate za izbor pri kreiranju domene (admin: sve; reseller: svojih
+     * klijenata + svoje). Vraća id + email klijenta + naziv plana.
+     */
+    private function subscriptions(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'users:read');
+        $ctx->requireRole('admin', 'reseller');
+        $rows = $ctx->isAdmin()
+            ? $this->app->db->all(
+                "SELECT s.id, u.email, p.name AS plan
+                 FROM subscriptions s JOIN users u ON u.id = s.user_id JOIN plans p ON p.id = s.plan_id
+                 WHERE s.status = 'active' ORDER BY u.email, p.name")
+            : $this->app->db->all(
+                "SELECT s.id, u.email, p.name AS plan
+                 FROM subscriptions s JOIN users u ON u.id = s.user_id JOIN plans p ON p.id = s.plan_id
+                 WHERE s.status = 'active' AND (u.reseller_id = ? OR u.id = ?) ORDER BY u.email, p.name",
+                [$ctx->user_id, $ctx->user_id]);
+        Response::ok($rows);
     }
 
     private function plans(Request $request): never

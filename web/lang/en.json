@@ -19,6 +19,7 @@
     "vhost.create": "New website",
     "vhost.domain": "Domain",
     "vhost.php_version": "PHP version",
+    "vhost.subscription": "Package / client",
     "vhost.status.active": "active",
     "vhost.status.creating": "creating",
     "vhost.status.suspended": "suspended",

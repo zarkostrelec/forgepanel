@@ -1011,13 +1011,22 @@ async function pageWebsites() {
     });
 }
 
-function createVhostModal() {
+async function createVhostModal() {
+    const isPriv = state.me.role === 'admin' || state.me.role === 'reseller';
+    let subs = [];
+    if (isPriv) { try { subs = await api('/subscriptions'); } catch { /* fallback: auto-pretplata */ } }
+    const subField = isPriv && subs.length ? `
+            <div class="field"><label>${t('vhost.subscription')}</label>
+                <select name="subscription_id" class="mono">
+                    ${subs.map((s) => `<option value="${s.id}">${esc(s.email)} — ${esc(s.plan)}</option>`).join('')}
+                </select></div>` : '';
     const modal = openModal(`
         <div class="dialog-head"><h1>${t('vhost.create')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="vf">
             <div class="field"><label>${t('vhost.domain')}</label>
                 <input name="domain" required placeholder="example.com" class="mono" autocomplete="off">
                 <span class="hint">Bez www — alias se dodaje automatski (AutoSSL pokriva oba).</span></div>
+            ${subField}
             <div class="field"><label>${t('vhost.php_version')}</label>
                 <select name="php_version">${['8.5', '8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
             <div class="dialog-foot">

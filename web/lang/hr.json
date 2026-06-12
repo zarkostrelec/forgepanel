@@ -19,6 +19,7 @@
     "vhost.create": "Nova web stranica",
     "vhost.domain": "Domena",
     "vhost.php_version": "PHP verzija",
+    "vhost.subscription": "Paket / klijent",
     "vhost.status.active": "aktivno",
     "vhost.status.creating": "kreira se",
     "vhost.status.suspended": "suspendirano",
