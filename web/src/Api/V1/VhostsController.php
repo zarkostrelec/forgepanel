@@ -104,7 +104,8 @@ final class VhostsController extends Controller
             throw new HttpException(422, 'invalid_php_version');
         }
 
-        $subscription_id = $request->int('subscription_id') ?? ($ctx->subscription_ids[0] ?? null);
+        $subscription_id = $request->int('subscription_id')
+            ?? ($ctx->subscription_ids[0] ?? ($ctx->isAdmin() ? $this->adminSubscription($ctx) : null));
         if ($subscription_id === null) {
             throw new HttpException(422, 'subscription_required');
         }

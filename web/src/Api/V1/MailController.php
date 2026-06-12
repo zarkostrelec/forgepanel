@@ -104,7 +104,8 @@ final class MailController extends Controller
         if (!preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $domain)) {
             throw new HttpException(422, 'invalid_domain');
         }
-        $subscription_id = $request->int('subscription_id') ?? ($ctx->subscription_ids[0] ?? null);
+        $subscription_id = $request->int('subscription_id')
+            ?? ($ctx->subscription_ids[0] ?? ($ctx->isAdmin() ? $this->adminSubscription($ctx) : null));
         if ($subscription_id === null) {
             throw new HttpException(422, 'subscription_required');
         }
