@@ -19,25 +19,51 @@ final class DatabasesController extends Controller
     {
         $router->add('GET', '/api/v1/databases', $this->index(...));
         $router->add('POST', '/api/v1/databases', $this->create(...));
+        $router->add('GET', '/api/v1/databases/pma/status', $this->pmaStatus(...));
+        $router->add('POST', '/api/v1/databases/pma/install', $this->pmaInstall(...));
         $router->add('DELETE', '/api/v1/databases/{id}', $this->delete(...));
         $router->add('POST', '/api/v1/databases/{id}/users', $this->createUser(...));
+        $router->add('PUT', '/api/v1/databases/{id}/users/{uid}', $this->updateUser(...));
+        $router->add('DELETE', '/api/v1/databases/{id}/users/{uid}', $this->deleteUser(...));
         $router->add('POST', '/api/v1/databases/{id}/pma', $this->pmaLogin(...));
+    }
+
+    /** Pripoji listu DB usera (id, username, remote_access) svakoj bazi. @param list<array<string,mixed>> $dbs */
+    private function withUsers(array $dbs): array
+    {
+        if ($dbs === []) {
+            return $dbs;
+        }
+        $ids = array_map(static fn ($d) => (int) $d['id'], $dbs);
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $users = $this->app->db->all(
+            "SELECT id, database_id, username, remote_access FROM db_users WHERE database_id IN ($ph) ORDER BY username",
+            $ids
+        );
+        $by_db = [];
+        foreach ($users as $u) {
+            $by_db[(int) $u['database_id']][] = $u;
+        }
+        foreach ($dbs as &$d) {
+            $d['users'] = $by_db[(int) $d['id']] ?? [];
+        }
+        return $dbs;
     }
 
     private function index(Request $request): never
     {
         $ctx = $this->ctx($request, 'databases:read');
         if ($ctx->isAdmin()) {
-            Response::ok($this->app->db->all('SELECT * FROM db_databases ORDER BY name'));
+            Response::ok($this->withUsers($this->app->db->all('SELECT * FROM db_databases ORDER BY name')));
         }
         if ($ctx->subscription_ids === []) {
             Response::ok([]);
         }
         $placeholders = implode(',', array_fill(0, count($ctx->subscription_ids), '?'));
-        Response::ok($this->app->db->all(
+        Response::ok($this->withUsers($this->app->db->all(
             "SELECT * FROM db_databases WHERE subscription_id IN ($placeholders) ORDER BY name",
             $ctx->subscription_ids
-        ));
+        )));
     }
 
     private function create(Request $request): never
@@ -121,6 +147,82 @@ final class DatabasesController extends Controller
         );
         $this->app->audit->log($ctx->user_id, $ctx->email, 'db.user_create', ['username' => $username], $request->ip);
         Response::ok(['username' => $username], 201);
+    }
+
+    /** Promjena lozinke (opcionalno) i/ili remote pristupa za DB usera. */
+    private function updateUser(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'databases:write');
+        $database = $this->databaseOr404($ctx, (int) $request->param('id'));
+        $user = $this->dbUserOr404($database, (int) $request->param('uid'));
+
+        $remote = (bool) ($request->body['remote_access'] ?? (int) $user['remote_access']);
+        $crypto = new Crypto($this->app->config);
+
+        $new_password = $request->str('password');
+        if ($new_password !== null && $new_password !== '') {
+            if (strlen($new_password) < 12) {
+                throw new HttpException(422, 'password_too_short');
+            }
+            $password = $new_password;
+        } elseif ($user['password_enc'] !== null) {
+            // bez nove lozinke: zadrži postojeću (treba nam puna za recreate na drugom hostu)
+            $password = $crypto->decrypt((string) $user['password_enc']);
+        } else {
+            throw new HttpException(422, 'password_required');
+        }
+
+        $this->app->agent->call('db.user_update', [
+            'username' => $user['username'],
+            'database' => $database['name'],
+            'password' => $password,
+            'remote_access' => $remote,
+        ]);
+        $this->app->db->run(
+            'UPDATE db_users SET remote_access = ?, password_enc = ? WHERE id = ?',
+            [(int) $remote, $crypto->encrypt($password), $user['id']]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'db.user_update', ['username' => $user['username']], $request->ip);
+        Response::ok(['username' => $user['username']]);
+    }
+
+    private function deleteUser(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'databases:write');
+        $database = $this->databaseOr404($ctx, (int) $request->param('id'));
+        $user = $this->dbUserOr404($database, (int) $request->param('uid'));
+
+        $this->app->agent->call('db.user_delete', ['username' => $user['username']]);
+        $this->app->db->run('DELETE FROM db_users WHERE id = ?', [$user['id']]);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'db.user_delete', ['username' => $user['username']], $request->ip);
+        Response::ok(['deleted' => $user['username']]);
+    }
+
+    /** Je li phpMyAdmin instaliran na serveru (UI prikazuje "Instaliraj" ako nije). */
+    private function pmaStatus(Request $request): never
+    {
+        $this->ctx($request, 'databases:read');
+        Response::ok(['installed' => is_dir('/opt/forgepanel/phpmyadmin') && is_file('/opt/forgepanel/phpmyadmin/index.php')]);
+    }
+
+    /** Naknadna instalacija phpMyAdmina iz panela (admin). */
+    private function pmaInstall(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'databases:write');
+        $ctx->requireRole('admin');
+        $task_id = $this->app->tasks->enqueue('apps.phpmyadmin_install', [], $ctx->user_id);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'db.pma_install', null, $request->ip);
+        Response::ok(['task_id' => $task_id], 202);
+    }
+
+    /** @param array<string,mixed> $database @return array<string,mixed> */
+    private function dbUserOr404(array $database, int $uid): array
+    {
+        $user = $this->app->db->one('SELECT * FROM db_users WHERE id = ? AND database_id = ?', [$uid, $database['id']]);
+        if ($user === null) {
+            throw new HttpException(404, 'not_found');
+        }
+        return $user;
     }
 
     /** phpMyAdmin auto-login: signed one-time token → /pma-signon.php otvara PMA session. */

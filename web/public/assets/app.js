@@ -1662,29 +1662,71 @@ async function pageDatabases() {
     main().innerHTML = `
     <div class="page-head"><div class="spacer"></div>
         <button class="btn primary" id="new">${icon('plus')}${t('db.create')}</button></div>
-    <div class="card">${t('common.loading')}</div>`;
+    <div id="pmabar"></div>
+    <div class="card" id="dblist">${t('common.loading')}</div>`;
     document.getElementById('new').addEventListener('click', createDbModal);
 
-    const dbs = await api('/databases');
-    main().querySelector('.card').innerHTML = dbs.length ? `
-        <table class="data"><thead><tr><th>${t('db.name')}</th><th class="hide-sm">Veličina</th><th class="hide-sm">Kreirano</th><th></th></tr></thead><tbody>
-        ${dbs.map((d) => `<tr>
-            <td class="mono">${esc(d.name)}</td>
-            <td class="mono hide-sm">${fmtBytes(d.size_bytes)}</td>
-            <td class="hide-sm">${fmtDate(d.created_at)}</td>
-            <td class="num"><button class="btn ghost" data-pma="${d.id}">${t('db.pma')}</button>
-                <button class="btn ghost" data-user="${d.id}">+ ${t('db.user')}</button>
-                <button class="btn danger" data-del="${d.id}" data-name="${esc(d.name)}">${t('common.delete')}</button></td>
-        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('nav.databases')}: 0</div>`;
+    const [dbs, pma] = await Promise.all([
+        api('/databases'),
+        api('/databases/pma/status').catch(() => ({ installed: true })),
+    ]);
 
-    main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (state.me.role === 'admin' && !pma.installed) {
+        document.getElementById('pmabar').innerHTML = `
+            <div class="alert warn" style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                <span style="flex:1">${t('db.pma_install_hint')}</span>
+                <button class="btn sm" id="pmainstall">${icon('download')}${t('db.pma_install')}</button></div>`;
+        document.getElementById('pmainstall').addEventListener('click', async (e) => {
+            e.target.disabled = true;
+            try {
+                const r = await api('/databases/pma/install', { method: 'POST' });
+                watchTask(r.task_id, 'phpMyAdmin install');
+                toast(t('db.pma_installing'));
+            } catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+        });
+    }
+
+    const list = document.getElementById('dblist');
+    list.innerHTML = dbs.length ? dbs.map((d) => `
+        <div class="db-item">
+            <div class="db-head">
+                <div class="db-meta"><span class="mono db-title">${esc(d.name)}</span>
+                    <span class="db-sub mono">${fmtBytes(d.size_bytes)} · ${fmtDate(d.created_at)}</span></div>
+                <div class="db-acts">
+                    <button class="btn ghost" data-pma="${d.id}">${t('db.pma')}</button>
+                    <button class="btn ghost" data-user="${d.id}">${icon('plus')}${t('db.user')}</button>
+                    <button class="btn danger" data-del="${d.id}" data-name="${esc(d.name)}">${t('common.delete')}</button>
+                </div>
+            </div>
+            <div class="db-users">
+                ${(d.users && d.users.length) ? d.users.map((u) => `
+                    <div class="db-user">
+                        <span class="mono">${esc(u.username)}</span>
+                        <span class="badge ${Number(u.remote_access) ? 'warn' : ''}">${Number(u.remote_access) ? t('db.remote') : t('db.local')}</span>
+                        <div class="spacer"></div>
+                        <button class="btn ghost sm" data-uedit="${u.id}" data-db="${d.id}">${t('common.edit')}</button>
+                        <button class="btn danger sm" data-udel="${u.id}" data-db="${d.id}" data-uname="${esc(u.username)}">${t('common.delete')}</button>
+                    </div>`).join('') : `<div class="db-nousers">${t('db.no_users')}</div>`}
+            </div>
+        </div>`).join('') : `<div class="empty">${t('nav.databases')}: 0</div>`;
+
+    list.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(`${t('common.confirm_delete')} (${b.dataset.name})`)) return;
         try { await api(`/databases/${b.dataset.del}`, { method: 'DELETE' }); pageDatabases(); }
         catch (err) { toast(err.message, 'err'); }
     }));
-    main().querySelectorAll('[data-user]').forEach((b) => b.addEventListener('click', () => createDbUserModal(b.dataset.user)));
+    list.querySelectorAll('[data-user]').forEach((b) => b.addEventListener('click', () => createDbUserModal(b.dataset.user)));
+    list.querySelectorAll('[data-uedit]').forEach((b) => b.addEventListener('click', () => {
+        const d = dbs.find((x) => String(x.id) === b.dataset.db);
+        editDbUserModal(b.dataset.db, d.users.find((x) => String(x.id) === b.dataset.uedit));
+    }));
+    list.querySelectorAll('[data-udel]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(`${t('common.confirm_delete')} (${b.dataset.uname})`)) return;
+        try { await api(`/databases/${b.dataset.db}/users/${b.dataset.udel}`, { method: 'DELETE' }); pageDatabases(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
     // phpMyAdmin auto-login: jednokratan signed token → nova kartica
-    main().querySelectorAll('[data-pma]').forEach((b) => b.addEventListener('click', async () => {
+    list.querySelectorAll('[data-pma]').forEach((b) => b.addEventListener('click', async () => {
         try {
             const r = await api(`/databases/${b.dataset.pma}/pma`, { method: 'POST' });
             window.open(r.url, '_blank', 'noopener');
@@ -1716,19 +1758,44 @@ function createDbUserModal(dbId) {
     const modal = openModal(`
         <div class="dialog-head"><h1>${t('db.user')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="uf">
-            <div class="field"><label>Korisničko ime</label><input name="username" required pattern="[a-z][a-z0-9_]{2,31}" class="mono"></div>
+            <div class="field"><label>${t('db.username')}</label><input name="username" required pattern="[a-z][a-z0-9_]{2,31}" class="mono"></div>
             <div class="field"><label>${t('auth.password')}</label><input name="password" type="password" required minlength="12">
                 <span class="hint">min. 12 znakova</span></div>
+            <label class="chk"><input type="checkbox" name="remote_access" value="1"> ${t('db.remote_access')}</label>
             <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
                 <button class="btn primary">${t('common.create')}</button></div>
         </form>`);
     modal.querySelector('#uf').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const f = new FormData(e.target);
         try {
-            await api(`/databases/${dbId}/users`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
-            toast('DB user kreiran');
-            modal.close();
+            await api(`/databases/${dbId}/users`, { method: 'POST', body: {
+                username: f.get('username'), password: f.get('password'), remote_access: f.get('remote_access') === '1',
+            } });
+            modal.close(); pageDatabases();
         } catch (err) { toast(err.message, 'err'); }
+    });
+}
+
+function editDbUserModal(dbId, user) {
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('db.user_edit')}: <span class="mono">${esc(user.username)}</span></h1>
+            <button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="euf">
+            <div class="field"><label>${t('auth.password')}</label>
+                <input name="password" type="password" minlength="12" placeholder="${t('users.password_keep')}">
+                <span class="hint">${t('db.pw_keep_hint')}</span></div>
+            <label class="chk"><input type="checkbox" name="remote_access" value="1" ${Number(user.remote_access) ? 'checked' : ''}> ${t('db.remote_access')}</label>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('common.save')}</button></div>
+        </form>`);
+    modal.querySelector('#euf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = new FormData(e.target);
+        const body = { remote_access: f.get('remote_access') === '1' };
+        if (f.get('password')) body.password = f.get('password');
+        try { await api(`/databases/${dbId}/users/${user.id}`, { method: 'PUT', body }); modal.close(); pageDatabases(); }
+        catch (err) { toast(err.message, 'err'); }
     });
 }
 

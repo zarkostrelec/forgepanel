@@ -805,3 +805,17 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 .addform-grid .span2 { grid-column: 1 / -1; }
 .addform-foot { margin-top: 12px; }
 @media (max-width: 560px) { .addform-grid, .addform-grid.cron { grid-template-columns: 1fr; } }
+
+/* ───────────────────────── Baze podataka: DB + useri ───────────────────────── */
+.btn.sm { padding: 4px 9px; font-size: var(--fs-xs); }
+.db-item { border: 1px solid var(--line-2); border-radius: var(--radius-sm); margin-bottom: 10px; overflow: hidden; }
+.db-item:last-child { margin-bottom: 0; }
+.db-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--surface-2); }
+.db-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.db-title { font-weight: 600; }
+.db-sub { color: var(--ink-3); font-size: var(--fs-xs); }
+.db-acts { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.db-users { padding: 2px 12px 6px; }
+.db-user { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line-2); font-size: var(--fs-sm); }
+.db-user:last-child { border-bottom: 0; }
+.db-nousers { color: var(--ink-3); font-size: var(--fs-sm); padding: 8px 0 4px; }
