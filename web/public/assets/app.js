@@ -2314,24 +2314,36 @@ async function pageUsers() {
             <td class="hide-sm">${fmtDate(u.last_login_at)}</td>
             <td class="num">
                 <button class="btn ghost" data-toggle="${u.id}" data-status="${u.status}">${u.status === 'active' ? t('bulk.suspend') : t('bulk.unsuspend')}</button>
+                <button class="btn ghost" data-edit="${u.id}">${t('common.edit')}</button>
                 <button class="btn danger" data-del="${u.id}">${t('common.delete')}</button>
             </td></tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`;
 
+    const canEditPlan = (p) => state.me.role === 'admin' || p.owner_user_id != null;
     document.getElementById('plans').innerHTML = `
         <table class="data"><tbody>
         ${plans.map((p) => `<tr>
             <td class="mono">${esc(p.name)}</td>
             <td class="mono">${fmtBytes(p.disk_bytes)} · ${p.max_domains} domena · ${p.max_mailboxes} mail · ${p.max_databases} baza</td>
             <td class="mono">${(JSON.parse(p.php_versions || '[]')).join(', ')}</td>
+            <td class="num">${canEditPlan(p) ? `
+                <button class="btn ghost" data-pedit="${p.id}">${t('common.edit')}</button>
+                <button class="btn danger" data-pdel="${p.id}">${t('common.delete')}</button>` : ''}</td>
         </tr>`).join('') || `<tr><td><div class="empty">0</div></td></tr>`}
         </tbody></table>
         <button class="btn mt" id="newplan">${icon('plus')}${t('users.new_plan')}</button>`;
     document.getElementById('newplan').addEventListener('click', () => planModal());
+    main().querySelectorAll('[data-pedit]').forEach((b) => b.addEventListener('click', () => planModal(plans.find((p) => String(p.id) === b.dataset.pedit))));
+    main().querySelectorAll('[data-pdel]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/plans/${b.dataset.pdel}`, { method: 'DELETE' }); pageUsers(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
 
     main().querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', async () => {
         try { await api(`/users/${b.dataset.toggle}/status`, { method: 'PUT', body: { status: b.dataset.status === 'active' ? 'suspended' : 'active' } }); pageUsers(); }
         catch (err) { toast(err.message, 'err'); }
     }));
+    main().querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => userModal(users.find((u) => String(u.id) === b.dataset.edit))));
     main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(t('common.confirm_delete'))) return;
         try { await api(`/users/${b.dataset.del}`, { method: 'DELETE' }); pageUsers(); }
@@ -2339,58 +2351,69 @@ async function pageUsers() {
     }));
 }
 
-function userModal() {
+function userModal(user = null) {
     const isAdmin = state.me.role === 'admin';
+    const edit = user != null;
     const modal = openModal(`
-        <div class="dialog-head"><h1>${t('users.new')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <div class="dialog-head"><h1>${edit ? t('users.edit') : t('users.new')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="uf">
-            <div class="field"><label>${t('auth.email')}</label><input name="email" type="email" required class="mono"></div>
-            <div class="field"><label>${t('auth.password')}</label><input name="password" type="password" required minlength="12"></div>
-            <div class="field"><label>Rola</label><select name="role">
-                <option value="client">client</option>
-                ${isAdmin ? '<option value="reseller">reseller</option><option value="admin">admin</option>' : ''}
+            <div class="field"><label>${t('auth.email')}</label><input name="email" type="email" required class="mono" value="${edit ? esc(user.email) : ''}"></div>
+            <div class="field"><label>${t('auth.password')}</label><input name="password" type="password" ${edit ? '' : 'required'} minlength="12" placeholder="${edit ? t('users.password_keep') : ''}"></div>
+            <div class="field"><label>Rola</label><select name="role" ${edit && !isAdmin ? 'disabled' : ''}>
+                <option value="client" ${edit && user.role === 'client' ? 'selected' : ''}>client</option>
+                ${isAdmin ? `<option value="reseller" ${edit && user.role === 'reseller' ? 'selected' : ''}>reseller</option><option value="admin" ${edit && user.role === 'admin' ? 'selected' : ''}>admin</option>` : ''}
             </select></div>
             <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
-                <button class="btn primary">${t('common.create')}</button></div>
+                <button class="btn primary">${edit ? t('common.save') : t('common.create')}</button></div>
         </form>`);
     modal.querySelector('#uf').addEventListener('submit', async (e) => {
         e.preventDefault();
-        try { await api('/users', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); modal.close(); pageUsers(); }
-        catch (err) { toast(err.message, 'err'); }
+        const body = Object.fromEntries(new FormData(e.target));
+        if (edit && !body.password) delete body.password; // ne mijenjaj lozinku ako je prazna
+        try {
+            if (edit) await api(`/users/${user.id}`, { method: 'PUT', body });
+            else await api('/users', { method: 'POST', body });
+            modal.close(); pageUsers();
+        } catch (err) { toast(err.message, 'err'); }
     });
 }
 
-function planModal() {
+function planModal(plan = null) {
+    const edit = plan != null;
+    const sel = edit ? JSON.parse(plan.php_versions || '[]') : ['8.4', '8.5'];
+    const v = (def, key) => edit ? plan[key] : def;
     const modal = openModal(`
-        <div class="dialog-head"><h1>${t('users.new_plan')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <div class="dialog-head"><h1>${edit ? t('users.edit_plan') : t('users.new_plan')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="pf">
-            <div class="field"><label>Naziv</label><input name="name" required></div>
+            <div class="field"><label>Naziv</label><input name="name" required value="${edit ? esc(plan.name) : ''}"></div>
             <div class="grid cols-2">
-                <div class="field"><label>Disk (GB)</label><input name="disk_gb" type="number" value="10" class="mono"></div>
-                <div class="field"><label>Max domena</label><input name="max_domains" type="number" value="5" class="mono"></div>
-                <div class="field"><label>Max mailboxa</label><input name="max_mailboxes" type="number" value="10" class="mono"></div>
-                <div class="field"><label>Max baza</label><input name="max_databases" type="number" value="5" class="mono"></div>
+                <div class="field"><label>Disk (GB)</label><input name="disk_gb" type="number" value="${edit ? Math.round(plan.disk_bytes / 1073741824) : 10}" class="mono"></div>
+                <div class="field"><label>Max domena</label><input name="max_domains" type="number" value="${v(5, 'max_domains')}" class="mono"></div>
+                <div class="field"><label>Max mailboxa</label><input name="max_mailboxes" type="number" value="${v(10, 'max_mailboxes')}" class="mono"></div>
+                <div class="field"><label>Max baza</label><input name="max_databases" type="number" value="${v(5, 'max_databases')}" class="mono"></div>
             </div>
             <div class="field"><label>PHP verzije</label>
-                <div class="checkrow">${['8.1', '8.2', '8.3', '8.4', '8.5'].map((v) =>
-                    `<label class="chk"><input type="checkbox" name="php" value="${v}" ${v === '8.4' || v === '8.5' ? 'checked' : ''}> ${v}</label>`).join('')}</div></div>
+                <div class="checkrow">${['8.1', '8.2', '8.3', '8.4', '8.5'].map((ver) =>
+                    `<label class="chk"><input type="checkbox" name="php" value="${ver}" ${sel.includes(ver) ? 'checked' : ''}> ${ver}</label>`).join('')}</div></div>
             <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
-                <button class="btn primary">${t('common.create')}</button></div>
+                <button class="btn primary">${edit ? t('common.save') : t('common.create')}</button></div>
         </form>`);
     modal.querySelector('#pf').addEventListener('submit', async (e) => {
         e.preventDefault();
         const f = Object.fromEntries(new FormData(e.target));
         const php = [...e.target.querySelectorAll('input[name="php"]:checked')].map((c) => c.value);
         if (php.length === 0) return toast(t('plan.pick_php') || 'Odaberi bar jednu PHP verziju', 'err');
+        const body = {
+            name: f.name,
+            disk_bytes: Number(f.disk_gb) * 1073741824,
+            max_domains: Number(f.max_domains),
+            max_mailboxes: Number(f.max_mailboxes),
+            max_databases: Number(f.max_databases),
+            php_versions: php,
+        };
         try {
-            await api('/plans', { method: 'POST', body: {
-                name: f.name,
-                disk_bytes: Number(f.disk_gb) * 1073741824,
-                max_domains: Number(f.max_domains),
-                max_mailboxes: Number(f.max_mailboxes),
-                max_databases: Number(f.max_databases),
-                php_versions: php,
-            } });
+            if (edit) await api(`/plans/${plan.id}`, { method: 'PUT', body });
+            else await api('/plans', { method: 'POST', body });
             modal.close(); pageUsers();
         } catch (err) { toast(err.message, 'err'); }
     });
