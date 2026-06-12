@@ -69,7 +69,9 @@ CREATE TABLE vhosts (
     status          ENUM('active','suspended','creating','error') NOT NULL DEFAULT 'creating',
     disk_bytes      BIGINT UNSIGNED NULL,                  -- du -sb vhost roota (osvježava agent periodički)
     app_type        VARCHAR(32) NULL,                      -- detekcija aplikacije (wordpress/woocommerce/laravel/node/astro/static/php)
-    stats_at        DATETIME NULL,                         -- zadnje osvježavanje disk_bytes/app_type
+    traffic_7d      BIGINT UNSIGNED NULL,                  -- broj zahtjeva (access.log) zadnjih 7 dana
+    traffic_spark   TEXT NULL,                             -- JSON: 24 satna bucketa za sparkline
+    stats_at        DATETIME NULL,                         -- zadnje osvježavanje statistika
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

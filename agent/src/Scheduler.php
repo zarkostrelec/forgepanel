@@ -49,9 +49,10 @@ final class Scheduler
         foreach ($vhosts as $v) {
             try {
                 [$disk, $app] = System\VhostStats::collect(Validator::VHOST_ROOT . '/' . $v['domain'], (string) $v['docroot']);
+                [$traffic7, $spark] = System\VhostStats::traffic((string) $v['domain']);
                 $this->db->run(
-                    'UPDATE vhosts SET disk_bytes = ?, app_type = ?, stats_at = NOW() WHERE id = ?',
-                    [$disk, $app, (int) $v['id']]
+                    'UPDATE vhosts SET disk_bytes = ?, app_type = ?, traffic_7d = ?, traffic_spark = ?, stats_at = NOW() WHERE id = ?',
+                    [$disk, $app, $traffic7, json_encode($spark), (int) $v['id']]
                 );
             } catch (\Throwable $e) {
                 error_log('forge-agentd vhost_stats [' . $v['domain'] . ']: ' . $e->getMessage());

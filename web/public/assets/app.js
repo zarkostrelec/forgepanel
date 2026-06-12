@@ -951,6 +951,13 @@ const bindVhostRows = () => main().querySelectorAll('[data-vhost]').forEach((tr)
 const dotKind = (v) => v.status === 'active' ? 'ok' : v.status === 'error' ? 'err' : v.status === 'suspended' ? 'warn' : 'info';
 const appLabel = (a) => ({ wordpress: 'WordPress', woocommerce: 'WooCommerce', laravel: 'Laravel', node: 'Node.js', nextjs: 'Next.js', astro: 'Astro', static: 'Static', php: 'PHP' }[a] || '');
 const stackText = (v) => `PHP ${esc(v.php_version)} · ${v.web_backend === 'nginx_apache' ? 'apache' : 'nginx'}`;
+const fmtNum = (n) => { n = Number(n) || 0; return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace('.0', '') + 'k' : String(n); };
+const parseSpark = (s) => { try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+const sparkBars = (arr) => {
+    if (!arr.length || arr.every((x) => !x)) return '<div class="spark-flat"></div>';
+    const max = Math.max(1, ...arr);
+    return `<div class="spark">${arr.map((v) => `<i style="height:${Math.max(6, Math.round((v / max) * 100))}%"></i>`).join('')}</div>`;
+};
 
 const sitesList = (vhosts, selectedId) => vhosts.length ? `
     <table class="data sites-table"><thead><tr>
@@ -967,7 +974,7 @@ const sitesList = (vhosts, selectedId) => vhosts.length ? `
                 <div><span class="mono site-name">${esc(v.domain)}</span>
                 ${appLabel(v.app_type) ? `<div class="sub">${appLabel(v.app_type)}</div>` : ''}</div></div></td>
             <td class="mono hide-sm sub2">${stackText(v)}</td>
-            <td class="mono hide-md num sub2">—</td>
+            <td class="mono hide-md num sub2">${v.traffic_7d != null ? fmtNum(v.traffic_7d) : '—'}</td>
             <td>${sslBadge(v.ssl_days)}</td>
             <td class="mono hide-md sub2">${v.git_branch ? esc(v.git_branch) + ' · ' + timeAgo(v.git_last_deploy) : '—'}</td>
             <td class="num mono sub2">${v.disk_bytes != null ? fmtBytes(Number(v.disk_bytes)) : '—'}</td>
@@ -980,10 +987,10 @@ const sitePanel = (v) => !v ? `<div class="empty">${t('sites.select')}</div>` : 
             <div class="sp-sub">${stackText(v)}${appLabel(v.app_type) ? ' · ' + appLabel(v.app_type) : ''}</div></div>
         <a class="btn ghost icon" href="#/websites/${v.id}" title="${t('sites.open')}">${icon('arrowUR')}</a>
     </div>
-    <div class="sp-spark"><div class="spark-line"></div><div class="sp-spark-cap">${t('sites.visits_24h')} · —</div></div>
+    <div class="sp-spark">${sparkBars(parseSpark(v.traffic_spark))}<div class="sp-spark-cap">${t('sites.visits_24h')} · ${fmtNum(parseSpark(v.traffic_spark).reduce((a, b) => a + (Number(b) || 0), 0))}</div></div>
     <div class="sp-stats">
-        <div class="sp-stat"><span class="k">${t('sites.col_traffic')}</span><span class="vv mono">—</span></div>
-        <div class="sp-stat"><span class="k">Trend</span><span class="vv mono">—</span></div>
+        <div class="sp-stat"><span class="k">${t('sites.col_traffic')}</span><span class="vv mono">${v.traffic_7d != null ? fmtNum(v.traffic_7d) : '—'}</span></div>
+        <div class="sp-stat"><span class="k">${t('sites.visits_24h_short')}</span><span class="vv mono">${fmtNum(parseSpark(v.traffic_spark).reduce((a, b) => a + (Number(b) || 0), 0))}</span></div>
         <div class="sp-stat"><span class="k">PHP</span><span class="vv mono">${esc(v.php_version)}</span></div>
         <div class="sp-stat"><span class="k">${t('sites.col_disk')}</span><span class="vv mono">${v.disk_bytes != null ? fmtBytes(Number(v.disk_bytes)) : '—'}</span></div>
     </div>
@@ -1523,21 +1530,58 @@ async function fileManager(vhost, container, relPath) {
                 <a href="#" data-go="/">${esc(vhost.domain)}</a>
                 ${parts.map((p, i) => `<span class="sep">/</span><a href="#" data-go="/${parts.slice(0, i + 1).join('/')}">${esc(p)}</a>`).join('')}
             </div>
+            <button class="btn danger sm" data-delsel hidden>${icon('archive', 14)}<span data-delcount></span></button>
             <button class="icon-btn" data-upload title="${t('files.upload')}">${icon('upload')}</button>
             <button class="icon-btn" data-mkdir title="${t('files.mkdir')}">${icon('folder')}</button>
             <input type="file" hidden>
         </div>
-        <table><tbody>
+        <table>
+            <thead><tr>
+                <th class="fm-check"><input type="checkbox" data-selall aria-label="${t('files.select_all')}"></th>
+                <th class="fm-ic"></th><th>${t('files.name')}</th>
+                <th class="meta num hide-sm">${t('files.size')}</th>
+                <th class="meta hide-sm">${t('files.mode')}</th>
+                <th class="meta hide-sm">${t('files.modified')}</th>
+            </tr></thead>
+            <tbody>
             ${entries.map((en, i) => `
             <tr data-i="${i}">
+                <td class="fm-check"><input type="checkbox" class="fsel" value="${esc(en.name)}"></td>
                 <td class="cell-icon">${icon(en.type === 'dir' ? 'folder' : 'file', 15)}</td>
                 <td class="mono">${esc(en.name)}</td>
                 <td class="meta num hide-sm">${en.type === 'file' ? fmtBytes(en.size_bytes) : ''}</td>
                 <td class="meta hide-sm">${esc(en.mode)}</td>
                 <td class="meta hide-sm">${fmtDate(en.mtime)}</td>
-            </tr>`).join('') || `<tr><td><div class="empty">prazno</div></td></tr>`}
-        </tbody></table>
+            </tr>`).join('') || `<tr><td colspan="6"><div class="empty">${t('files.empty')}</div></td></tr>`}
+            </tbody>
+        </table>
     </div>`;
+
+    const delBtn = container.querySelector('[data-delsel]');
+    const updateSel = () => {
+        const n = container.querySelectorAll('.fsel:checked').length;
+        delBtn.hidden = n === 0;
+        container.querySelector('[data-delcount]').textContent = ` ${t('common.delete')} (${n})`;
+    };
+    container.querySelector('[data-selall]').addEventListener('change', (e) => {
+        container.querySelectorAll('.fsel').forEach((c) => { c.checked = e.target.checked; });
+        updateSel();
+    });
+    container.querySelectorAll('.fsel').forEach((c) => {
+        c.addEventListener('click', (e) => e.stopPropagation());
+        c.addEventListener('change', updateSel);
+    });
+    delBtn.addEventListener('click', async () => {
+        const names = [...container.querySelectorAll('.fsel:checked')].map((c) => c.value);
+        if (names.length === 0 || !confirm(`${t('files.confirm_delete_n')} (${names.length})`)) return;
+        try {
+            for (const name of names) {
+                await api(`/vhosts/${vhost.id}/files/delete`, { method: 'POST', body: { path: `${relPath}/${name}` } });
+            }
+            toast(`${t('common.delete')}: ${names.length}`);
+            fileManager(vhost, container, relPath);
+        } catch (err) { toast(err.message, 'err'); }
+    });
 
     container.querySelectorAll('[data-go]').forEach((a) => a.addEventListener('click', (e) => {
         e.preventDefault();
@@ -1571,7 +1615,8 @@ async function fileManager(vhost, container, relPath) {
             fileManager(vhost, container, relPath);
         } catch (err) { toast(err.message, 'err'); }
     });
-    container.querySelectorAll('[data-i]').forEach((tr) => tr.addEventListener('click', () => {
+    container.querySelectorAll('[data-i]').forEach((tr) => tr.addEventListener('click', (e) => {
+        if (e.target.closest('.fm-check')) return; // klik na checkbox ne otvara file
         const entry = entries[Number(tr.dataset.i)];
         const next = `${relPath}/${entry.name}`;
         entry.type === 'dir' ? fileManager(vhost, container, next) : openFileEditor(vhost, container, relPath, entry);

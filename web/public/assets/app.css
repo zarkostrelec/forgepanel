@@ -600,29 +600,38 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 .user-pop button svg { width: 14px; height: 14px; color: var(--ink-2); }
 
 /* ---------------------------------------------------------------- file manager (dark chrome) */
-.fm { border: 1px solid var(--chrome-line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-2); background: var(--chrome); }
+/* File manager — prati panel temu (svijetlo/tamno preko tokena), ne više crni "chrome" */
+.fm { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
 .fm-bar {
     display: flex; align-items: center; gap: 8px; padding: 9px 14px;
-    background: var(--chrome); border-bottom: 1px solid var(--chrome-line); flex-wrap: wrap;
+    background: var(--surface-2); border-bottom: 1px solid var(--line); flex-wrap: wrap;
 }
 .fm-bar .crumbs { flex: 1; }
 .fm .crumbs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-family: var(--font-mono); font-size: var(--fs-sm); min-width: 0; }
-.fm .crumbs a { color: var(--chrome-ink-2); }
-.fm .crumbs a:hover { color: var(--chrome-ink); text-decoration: none; }
-.fm .crumbs a:last-child { color: #fff; }
-.fm .crumbs .sep { color: var(--chrome-ink-2); }
-.fm-bar .icon-btn { color: var(--chrome-ink-2); }
-.fm-bar .icon-btn:hover { background: var(--chrome-2); color: var(--chrome-ink); }
-.fm table { width: 100%; border-collapse: collapse; background: var(--chrome-2); }
-.fm td {
-    padding: 6px 12px; border-bottom: 1px solid var(--chrome-line);
-    color: var(--chrome-ink); font-size: var(--fs-sm);
+.fm .crumbs a { color: var(--ink-2); }
+.fm .crumbs a:hover { color: var(--ink); text-decoration: none; }
+.fm .crumbs a:last-child { color: var(--ink); font-weight: 600; }
+.fm .crumbs .sep { color: var(--ink-3); }
+.fm-bar .icon-btn { color: var(--ink-2); }
+.fm-bar .icon-btn:hover { background: var(--surface-3); color: var(--ink); }
+.fm table { width: 100%; border-collapse: collapse; background: var(--surface); }
+.fm thead th {
+    text-align: left; padding: 8px 12px; font-size: var(--fs-xs); font-weight: 600;
+    color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em;
+    border-bottom: 1px solid var(--line); white-space: nowrap;
 }
-.fm tr:last-child td { border-bottom: 0; }
-.fm tbody tr:hover { background: var(--chrome-3); cursor: pointer; }
-.fm .cell-icon svg { color: var(--chrome-ink-2); }
-.fm td.meta { color: var(--chrome-ink-2); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: nowrap; }
-.fm .empty { color: var(--chrome-ink-2); }
+.fm td {
+    padding: 7px 12px; border-bottom: 1px solid var(--line-2);
+    color: var(--ink); font-size: var(--fs-sm);
+}
+.fm tbody tr:last-child td { border-bottom: 0; }
+.fm tbody tr:hover { background: var(--surface-2); cursor: pointer; }
+.fm .cell-icon svg { color: var(--ink-3); }
+.fm td.meta, .fm th.meta { color: var(--ink-3); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: nowrap; }
+.fm .empty { color: var(--ink-3); }
+.fm .fm-check { width: 1%; white-space: nowrap; }
+.fm .fm-ic { width: 1%; }
+.fm .fm-check input { cursor: pointer; vertical-align: middle; }
 
 /* editor (modal) — dark */
 .code-edit {
@@ -819,3 +828,9 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 .db-user { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line-2); font-size: var(--fs-sm); }
 .db-user:last-child { border-bottom: 0; }
 .db-nousers { color: var(--ink-3); font-size: var(--fs-sm); padding: 8px 0 4px; }
+
+/* Sparkline (promet 24h) u site panelu */
+.spark { display: flex; align-items: flex-end; gap: 2px; height: 40px; }
+.spark i { flex: 1 1 0; min-width: 0; background: var(--accent); opacity: .55; border-radius: 1px 1px 0 0; min-height: 2px; }
+.spark-flat { height: 40px; border-radius: 4px; background: var(--surface-3);
+    -webkit-mask: linear-gradient(90deg, #000 0 100%) center/100% 2px no-repeat; mask: linear-gradient(90deg, #000 0 100%) center/100% 2px no-repeat; }
