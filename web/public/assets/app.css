@@ -794,3 +794,14 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
     .sites-layout { grid-template-columns: 1fr; }
     .site-panel { position: static; }
 }
+
+/* Prazan state + "dodaj" forma (cron, ftp, …) — lijevo poravnato, pregledno */
+.empty-row { color: var(--ink-3); font-size: var(--fs-sm); padding: 8px 2px 2px; }
+.addform { border-top: 1px solid var(--line-2); margin-top: 12px; padding-top: 12px; }
+.addform-h { color: var(--ink-3); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; margin-bottom: 10px; }
+.addform-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.addform-grid.cron { grid-template-columns: minmax(150px, 210px) 1fr; }
+.addform-grid .field { margin-bottom: 0; }
+.addform-grid .span2 { grid-column: 1 / -1; }
+.addform-foot { margin-top: 12px; }
+@media (max-width: 560px) { .addform-grid, .addform-grid.cron { grid-template-columns: 1fr; } }

@@ -1239,7 +1239,15 @@ async function pageWebsiteDetail(id) {
         try {
             const r = await api(`/assistant/diagnose/${id}`, { method: 'POST' });
             box.innerHTML = `<div class="task-output" style="white-space:pre-wrap">${esc(r.answer)}</div>`;
-        } catch (err) { box.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+        } catch (err) {
+            if (err.message === 'assistant_not_configured') {
+                box.innerHTML = `<div class="alert warn">${t('assistant.not_configured')}
+                    <button class="btn sm" id="aigo">${icon('sparkle')}Forge AI</button></div>`;
+                box.querySelector('#aigo')?.addEventListener('click', () => toggleAiDrawer(true));
+            } else {
+                box.innerHTML = `<div class="alert err">${esc(err.message)}</div>`;
+            }
+        }
     });
     main().querySelector('#renew').addEventListener('click', async () => {
         try {
@@ -1413,14 +1421,15 @@ async function ftpSection(vhost, container) {
             <td class="mono" style="word-break:break-all">${esc(u.home_path)}</td>
             <td class="num"><button class="btn danger" data-del="${u.id}">${t('common.delete')}</button></td>
         </tr>`).join('')}
-    </tbody></table>` : `<div class="empty">${t('ftp.title')}: 0</div>`}
-    <form id="ftpf" class="mt">
-        <div class="grid cols-2">
+    </tbody></table>` : `<div class="empty-row">${t('ftp.empty')}</div>`}
+    <form id="ftpf" class="addform">
+        <div class="addform-h">${t('ftp.add')}</div>
+        <div class="addform-grid">
             <div class="field"><label>${t('ftp.username')}</label><input name="username" required pattern="[a-z][a-z0-9_.\\-]{2,31}" class="mono"></div>
             <div class="field"><label>${t('auth.password')}</label><input name="password" type="password" required minlength="12"></div>
+            <div class="field span2"><label>${t('ftp.home')}</label><input name="home" value="/httpdocs" class="mono"></div>
         </div>
-        <div class="field"><label>Home (unutar vhosta)</label><input name="home" value="/httpdocs" class="mono"></div>
-        <button class="btn primary">${icon('plus')}${t('common.create')}</button>
+        <div class="addform-foot"><button class="btn primary">${icon('plus')}${t('common.create')}</button></div>
     </form>`;
 
     container.querySelector('#ftpf').addEventListener('submit', async (e) => {
@@ -1458,16 +1467,17 @@ async function cronSection(vhost, container) {
                 <button class="btn ghost" data-toggle="${j.id}">${Number(j.enabled) ? '⏸' : '▶'}</button>
                 <button class="btn danger" data-del="${j.id}">${t('common.delete')}</button>
             </td></tr>`).join('')}
-    </tbody></table>` : `<div class="empty">${t('cron.title')}: 0</div>`}
-    <form id="cronf" class="mt">
-        <div class="grid cols-2">
+    </tbody></table>` : `<div class="empty-row">${t('cron.empty')}</div>`}
+    <form id="cronf" class="addform">
+        <div class="addform-h">${t('cron.add')}</div>
+        <div class="addform-grid cron">
             <div class="field"><label>${t('cron.schedule')}</label>
                 <input name="schedule" required placeholder="*/15 * * * *" class="mono">
                 <span class="hint">min sat dan mjesec dan_u_tjednu</span></div>
             <div class="field"><label>${t('cron.command')}</label>
                 <input name="command" required placeholder="php /var/www/vhosts/.../cron.php" class="mono"></div>
         </div>
-        <button class="btn primary">${icon('plus')}${t('common.create')}</button>
+        <div class="addform-foot"><button class="btn primary">${icon('plus')}${t('common.create')}</button></div>
     </form>`;
 
     container.querySelector('#cronf').addEventListener('submit', async (e) => {
