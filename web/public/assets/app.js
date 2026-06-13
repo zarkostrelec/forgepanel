@@ -2215,6 +2215,20 @@ async function pageDns() {
         });
     });
 
+    const dnsStatus = await api('/dns/status').catch(() => ({ installed: true }));
+    if (!dnsStatus.installed) {
+        document.getElementById('zones').innerHTML = `
+            <div class="alert warn" style="display:flex;align-items:center;gap:10px">
+                <span style="flex:1">${t('dns.not_installed')}</span>
+                ${state.me.role === 'admin' ? `<button class="btn sm" id="dnsinstall">${icon('download')}${t('dns.install')}</button>` : ''}</div>`;
+        document.getElementById('dnsinstall')?.addEventListener('click', async (e) => {
+            e.target.disabled = true;
+            try { const r = await api('/dns/install', { method: 'POST' }); watchTask(r.task_id, 'DNS (BIND9) install'); toast(t('dns.installing')); }
+            catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+        });
+        return;
+    }
+
     const zones = await api('/dns/zones');
     document.getElementById('zones').innerHTML = zones.length ? `
         <table class="data"><thead><tr><th>${t('dns.zone')}</th><th class="hide-sm">Serial</th><th>DNSSEC</th><th></th></tr></thead><tbody>

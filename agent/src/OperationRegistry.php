@@ -20,6 +20,7 @@ final class OperationRegistry
         'vhost.php_set'     => Operations\VhostPhpSet::class,
         'vhost.suspend'     => Operations\VhostSuspend::class,
         'vhost.backend_set' => Operations\VhostBackendSet::class,
+        'dns.install'       => Operations\DnsInstall::class,
         'dns.zone_write'    => Operations\DnsZoneWrite::class,
         'dns.zone_delete'   => Operations\DnsZoneDelete::class,
         'ftp.sync'          => Operations\FtpSync::class,

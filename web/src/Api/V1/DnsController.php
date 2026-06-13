@@ -18,6 +18,8 @@ final class DnsController extends Controller
 
     public function register(Router $router): void
     {
+        $router->add('GET', '/api/v1/dns/status', $this->status(...));
+        $router->add('POST', '/api/v1/dns/install', $this->install(...));
         $router->add('GET', '/api/v1/dns/zones', $this->zones(...));
         $router->add('POST', '/api/v1/dns/zones', $this->createZone(...));
         $router->add('DELETE', '/api/v1/dns/zones/{id}', $this->deleteZone(...));
@@ -26,6 +28,27 @@ final class DnsController extends Controller
         $router->add('PUT', '/api/v1/dns/zones/{id}/records/{rid}', $this->updateRecord(...));
         $router->add('DELETE', '/api/v1/dns/zones/{id}/records/{rid}', $this->deleteRecord(...));
         $router->add('POST', '/api/v1/dns/zones/{id}/cloudflare/export', $this->exportCloudflare(...));
+    }
+
+    /** Je li BIND9 instaliran (DNS je opcionalna komponenta). */
+    private function status(Request $request): never
+    {
+        $this->ctx($request, 'dns:read');
+        Response::ok(['installed' => $this->dnsInstalled()]);
+    }
+
+    private function install(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'dns:write');
+        $ctx->requireRole('admin');
+        $task_id = $this->app->tasks->enqueue('dns.install', [], $ctx->user_id);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'dns.install', null, $request->ip);
+        Response::ok(['task_id' => $task_id], 202);
+    }
+
+    private function dnsInstalled(): bool
+    {
+        return $this->app->db->one("SELECT 1 FROM components WHERE name = 'bind9' AND status = 'installed'") !== null;
     }
 
     private function zones(Request $request): never
