@@ -587,6 +587,17 @@ async function pollAiTask(id, { interval = 1500, maxMs = 200000 } = {}) {
     }
 }
 
+// Generički task poller (bilo koji op) — čeka terminalni status iz tablice tasks
+async function pollTask(id, { interval = 1500, maxMs = 180000 } = {}) {
+    const start = Date.now();
+    for (;;) {
+        const r = await api(`/tasks/${id}`);
+        if (['done', 'failed', 'cancelled'].includes(r.status)) return r;
+        if (Date.now() - start > maxMs) return { status: 'failed', error: 'timeout' };
+        await new Promise((res) => setTimeout(res, interval));
+    }
+}
+
 // Kao pollAiTask, ali zove onPartial(output) dok task traje (live ispis)
 async function pollAiTaskLive(id, onPartial, { interval = 800, maxMs = 200000 } = {}) {
     const start = Date.now();
@@ -844,6 +855,7 @@ async function refreshDashboard(cfConnected) {
             </div>
             <div class="card flush">
                 <div class="card-head"><h2>${t('dash.services')}</h2><span class="spacer"></span>
+                    <button class="btn small" id="chkupd">${icon('refresh')}${t('dash.check_updates')}</button>
                     <a class="btn small" href="#/monitoring">${t('dash.all')} ${icon('chevR')}</a></div>
                 <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th></tr></thead><tbody>
                 ${sv.map(([name, p]) => `<tr>
@@ -883,6 +895,24 @@ async function refreshDashboard(cfConnected) {
     if (aibtn) aibtn.addEventListener('click', () => {
         state.aiPending = insights.items.find((i) => i.ai_prompt)?.ai_prompt || null;
         toggleAiDrawer(true); // renderAiDrawer pokupi state.aiPending kad se učita
+    });
+
+    const chk = document.getElementById('chkupd');
+    if (chk) chk.addEventListener('click', async () => {
+        chk.disabled = true;
+        const orig = chk.innerHTML;
+        chk.innerHTML = `${icon('refresh')}${t('dash.checking')}`;
+        try {
+            const r = await api('/updates/scan', { method: 'POST' });
+            watchTask(r.task_id, t('dash.check_updates'));
+            const res = await pollTask(r.task_id);
+            if (res.status !== 'done') throw new Error(res.error || 'scan_failed');
+            const comps = await api('/updates').catch(() => []);
+            const n = comps.filter((c) => c.available_version && c.available_version !== c.current_version).length;
+            toast(n ? `${t('dash.updates_available')}: ${n}` : t('dash.updates_none'), n ? 'warn' : 'ok');
+            if (n) location.hash = '#/updates';
+        } catch (err) { toast(err.message, 'err'); }
+        finally { chk.disabled = false; chk.innerHTML = orig; }
     });
 }
 
