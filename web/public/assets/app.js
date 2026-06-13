@@ -2242,7 +2242,8 @@ async function dnsRecords(zoneId, domain) {
 
     container.innerHTML = `
     <div class="card mt">
-        <div class="page-head"><h2 class="mono">${esc(domain)}</h2></div>
+        <div class="page-head"><h2 class="mono">${esc(domain)}</h2><div class="spacer"></div>
+            <button class="btn" id="cfexport">${icon('cloud')}${t('dns.cf_export')}</button></div>
         <table class="data"><thead><tr>
             <th>${t('dns.name')}</th><th>Tip</th><th>${t('dns.content')}</th><th class="hide-sm">TTL</th><th class="hide-sm">Prio</th><th></th>
         </tr></thead><tbody>
@@ -2252,7 +2253,9 @@ async function dnsRecords(zoneId, domain) {
             <td class="mono" style="word-break:break-all">${esc(r.content)}</td>
             <td class="mono hide-sm">${r.ttl}</td>
             <td class="mono hide-sm">${r.prio ?? ''}</td>
-            <td class="num"><button class="btn danger" data-delrec="${r.id}">${t('common.delete')}</button></td>
+            <td class="num">
+                <button class="btn ghost" data-editrec="${r.id}">${t('common.edit')}</button>
+                <button class="btn danger" data-delrec="${r.id}">${t('common.delete')}</button></td>
         </tr>`).join('')}</tbody></table>
         <form id="rf" class="mt">
             <div class="grid cols-4">
@@ -2281,6 +2284,47 @@ async function dnsRecords(zoneId, domain) {
         try { await api(`/dns/zones/${zoneId}/records/${b.dataset.delrec}`, { method: 'DELETE' }); dnsRecords(zoneId, domain); }
         catch (err) { toast(err.message, 'err'); }
     }));
+    container.querySelectorAll('[data-editrec]').forEach((b) => b.addEventListener('click', () =>
+        editDnsRecordModal(zoneId, domain, records.find((r) => String(r.id) === b.dataset.editrec))));
+    container.querySelector('#cfexport').addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        try {
+            const r = await api(`/dns/zones/${zoneId}/cloudflare/export`, { method: 'POST' });
+            const extra = r.failed?.length ? ` · ${t('dns.cf_failed')}: ${r.failed.length}` : '';
+            toast(`${t('dns.cf_export_done')} · +${r.created} · ${t('dns.cf_skipped')}: ${r.skipped}${extra}`, r.failed?.length ? 'warn' : 'ok');
+        } catch (err) {
+            toast(t('dns.' + err.message) !== 'dns.' + err.message ? t('dns.' + err.message) : err.message, 'err');
+        } finally { e.target.disabled = false; }
+    });
+}
+
+function editDnsRecordModal(zoneId, domain, rec) {
+    const types = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'];
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('dns.edit_record')} <span class="mono">${esc(domain)}</span></h1>
+            <button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="erf">
+            <div class="grid cols-2">
+                <div class="field"><label>${t('dns.name')}</label><input name="name" class="mono" value="${esc(rec.name)}"></div>
+                <div class="field"><label>Tip</label><select name="type" class="mono">${types.map((x) => `<option ${x === rec.type ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+            </div>
+            <div class="field"><label>${t('dns.content')}</label><input name="content" required class="mono" value="${esc(rec.content)}"></div>
+            <div class="grid cols-2">
+                <div class="field"><label>TTL</label><input name="ttl" class="mono" value="${rec.ttl}"></div>
+                <div class="field"><label>Prio</label><input name="prio" class="mono" placeholder="—" value="${rec.prio ?? ''}"></div>
+            </div>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('common.save')}</button></div>
+        </form>`);
+    modal.querySelector('#erf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = Object.fromEntries(new FormData(e.target));
+        if (!body.prio) delete body.prio;
+        try {
+            await api(`/dns/zones/${zoneId}/records/${rec.id}`, { method: 'PUT', body });
+            modal.close(); dnsRecords(zoneId, domain);
+        } catch (err) { toast(err.message, 'err'); }
+    });
 }
 
 // ---------------------------------------------------------------- mail

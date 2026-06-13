@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace ForgePanel\Web\Api\V1;
 
 use ForgePanel\Web\Core\AuthContext;
+use ForgePanel\Web\Core\CloudflareClient;
+use ForgePanel\Web\Core\Crypto;
 use ForgePanel\Web\Core\HttpException;
 use ForgePanel\Web\Core\Request;
 use ForgePanel\Web\Core\Response;
@@ -21,7 +23,9 @@ final class DnsController extends Controller
         $router->add('DELETE', '/api/v1/dns/zones/{id}', $this->deleteZone(...));
         $router->add('GET', '/api/v1/dns/zones/{id}/records', $this->records(...));
         $router->add('POST', '/api/v1/dns/zones/{id}/records', $this->createRecord(...));
+        $router->add('PUT', '/api/v1/dns/zones/{id}/records/{rid}', $this->updateRecord(...));
         $router->add('DELETE', '/api/v1/dns/zones/{id}/records/{rid}', $this->deleteRecord(...));
+        $router->add('POST', '/api/v1/dns/zones/{id}/cloudflare/export', $this->exportCloudflare(...));
     }
 
     private function zones(Request $request): never
@@ -171,6 +175,108 @@ final class DnsController extends Controller
             throw $e;
         }
         Response::ok();
+    }
+
+    private function updateRecord(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'dns:write');
+        $zone = $this->zoneOr404($ctx, (int) $request->param('id'));
+        $record = $this->app->db->one(
+            'SELECT * FROM dns_records WHERE id = ? AND zone_id = ?',
+            [(int) $request->param('rid'), $zone['id']]
+        ) ?? throw new HttpException(404, 'not_found');
+
+        $name = trim($request->str('name') ?? '@') ?: '@';
+        $type = strtoupper(trim($request->str('type') ?? ''));
+        $content = trim($request->str('content') ?? '');
+        $ttl = max(60, min(604800, $request->int('ttl', 3600) ?? 3600));
+        $prio = $request->int('prio');
+
+        if (!in_array($type, self::RECORD_TYPES, true)) {
+            throw new HttpException(422, 'invalid_type');
+        }
+        if ($name !== '@' && !preg_match('/^[a-z0-9_*][a-z0-9_.*-]{0,62}$/i', $name)) {
+            throw new HttpException(422, 'invalid_name');
+        }
+        if ($content === '' || strlen($content) > 1024 || preg_match('/[\r\n]/', $content)) {
+            throw new HttpException(422, 'invalid_content');
+        }
+
+        $this->app->db->run(
+            'UPDATE dns_records SET name = ?, type = ?, content = ?, ttl = ?, prio = ? WHERE id = ?',
+            [$name, $type, $content, $ttl, $prio, $record['id']]
+        );
+        try {
+            $this->syncZone((int) $zone['id']);
+        } catch (\Throwable $e) {
+            // named-checkzone odbio — vrati prethodne vrijednosti
+            $this->app->db->run(
+                'UPDATE dns_records SET name = ?, type = ?, content = ?, ttl = ?, prio = ? WHERE id = ?',
+                [$record['name'], $record['type'], $record['content'], $record['ttl'], $record['prio'], $record['id']]
+            );
+            throw $e;
+        }
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'dns.record_update', ['zone' => $zone['domain'], 'type' => $type, 'name' => $name], $request->ip);
+        Response::ok(['id' => (int) $record['id']]);
+    }
+
+    /**
+     * Export lokalnih zapisa zone u Cloudflare (domena MORA postojati na CF računu).
+     * Preskače NS/SOA (CF ih sam vodi) i već postojeće zapise (dedup type|name|content).
+     */
+    private function exportCloudflare(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'dns:write');
+        $zone = $this->zoneOr404($ctx, (int) $request->param('id'));
+
+        $row = $this->app->db->one('SELECT api_token FROM cloudflare_accounts WHERE user_id = ?', [$ctx->user_id])
+            ?? throw new HttpException(409, 'cloudflare_not_connected');
+        $client = new CloudflareClient((new Crypto($this->app->config))->decrypt((string) $row['api_token']));
+
+        $domain = (string) $zone['domain'];
+        $cf_zone = null;
+        foreach ($client->zones() as $z) {
+            if (strtolower($z['name']) === strtolower($domain)) {
+                $cf_zone = $z['id'];
+                break;
+            }
+        }
+        if ($cf_zone === null) {
+            throw new HttpException(422, 'cf_zone_not_found');
+        }
+
+        $existing = [];
+        foreach ($client->dnsRecords($cf_zone) as $r) {
+            $existing[strtoupper((string) $r['type']) . '|' . strtolower(rtrim((string) $r['name'], '.')) . '|' . strtolower(rtrim((string) $r['content'], '.'))] = true;
+        }
+
+        $records = $this->app->db->all('SELECT name, type, content, ttl, prio FROM dns_records WHERE zone_id = ?', [$zone['id']]);
+        $created = 0;
+        $skipped = 0;
+        $failed = [];
+        foreach ($records as $rec) {
+            $type = strtoupper((string) $rec['type']);
+            if (in_array($type, ['NS', 'SOA'], true)) {
+                $skipped++;
+                continue;
+            }
+            $name = $rec['name'] === '@' ? $domain : $rec['name'] . '.' . $domain;
+            $content = rtrim((string) $rec['content'], '.');
+            if (isset($existing[$type . '|' . strtolower(rtrim($name, '.')) . '|' . strtolower($content)])) {
+                $skipped++;
+                continue;
+            }
+            try {
+                $client->createRecord($cf_zone, $type, $name, $content, false, (int) $rec['ttl'],
+                    $rec['prio'] !== null ? (int) $rec['prio'] : null);
+                $created++;
+            } catch (\Throwable) {
+                $failed[] = $rec['name'] . ' ' . $type;
+            }
+        }
+
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'dns.cloudflare_export', ['domain' => $domain, 'created' => $created], $request->ip);
+        Response::ok(['created' => $created, 'skipped' => $skipped, 'failed' => $failed]);
     }
 
     /** Bump seriala + puni rewrite zone kroz agent (named-checkzone je završni sudac). */

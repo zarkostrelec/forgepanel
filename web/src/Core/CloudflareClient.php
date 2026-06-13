@@ -38,12 +38,16 @@ final class CloudflareClient
     }
 
     /** @return array<string, mixed> */
-    public function createRecord(string $zone_id, string $type, string $name, string $content, bool $proxied = false, int $ttl = 1): array
+    public function createRecord(string $zone_id, string $type, string $name, string $content, bool $proxied = false, int $ttl = 1, ?int $priority = null): array
     {
-        return $this->request('POST', "/zones/$zone_id/dns_records", [
+        $body = [
             'type' => $type, 'name' => $name, 'content' => $content,
             'proxied' => $proxied, 'ttl' => $ttl,
-        ]);
+        ];
+        if ($priority !== null) {
+            $body['priority'] = $priority; // MX / SRV
+        }
+        return $this->request('POST', "/zones/$zone_id/dns_records", $body);
     }
 
     public function setProxied(string $zone_id, string $record_id, bool $proxied): void
