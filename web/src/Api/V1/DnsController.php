@@ -252,8 +252,13 @@ final class DnsController extends Controller
         $ctx = $this->ctx($request, 'dns:write');
         $zone = $this->zoneOr404($ctx, (int) $request->param('id'));
 
-        $row = $this->app->db->one('SELECT api_token FROM cloudflare_accounts WHERE user_id = ?', [$ctx->user_id])
-            ?? throw new HttpException(409, 'cloudflare_not_connected');
+        $account_id = $request->int('account_id');
+        $row = $account_id !== null
+            ? $this->app->db->one('SELECT api_token FROM cloudflare_accounts WHERE id = ? AND user_id = ?', [$account_id, $ctx->user_id])
+            : $this->app->db->one('SELECT api_token FROM cloudflare_accounts WHERE user_id = ? ORDER BY id LIMIT 1', [$ctx->user_id]);
+        if ($row === null) {
+            throw new HttpException(409, 'cloudflare_not_connected');
+        }
         $client = new CloudflareClient((new Crypto($this->app->config))->decrypt((string) $row['api_token']));
 
         $domain = (string) $zone['domain'];

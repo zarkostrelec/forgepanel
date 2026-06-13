@@ -2107,82 +2107,87 @@ async function pageMonitoring() {
 async function pageCloudflare() {
     setActive('protect');
     main().innerHTML = `${tabsHtml('protect', 'cloudflare')}<div class="empty">${t('common.loading')}</div>`;
-    const acct = await api('/cloudflare/account').catch(() => ({ connected: false }));
-
-    if (!acct.connected) {
-        main().innerHTML = `${tabsHtml('protect', 'cloudflare')}
-        <div class="card" style="max-width:560px">
-            <div class="card-head"><h2>${t('cf.title')}</h2></div>
-            <p class="hint" style="margin:0 0 var(--gap)">${t('cf.intro')}</p>
-            <form id="cff">
-                <div class="field"><label>${t('cf.token')}</label>
-                    <input name="api_token" required class="mono" placeholder="••••••••••••••••" autocomplete="off">
-                    <span class="hint">${t('cf.token_hint')}</span></div>
-                <button class="btn primary">${icon('cloud')}${t('cf.connect')}</button>
-            </form>
-        </div>`;
-        main().querySelector('#cff').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            try {
-                await api('/cloudflare/account', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
-                toast(t('cf.connected'), 'ok'); pageCloudflare();
-            } catch (err) { toast(err.message, 'err'); }
-        });
-        return;
-    }
-
-    const [zones, vhosts] = await Promise.all([
-        api('/cloudflare/zones').catch(() => []),
-        api('/vhosts').catch(() => []),
-    ]);
-    const zoneOpts = zones.map((z) => `<option value="${esc(z.id)}">${esc(z.name)}</option>`).join('');
+    const acct = await api('/cloudflare/account').catch(() => ({ connected: false, accounts: [] }));
+    const accounts = acct.accounts || [];
 
     main().innerHTML = `${tabsHtml('protect', 'cloudflare')}
-    <div class="page-head">
-        <span class="badge ok">${icon('cloud')} ${t('cf.connected')}</span><span class="spacer"></span>
-        <button class="btn danger" id="cfdis">${t('cf.disconnect')}</button>
+    <div class="card" style="max-width:640px">
+        <div class="card-head"><h2>${t('cf.accounts')}</h2></div>
+        ${accounts.length ? `<table class="data"><tbody>${accounts.map((a) => `<tr>
+            <td class="mono" style="font-weight:600">${esc(a.name)}</td>
+            <td><span class="badge ${a.status === 'active' ? 'ok' : 'warn'}">${esc(a.status)}</span></td>
+            <td class="num"><button class="btn danger sm" data-cfdel="${a.id}">${t('common.delete')}</button></td>
+        </tr>`).join('')}</tbody></table>` : `<p class="hint" style="margin:0 0 var(--gap)">${t('cf.intro')}</p>`}
+        <form id="cff" class="addform">
+            <div class="addform-h">${t('cf.add_account')}</div>
+            <div class="addform-grid">
+                <div class="field"><label>${t('cf.name')}</label><input name="name" class="mono" placeholder="npr. Glavni CF"></div>
+                <div class="field"><label>${t('cf.token')}</label><input name="api_token" required class="mono" placeholder="cfat_…" autocomplete="off"></div>
+            </div>
+            <div class="addform-foot"><button class="btn primary">${icon('cloud')}${t('cf.connect')}</button></div>
+        </form>
     </div>
-    <div class="card"><div class="card-head"><h2>${t('cf.zones')}</h2></div>
+    ${accounts.length ? `
+    <div class="card mt">
+        <div class="card-head"><h2>${t('cf.zones')}</h2><span class="spacer"></span>
+            ${accounts.length > 1 ? `<select id="cfacct" class="mono">${accounts.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select>` : ''}</div>
+        <div id="cfzonebox">${t('common.loading')}</div>
+    </div>` : ''}`;
+
+    main().querySelector('#cff').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try { await api('/cloudflare/account', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); toast(t('cf.connected'), 'ok'); pageCloudflare(); }
+        catch (err) { toast(err.message, 'err'); }
+    });
+    main().querySelectorAll('[data-cfdel]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/cloudflare/account/${b.dataset.cfdel}`, { method: 'DELETE' }); pageCloudflare(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    if (!accounts.length) return;
+
+    const loadZones = async (accountId) => {
+        const box = document.getElementById('cfzonebox');
+        box.innerHTML = t('common.loading');
+        const [zones, vhosts] = await Promise.all([
+            api('/cloudflare/zones' + (accountId ? `?account_id=${accountId}` : '')).catch(() => []),
+            api('/vhosts').catch(() => []),
+        ]);
+        const zoneOpts = zones.map((z) => `<option value="${esc(z.id)}">${esc(z.name)}</option>`).join('');
+        box.innerHTML = `
         ${zones.length ? `<table class="data"><thead><tr><th>${t('cf.zone')}</th><th>${t('cf.status')}</th><th class="mono hide-sm">Zone ID</th></tr></thead>
         <tbody>${zones.map((z) => `<tr><td class="mono">${esc(z.name)}</td>
             <td><span class="badge ${z.status === 'active' ? 'ok' : 'warn'}">${esc(z.status)}</span></td>
-            <td class="mono hide-sm" style="font-size:var(--fs-sm)">${esc(z.id)}</td></tr>`).join('')}</tbody></table>`
-        : `<div class="empty">${t('cf.zones')}: 0</div>`}</div>
-
-    <div class="card mt"><div class="card-head"><h2>${t('cf.sync')}</h2></div>
-        ${vhosts.length && zones.length ? `<table class="data"><thead><tr><th>${t('vhost.domain')}</th><th>${t('cf.zone')}</th><th></th></tr></thead>
+            <td class="mono hide-sm" style="font-size:var(--fs-sm)">${esc(z.id)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${t('cf.zones')}: 0</div>`}
+        ${vhosts.length && zones.length ? `<div class="card-head mt"><h2>${t('cf.sync')}</h2></div>
+        <table class="data"><thead><tr><th>${t('vhost.domain')}</th><th>${t('cf.zone')}</th><th></th></tr></thead>
         <tbody>${vhosts.map((v) => `<tr data-vid="${v.id}">
             <td class="mono">${esc(v.domain)}</td>
             <td><select class="mono cf-zone">${zoneOpts}</select>
                 <label class="inline" style="margin-left:8px"><input type="checkbox" class="cf-proxy" checked> ${t('cf.proxy')}</label></td>
-            <td class="num">
-                <button class="btn cf-sync">${t('cf.sync')}</button>
-                <button class="btn cf-purge">${t('cf.purge')}</button></td>
-        </tr>`).join('')}</tbody></table>`
-        : `<div class="empty">${vhosts.length ? t('cf.zones') + ': 0' : t('nav.websites') + ': 0'}</div>`}</div>`;
+            <td class="num"><button class="btn cf-sync">${t('cf.sync')}</button><button class="btn cf-purge">${t('cf.purge')}</button></td>
+        </tr>`).join('')}</tbody></table>` : ''}`;
 
-    main().querySelector('#cfdis').addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
-        try { await api('/cloudflare/account', { method: 'DELETE' }); pageCloudflare(); }
-        catch (err) { toast(err.message, 'err'); }
-    });
-    main().querySelectorAll('tr[data-vid]').forEach((tr) => {
-        const vid = tr.dataset.vid;
-        const zoneId = () => tr.querySelector('.cf-zone').value;
-        tr.querySelector('.cf-sync').addEventListener('click', async (e) => {
-            e.target.disabled = true;
-            try {
-                const r = await api(`/vhosts/${vid}/cloudflare/sync`, { method: 'POST',
-                    body: { zone_id: zoneId(), proxy: tr.querySelector('.cf-proxy').checked } });
-                toast(t('cf.sync_done') + ': ' + (r.created || []).join(', '), 'ok');
-            } catch (err) { toast(err.message, 'err'); } finally { e.target.disabled = false; }
+        box.querySelectorAll('tr[data-vid]').forEach((tr) => {
+            const vid = tr.dataset.vid;
+            tr.querySelector('.cf-sync').addEventListener('click', async (e) => {
+                e.target.disabled = true;
+                try {
+                    const r = await api(`/vhosts/${vid}/cloudflare/sync`, { method: 'POST',
+                        body: { zone_id: tr.querySelector('.cf-zone').value, proxy: tr.querySelector('.cf-proxy').checked, account_id: accountId } });
+                    toast(t('cf.sync_done') + ': ' + (r.created || []).join(', '), 'ok');
+                } catch (err) { toast(err.message, 'err'); } finally { e.target.disabled = false; }
+            });
+            tr.querySelector('.cf-purge').addEventListener('click', async (e) => {
+                e.target.disabled = true;
+                try { await api(`/vhosts/${vid}/cloudflare/purge`, { method: 'POST', body: {} }); toast(t('cf.purge_done'), 'ok'); }
+                catch (err) { toast(err.message, 'err'); } finally { e.target.disabled = false; }
+            });
         });
-        tr.querySelector('.cf-purge').addEventListener('click', async (e) => {
-            e.target.disabled = true;
-            try { await api(`/vhosts/${vid}/cloudflare/purge`, { method: 'POST', body: {} }); toast(t('cf.purge_done'), 'ok'); }
-            catch (err) { toast(err.message, 'err'); } finally { e.target.disabled = false; }
-        });
-    });
+    };
+    const acctSel = document.getElementById('cfacct');
+    loadZones(acctSel ? Number(acctSel.value) : accounts[0].id);
+    acctSel?.addEventListener('change', () => loadZones(Number(acctSel.value)));
 }
 
 // ---------------------------------------------------------------- DNS
@@ -2236,8 +2241,15 @@ async function pageDns() {
             <td class="mono">${esc(z.domain)}</td>
             <td class="mono hide-sm">${esc(z.serial)}</td>
             <td><span class="badge ${Number(z.dnssec_enabled) ? 'ok' : ''}">${Number(z.dnssec_enabled) ? 'on' : 'off'}</span></td>
-            <td class="num"><button class="btn danger" data-delzone="${z.id}">${t('common.delete')}</button></td>
+            <td class="num">
+                <button class="btn ghost" data-cfexp="${z.id}" data-domain="${esc(z.domain)}">${icon('cloud')}${t('dns.cf_export')}</button>
+                <button class="btn danger" data-delzone="${z.id}">${t('common.delete')}</button></td>
         </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('nav.dns')}: 0</div>`;
+
+    main().querySelectorAll('[data-cfexp]').forEach((b) => b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportZoneToCloudflare(Number(b.dataset.cfexp), b.dataset.domain);
+    }));
 
     main().querySelectorAll('[data-delzone]').forEach((b) => b.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -2300,15 +2312,34 @@ async function dnsRecords(zoneId, domain) {
     }));
     container.querySelectorAll('[data-editrec]').forEach((b) => b.addEventListener('click', () =>
         editDnsRecordModal(zoneId, domain, records.find((r) => String(r.id) === b.dataset.editrec))));
-    container.querySelector('#cfexport').addEventListener('click', async (e) => {
-        e.target.disabled = true;
+    container.querySelector('#cfexport').addEventListener('click', () => exportZoneToCloudflare(zoneId, domain));
+}
+
+// Export zone na Cloudflare — bira račun ako ih ima više
+async function exportZoneToCloudflare(zoneId, domain) {
+    let accounts = [];
+    try { accounts = (await api('/cloudflare/account')).accounts || []; } catch { /* nije povezan */ }
+    if (!accounts.length) return toast(t('dns.cloudflare_not_connected'), 'err');
+    const run = async (accountId) => {
         try {
-            const r = await api(`/dns/zones/${zoneId}/cloudflare/export`, { method: 'POST' });
+            const r = await api(`/dns/zones/${zoneId}/cloudflare/export`, { method: 'POST', body: accountId ? { account_id: accountId } : {} });
             const extra = r.failed?.length ? ` · ${t('dns.cf_failed')}: ${r.failed.length}` : '';
             toast(`${t('dns.cf_export_done')} · +${r.created} · ${t('dns.cf_skipped')}: ${r.skipped}${extra}`, r.failed?.length ? 'warn' : 'ok');
-        } catch (err) {
-            toast(t('dns.' + err.message) !== 'dns.' + err.message ? t('dns.' + err.message) : err.message, 'err');
-        } finally { e.target.disabled = false; }
+        } catch (err) { toast(t('dns.' + err.message) !== 'dns.' + err.message ? t('dns.' + err.message) : err.message, 'err'); }
+    };
+    if (accounts.length === 1) return run(accounts[0].id);
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('dns.cf_export')} <span class="mono">${esc(domain)}</span></h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="cxf">
+            <div class="field"><label>${t('cf.account')}</label>
+                <select name="account_id" class="mono">${accounts.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></div>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('dns.cf_export')}</button></div>
+        </form>`);
+    modal.querySelector('#cxf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const accountId = Number(new FormData(e.target).get('account_id'));
+        modal.close(); await run(accountId);
     });
 }
 

@@ -392,6 +392,7 @@ CREATE TABLE notifications (
 CREATE TABLE cloudflare_accounts (
     id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     user_id         INT UNSIGNED NOT NULL,
+    name            VARCHAR(64) NOT NULL DEFAULT 'Cloudflare',  -- nadjenuto ime (više računa po useru)
     api_token       TEXT NOT NULL,                          -- enkriptiran (libsodium secretbox)
     status          ENUM('active','invalid') NOT NULL DEFAULT 'active',
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

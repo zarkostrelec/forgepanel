@@ -18,7 +18,7 @@ final class CloudflareController extends Controller
     {
         $router->add('GET', '/api/v1/cloudflare/account', $this->account(...));
         $router->add('POST', '/api/v1/cloudflare/account', $this->connect(...));
-        $router->add('DELETE', '/api/v1/cloudflare/account', $this->disconnect(...));
+        $router->add('DELETE', '/api/v1/cloudflare/account/{id}', $this->disconnect(...));
         $router->add('GET', '/api/v1/cloudflare/zones', $this->zones(...));
         $router->add('POST', '/api/v1/vhosts/{id}/cloudflare/sync', $this->syncVhost(...));
         $router->add('POST', '/api/v1/vhosts/{id}/cloudflare/purge', $this->purge(...));
@@ -28,8 +28,8 @@ final class CloudflareController extends Controller
     private function account(Request $request): never
     {
         $ctx = $this->ctx($request, 'cloudflare:read');
-        $row = $this->app->db->one('SELECT id, status FROM cloudflare_accounts WHERE user_id = ?', [$ctx->user_id]);
-        Response::ok(['connected' => $row !== null, 'status' => $row['status'] ?? null]);
+        $accounts = $this->app->db->all('SELECT id, name, status FROM cloudflare_accounts WHERE user_id = ? ORDER BY id', [$ctx->user_id]);
+        Response::ok(['connected' => $accounts !== [], 'accounts' => $accounts]);
     }
 
     private function connect(Request $request): never
@@ -39,6 +39,13 @@ final class CloudflareController extends Controller
         if (!preg_match('/^[A-Za-z0-9_-]{20,120}$/', $token)) {
             throw new HttpException(422, 'invalid_token');
         }
+        $name = trim($request->str('name') ?? '');
+        if ($name === '') {
+            $name = 'Cloudflare';
+        }
+        if (mb_strlen($name) > 64) {
+            throw new HttpException(422, 'invalid_name');
+        }
 
         // Verifikacija tokena prije spremanja
         $verify = (new CloudflareClient($token))->verify();
@@ -46,32 +53,26 @@ final class CloudflareController extends Controller
             throw new HttpException(422, 'cloudflare_token_invalid');
         }
 
-        $crypto = new Crypto($this->app->config);
-        $encrypted = $crypto->encrypt($token);
-        $existing = $this->app->db->one('SELECT id FROM cloudflare_accounts WHERE user_id = ?', [$ctx->user_id]);
-        if ($existing === null) {
-            $this->app->db->run(
-                "INSERT INTO cloudflare_accounts (user_id, api_token, status) VALUES (?, ?, 'active')",
-                [$ctx->user_id, $encrypted]
-            );
-        } else {
-            $this->app->db->run("UPDATE cloudflare_accounts SET api_token = ?, status = 'active' WHERE id = ?", [$encrypted, $existing['id']]);
-        }
-        $this->app->audit->log($ctx->user_id, $ctx->email, 'cloudflare.connect', null, $request->ip);
-        Response::ok(['connected' => true]);
+        $encrypted = (new Crypto($this->app->config))->encrypt($token);
+        $this->app->db->run(
+            "INSERT INTO cloudflare_accounts (user_id, name, api_token, status) VALUES (?, ?, ?, 'active')",
+            [$ctx->user_id, $name, $encrypted]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'cloudflare.connect', ['name' => $name], $request->ip);
+        Response::ok(['id' => $this->app->db->lastId(), 'name' => $name], 201);
     }
 
     private function disconnect(Request $request): never
     {
         $ctx = $this->ctx($request, 'cloudflare:write');
-        $this->app->db->run('DELETE FROM cloudflare_accounts WHERE user_id = ?', [$ctx->user_id]);
+        $this->app->db->run('DELETE FROM cloudflare_accounts WHERE id = ? AND user_id = ?', [(int) $request->param('id'), $ctx->user_id]);
         Response::ok();
     }
 
     private function zones(Request $request): never
     {
         $ctx = $this->ctx($request, 'cloudflare:read');
-        Response::ok($this->client($ctx)->zones());
+        Response::ok($this->client($ctx, $request->int('account_id'))->zones());
     }
 
     /** Piše vhost A/MX/SPF/DKIM/DMARC zapise u CF zonu. */
@@ -84,7 +85,8 @@ final class CloudflareController extends Controller
             throw new HttpException(422, 'invalid_zone_id');
         }
 
-        $cf = $this->client($ctx);
+        $account = $this->accountRow($ctx, $request->int('account_id'));
+        $cf = new CloudflareClient((new Crypto($this->app->config))->decrypt((string) $account['api_token']));
         $server_ip = $this->serverIp();
         $proxy = (bool) ($request->body['proxy'] ?? true);
 
@@ -115,7 +117,6 @@ final class CloudflareController extends Controller
         }
 
         // Zapamti vezu vhost ↔ CF zona
-        $account = $this->app->db->one('SELECT id FROM cloudflare_accounts WHERE user_id = ?', [$ctx->user_id]);
         $this->app->db->run(
             "INSERT INTO cloudflare_zones (vhost_id, account_id, zone_id, dns_mode, proxy_default)
              VALUES (?, ?, ?, 'cloudflare', ?)
@@ -151,12 +152,19 @@ final class CloudflareController extends Controller
         Response::ok();
     }
 
-    private function client(\ForgePanel\Web\Core\AuthContext $ctx): CloudflareClient
+    private function client(\ForgePanel\Web\Core\AuthContext $ctx, ?int $account_id = null): CloudflareClient
     {
-        $row = $this->app->db->one('SELECT api_token FROM cloudflare_accounts WHERE user_id = ?', [$ctx->user_id])
-            ?? throw new HttpException(409, 'cloudflare_not_connected');
-        $token = (new Crypto($this->app->config))->decrypt((string) $row['api_token']);
-        return new CloudflareClient($token);
+        $row = $this->accountRow($ctx, $account_id);
+        return new CloudflareClient((new Crypto($this->app->config))->decrypt((string) $row['api_token']));
+    }
+
+    /** Izabrani CF račun (po account_id) ili prvi povezani; ownership po user_id. @return array<string,mixed> */
+    private function accountRow(\ForgePanel\Web\Core\AuthContext $ctx, ?int $account_id): array
+    {
+        $row = $account_id !== null
+            ? $this->app->db->one('SELECT id, api_token FROM cloudflare_accounts WHERE id = ? AND user_id = ?', [$account_id, $ctx->user_id])
+            : $this->app->db->one('SELECT id, api_token FROM cloudflare_accounts WHERE user_id = ? ORDER BY id LIMIT 1', [$ctx->user_id]);
+        return $row ?? throw new HttpException(409, 'cloudflare_not_connected');
     }
 
     private function serverIp(): string
