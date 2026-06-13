@@ -55,14 +55,19 @@ final class DnsController extends Controller
     {
         $ctx = $this->ctx($request, 'dns:read');
         if ($ctx->isAdmin()) {
-            Response::ok($this->app->db->all('SELECT * FROM dns_zones ORDER BY domain'));
+            Response::ok($this->app->db->all(
+                'SELECT z.*, ca.name AS cf_account FROM dns_zones z
+                 LEFT JOIN cloudflare_accounts ca ON ca.id = z.cf_account_id ORDER BY z.domain'
+            ));
         }
         if ($ctx->subscription_ids === []) {
             Response::ok([]);
         }
         $placeholders = implode(',', array_fill(0, count($ctx->subscription_ids), '?'));
         Response::ok($this->app->db->all(
-            "SELECT * FROM dns_zones WHERE subscription_id IN ($placeholders) ORDER BY domain",
+            "SELECT z.*, ca.name AS cf_account FROM dns_zones z
+             LEFT JOIN cloudflare_accounts ca ON ca.id = z.cf_account_id
+             WHERE z.subscription_id IN ($placeholders) ORDER BY z.domain",
             $ctx->subscription_ids
         ));
     }
@@ -254,8 +259,8 @@ final class DnsController extends Controller
 
         $account_id = $request->int('account_id');
         $row = $account_id !== null
-            ? $this->app->db->one('SELECT api_token FROM cloudflare_accounts WHERE id = ? AND user_id = ?', [$account_id, $ctx->user_id])
-            : $this->app->db->one('SELECT api_token FROM cloudflare_accounts WHERE user_id = ? ORDER BY id LIMIT 1', [$ctx->user_id]);
+            ? $this->app->db->one('SELECT id, api_token FROM cloudflare_accounts WHERE id = ? AND user_id = ?', [$account_id, $ctx->user_id])
+            : $this->app->db->one('SELECT id, api_token FROM cloudflare_accounts WHERE user_id = ? ORDER BY id LIMIT 1', [$ctx->user_id]);
         if ($row === null) {
             throw new HttpException(409, 'cloudflare_not_connected');
         }
@@ -303,6 +308,7 @@ final class DnsController extends Controller
             }
         }
 
+        $this->app->db->run('UPDATE dns_zones SET cf_account_id = ? WHERE id = ?', [(int) $row['id'], $zone['id']]);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'dns.cloudflare_export', ['domain' => $domain, 'created' => $created], $request->ip);
         Response::ok(['created' => $created, 'skipped' => $skipped, 'failed' => $failed]);
     }

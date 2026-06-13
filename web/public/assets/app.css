@@ -310,6 +310,8 @@ h2 {
 .btn.ghost:hover { color: var(--ink); background: var(--surface-3); }
 .btn.small { padding: 4px 9px; font-size: var(--fs-xs); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* razmak između susjednih gumba u ćelijama tablice (akcijski stupci) */
+td .btn + .btn { margin-left: 6px; }
 .btn.icon { padding: 6px 8px; }
 .btn svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .btn.small svg { width: 13px; height: 13px; }

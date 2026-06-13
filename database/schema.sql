@@ -99,6 +99,7 @@ CREATE TABLE dns_zones (
     subscription_id INT UNSIGNED NOT NULL,
     serial          BIGINT UNSIGNED NOT NULL,
     dnssec_enabled  TINYINT(1) NOT NULL DEFAULT 0,
+    cf_account_id   INT UNSIGNED NULL,                     -- zadnji CF račun na koji je exportano
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

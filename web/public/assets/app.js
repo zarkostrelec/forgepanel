@@ -2236,11 +2236,12 @@ async function pageDns() {
 
     const zones = await api('/dns/zones');
     document.getElementById('zones').innerHTML = zones.length ? `
-        <table class="data"><thead><tr><th>${t('dns.zone')}</th><th class="hide-sm">Serial</th><th>DNSSEC</th><th></th></tr></thead><tbody>
+        <table class="data"><thead><tr><th>${t('dns.zone')}</th><th class="hide-sm">Serial</th><th>DNSSEC</th><th>Cloudflare</th><th></th></tr></thead><tbody>
         ${zones.map((z) => `<tr class="row-link" data-zone="${z.id}" data-domain="${esc(z.domain)}">
             <td class="mono">${esc(z.domain)}</td>
             <td class="mono hide-sm">${esc(z.serial)}</td>
             <td><span class="badge ${Number(z.dnssec_enabled) ? 'ok' : ''}">${Number(z.dnssec_enabled) ? 'on' : 'off'}</span></td>
+            <td>${z.cf_account ? `<span class="badge info">${icon('cloud', 12)} ${esc(z.cf_account)}</span>` : '<span class="mono" style="color:var(--ink-3)">—</span>'}</td>
             <td class="num">
                 <button class="btn ghost" data-cfexp="${z.id}" data-domain="${esc(z.domain)}">${icon('cloud')}${t('dns.cf_export')}</button>
                 <button class="btn danger" data-delzone="${z.id}">${t('common.delete')}</button></td>
