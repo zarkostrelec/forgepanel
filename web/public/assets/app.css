@@ -948,3 +948,14 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 /* mail detail kartice — h2 razmak + manje prazno stanje */
 .grid.top .card > h2 { margin: 0 0 12px; font-size: var(--fs-base); }
 .grid.top .card .empty { padding: 18px 0; }
+
+/* Grafana-style monitoring paneli */
+.g-chart { display: flex; gap: 6px; height: var(--gh, 150px); }
+.g-yaxis { display: flex; flex-direction: column; justify-content: space-between; width: 40px;
+    text-align: right; font-size: 10px; line-height: 1; color: var(--ink-3);
+    font-family: var(--mono, monospace); font-variant-numeric: tabular-nums; padding: 1px 0; }
+.g-plot { flex: 1; min-width: 0; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.g-svg { width: 100%; height: 100%; display: block; }
+.g-grid line { stroke: var(--line-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.g-xaxis { display: flex; justify-content: space-between; padding-left: 46px; margin-top: 5px;
+    font-size: 10px; color: var(--ink-3); font-family: var(--mono, monospace); font-variant-numeric: tabular-nums; }

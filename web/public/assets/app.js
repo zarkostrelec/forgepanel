@@ -2099,23 +2099,53 @@ async function pageTasks() {
     }));
 }
 
-function sparkline(points, { height = 130, formatY = (v) => String(v), color = 'var(--accent)' } = {}) {
-    if (points.length < 2) return `<div class="empty">${t('common.loading')}</div>`;
+// Zaokruži gore na "lijep" broj (1/2/5 × 10ⁿ) za y-os
+function niceCeil(n) {
+    if (!(n > 0)) return 1;
+    const exp = Math.floor(Math.log10(n));
+    const base = Math.pow(10, exp);
+    const f = n / base;
+    const nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10;
+    return nice * base;
+}
+// "YYYY-MM-DD HH:MM:SS" → HH:MM ili DD.MM. (dugi raspon)
+function fmtTs(ts, longSpan) {
+    const d = new Date(String(ts).replace(' ', 'T'));
+    if (isNaN(d)) return '';
+    const p = (x) => String(x).padStart(2, '0');
+    return longSpan ? `${p(d.getDate())}.${p(d.getMonth() + 1)}.` : `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// Grafana-style area panel: y-os oznake + gridlines + vremenska x-os
+function sparkline(points, { height = 150, formatY = (v) => String(v), color = 'var(--accent)' } = {}) {
+    if (!points || points.length < 2) return `<div class="empty" style="padding:40px 0">${t('common.loading')}</div>`;
     const values = points.map((p) => Number(p.value));
-    const max = Math.max(...values) * 1.1 || 1;
+    const niceMax = niceCeil(Math.max(...values, 0)) || 1;
     const width = 600;
-    const coords = values.map((v, i) =>
-        `${(i / (values.length - 1)) * width},${height - (v / max) * (height - 8)}`).join(' ');
-    const gridLines = [1, 2, 3, 4].map((i) =>
-        `<line x1="0" x2="${width}" y1="${(i / 5) * height}" y2="${(i / 5) * height}" stroke="var(--line-2)" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join('');
+    const x = (i) => (i / (values.length - 1)) * width;
+    const y = (v) => height - (v / niceMax) * height;
+    const coords = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((tk) =>
+        `<line x1="0" x2="${width}" y1="${(height * tk).toFixed(1)}" y2="${(height * tk).toFixed(1)}"/>`).join('');
+    const yLabels = [1, 0.75, 0.5, 0.25, 0].map((tk) => `<span>${formatY(niceMax * tk)}</span>`).join('');
+    const first = new Date(String(points[0].ts).replace(' ', 'T'));
+    const last = new Date(String(points.at(-1).ts).replace(' ', 'T'));
+    const longSpan = (last - first) > 2 * 86400 * 1000;
+    const mid = Math.floor((points.length - 1) / 2);
+    const xLabels = [0, mid, points.length - 1].map((i) => `<span>${fmtTs(points[i].ts, longSpan)}</span>`).join('');
     return `
-    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="chart" role="img">
-        ${gridLines}
-        <polygon points="0,${height} ${coords} ${width},${height}" fill="${color}" opacity="0.1"/>
-        <polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.8"
-            vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
-    </svg>
-    <div class="chart-meta mono">max ${formatY(max / 1.1)} · ${points.length} točaka</div>`;
+    <div class="g-chart" style="--gh:${height}px">
+        <div class="g-yaxis">${yLabels}</div>
+        <div class="g-plot">
+            <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="g-svg" role="img">
+                <g class="g-grid">${grid}</g>
+                <polygon points="0,${height} ${coords} ${width},${height}" fill="${color}" opacity="0.13"/>
+                <polyline points="${coords}" fill="none" stroke="${color}" stroke-width="2"
+                    vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+            </svg>
+        </div>
+    </div>
+    <div class="g-xaxis">${xLabels}</div>`;
 }
 
 const bps = (v) => `${fmtBytes(v)}/s`;
