@@ -872,3 +872,16 @@ a.site-name:hover { color: var(--accent-deep); text-decoration: underline; }
 .about-link strong { font-size: var(--fs-sm); }
 .about-link span { color: var(--ink-3); font-size: var(--fs-xs); }
 .about-foot { text-align: center; color: var(--ink-3); font-size: var(--fs-xs); padding: 20px 0 8px; }
+
+/* 3-stupčani grid + collapsible kartica (PHP postavke i sl.) */
+.grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.span-all { grid-column: 1 / -1; }
+.card-collapse { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.card-collapse::-webkit-details-marker { display: none; }
+.card-collapse h2 { margin: 0; }
+.card-collapse > svg { width: 14px; height: 14px; color: var(--ink-3); transition: transform .2s; flex-shrink: 0; }
+details[open] > .card-collapse > svg { transform: rotate(90deg); }
+.php-foot { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+.php-foot .hint { flex: 1; }
+@media (max-width: 720px) { .grid.cols-3 { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 480px) { .grid.cols-3 { grid-template-columns: 1fr; } }

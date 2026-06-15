@@ -1214,21 +1214,21 @@ function phpSettingsCard(vhost) {
         ['post_max_size', '128M'], ['upload_max_filesize', '128M'], ['max_input_vars', '5000'],
     ];
     return `
-    <div class="card mt">
-        <div class="page-head"><h2>${t('php.title')}</h2><span class="spacer"></span>
-            <span class="hint mono">PHP ${esc(vhost.php_version)}</span></div>
-        <form id="phpform">
+    <details class="card php-card mt">
+        <summary class="card-collapse">${icon('chevR')}<h2>${t('php.title')}</h2><span class="spacer"></span>
+            <span class="hint mono">PHP ${esc(vhost.php_version)}</span></summary>
+        <form id="phpform" class="mt">
             <div class="grid cols-3">
                 ${num.map(([k, ph]) => `<div class="field"><label>${k}</label><input name="${k}" class="mono" placeholder="${ph}" value="${v(k)}"></div>`).join('')}
                 <div class="field"><label>opcache.enable</label>${sel('opcache.enable', [['1', 'on'], ['0', 'off']])}</div>
                 <div class="field"><label>display_errors</label>${sel('display_errors', [['On', 'On'], ['Off', 'Off']])}</div>
+                <div class="field span-all"><label>disable_functions</label>
+                    <input name="disable_functions" class="mono" placeholder="exec,system,shell_exec,passthru" value="${v('disable_functions')}"></div>
             </div>
-            <div class="field"><label>disable_functions</label>
-                <input name="disable_functions" class="mono" placeholder="exec,system,shell_exec,passthru" value="${v('disable_functions')}">
-                <span class="hint">${t('php.hint')}</span></div>
-            <button class="btn primary" type="submit">${t('common.save')}</button>
+            <div class="php-foot"><span class="hint">${t('php.hint')}</span>
+                <button class="btn primary" type="submit">${t('common.save')}</button></div>
         </form>
-    </div>`;
+    </details>`;
 }
 
 async function pageWebsiteDetail(id) {
