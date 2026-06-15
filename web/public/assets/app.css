@@ -917,3 +917,7 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 .usage-item { margin-bottom: 12px; }
 .usage-item:last-child { margin-bottom: 0; }
 .meter-warn { background: var(--warn); }
+
+/* WAF whitelist inline remove */
+.linkx { background: none; border: 0; color: inherit; cursor: pointer; font: inherit; padding: 0 0 0 2px; opacity: .7; }
+.linkx:hover { opacity: 1; }

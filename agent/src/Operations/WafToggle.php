@@ -52,10 +52,17 @@ final class WafToggle extends Operation
 
         if ($enabled) {
             $context->output("WAF ON za $domain (paranoia $paranoia)");
+            // Whitelist (SecRuleRemoveById) živi u zasebnom include fileu da ga
+            // toggle ne pregazi; kreiraj prazan ako ne postoji.
+            $whitelist_file = self::WAF_DIR . "/$domain.whitelist.conf";
+            if (!is_file($whitelist_file)) {
+                file_put_contents($whitelist_file, "# ForgePanel WAF whitelist za $domain (SecRuleRemoveById)\n");
+            }
             file_put_contents($rules_file, implode("\n", [
                 'modsecurity on;',
                 'modsecurity_rules \'SecAction "id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=' . $paranoia . '"\';',
                 'modsecurity_rules_file /etc/nginx/forgepanel/waf/crs-setup.conf;',
+                "modsecurity_rules_file $whitelist_file;",
             ]) . "\n");
         } else {
             $context->output("WAF OFF za $domain");

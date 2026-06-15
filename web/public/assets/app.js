@@ -3553,7 +3553,11 @@ async function pageFirewall() {
     main().innerHTML = `
     ${tabsHtml('protect', 'firewall')}
     <div class="card"><h2>ufw</h2><div id="ufw">${t('common.loading')}</div></div>
-    <div class="card mt"><h2>fail2ban</h2><div id="f2b">${t('common.loading')}</div></div>`;
+    <div class="card mt"><h2>fail2ban</h2><div id="f2b">${t('common.loading')}</div></div>
+    <div class="card mt"><div class="card-head"><h2>${t('waf.title')}</h2>
+        <select id="wafvh" class="mono"></select></div>
+        <p class="hint">${t('waf.hint')}</p>
+        <div id="wafbox">${t('common.loading')}</div></div>`;
 
     try {
         const rules = await api('/firewall/rules');
@@ -3591,6 +3595,67 @@ async function pageFirewall() {
         main().querySelector('.content')?.insertAdjacentHTML?.('beforeend', '');
         document.getElementById('ufw').innerHTML = `<div class="alert err">${esc(err.message)}</div>`;
     }
+
+    // ModSecurity WAF — vhost selektor + stanje/log/whitelist
+    const vhosts = await api('/vhosts').catch(() => []);
+    const sel = document.getElementById('wafvh');
+    if (!vhosts.length) {
+        document.getElementById('wafbox').innerHTML = `<div class="empty">${t('waf.no_vhosts')}</div>`;
+    } else {
+        sel.innerHTML = vhosts.map((v) => `<option value="${v.id}">${esc(v.domain)}</option>`).join('');
+        sel.addEventListener('change', () => loadWaf(Number(sel.value)));
+        loadWaf(Number(vhosts[0].id));
+    }
+}
+
+async function loadWaf(vhostId) {
+    const box = document.getElementById('wafbox');
+    if (!box) return;
+    box.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+    const [state_, log] = await Promise.all([
+        api(`/vhosts/${vhostId}/waf`).catch(() => ({ enabled: false, paranoia: 1, whitelist: [] })),
+        api(`/vhosts/${vhostId}/waf/log`).catch(() => ({ events: [] })),
+    ]);
+    const events = log.events || [];
+    box.innerHTML = `
+        <div class="row" style="gap:12px;align-items:center;flex-wrap:wrap">
+            <label class="inline" style="gap:8px"><input type="checkbox" id="wafon" ${state_.enabled ? 'checked' : ''}> ${t('waf.engine')}</label>
+            <label class="inline mono" style="gap:6px">${t('waf.paranoia')}
+                <select id="wafpar" class="mono">${[1, 2, 3, 4].map((p) => `<option ${p === state_.paranoia ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
+            <button class="btn sm primary" id="wafapply">${t('common.save')}</button>
+        </div>
+        ${state_.whitelist.length ? `<div class="mt"><b class="small">${t('waf.whitelisted')}:</b>
+            ${state_.whitelist.map((id) => `<span class="badge ok mono">${esc(id)} <button class="linkx" data-unwl="${esc(id)}">✕</button></span>`).join(' ')}</div>` : ''}
+        <h2 class="mt">${t('waf.blocked')}</h2>
+        ${events.length ? `<table class="data"><thead><tr>
+            <th>${t('waf.rule')}</th><th>${t('waf.message')}</th><th class="hide-sm">URI</th><th class="num">${t('deliver.count')}</th><th></th>
+        </tr></thead><tbody>
+        ${events.map((e) => `<tr>
+            <td class="mono">${esc(e.rule_id)}</td>
+            <td class="small">${esc((e.msg || '').slice(0, 70))}</td>
+            <td class="mono small hide-sm">${esc((e.uri || '').slice(0, 40))}</td>
+            <td class="num mono">${e.count}</td>
+            <td class="num">${state_.whitelist.includes(e.rule_id) ? `<span class="badge ok">${t('waf.allowed')}</span>` : `<button class="btn sm" data-wl="${esc(e.rule_id)}">${t('waf.whitelist')}</button>`}</td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('waf.no_blocks')}</div>`}`;
+
+    document.getElementById('wafapply').addEventListener('click', async () => {
+        try {
+            const r = await api(`/vhosts/${vhostId}/waf`, { method: 'POST', body: {
+                enabled: document.getElementById('wafon').checked,
+                paranoia: Number(document.getElementById('wafpar').value),
+            } });
+            watchTask(r.task_id, 'waf.toggle');
+            toast(t('waf.applied'));
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    box.querySelectorAll('[data-wl]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api(`/vhosts/${vhostId}/waf/whitelist`, { method: 'POST', body: { rule_id: b.dataset.wl } }); loadWaf(vhostId); toast(t('waf.whitelisted_ok')); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    box.querySelectorAll('[data-unwl]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api(`/vhosts/${vhostId}/waf/whitelist/${b.dataset.unwl}`, { method: 'DELETE' }); loadWaf(vhostId); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
 }
 
 // ---------------------------------------------------------------- updates (admin)

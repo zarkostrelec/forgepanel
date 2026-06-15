@@ -46,6 +46,7 @@ final class OperationRegistry
         'config.history'    => Operations\ConfigHistory::class,
         'migrator.cpanel_parse' => Operations\MigratorCpanelParse::class,
         'waf.toggle'        => Operations\WafToggle::class,
+        'waf.rule'          => Operations\WafRule::class,
         'country.block'     => Operations\CountryBlock::class,
         'node.app'          => Operations\NodeApp::class,
         'terminal.exec'     => Operations\TerminalExec::class,

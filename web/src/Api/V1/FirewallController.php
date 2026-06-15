@@ -21,7 +21,81 @@ final class FirewallController extends Controller
         $router->add('POST', '/api/v1/firewall/ban', $this->ban(...));
         $router->add('POST', '/api/v1/firewall/unban', $this->unban(...));
         $router->add('POST', '/api/v1/firewall/country-block', $this->countryBlock(...));
+        $router->add('GET', '/api/v1/vhosts/{id}/waf', $this->wafState(...));
         $router->add('POST', '/api/v1/vhosts/{id}/waf', $this->waf(...));
+        $router->add('GET', '/api/v1/vhosts/{id}/waf/log', $this->wafLog(...));
+        $router->add('POST', '/api/v1/vhosts/{id}/waf/whitelist', $this->wafWhitelistAdd(...));
+        $router->add('DELETE', '/api/v1/vhosts/{id}/waf/whitelist/{rule}', $this->wafWhitelistDel(...));
+    }
+
+    /** WAF stanje: engine on/off, paranoia i whitelistana pravila. */
+    private function wafState(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'firewall:read');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $row = $this->app->db->one("SELECT value FROM settings WHERE `key` = ?", ['waf_' . $vhost['id']]);
+        $cfg = $row === null ? [] : json_decode((string) $row['value'], true);
+        $whitelist = array_column(
+            $this->app->db->all(
+                "SELECT rule_id FROM waf_rules WHERE vhost_id = ? AND action = 'whitelist' AND rule_id <> 'engine' ORDER BY rule_id",
+                [(int) $vhost['id']]
+            ),
+            'rule_id'
+        );
+        Response::ok([
+            'domain' => $vhost['domain'],
+            'enabled' => (bool) ($cfg['enabled'] ?? false),
+            'paranoia' => (int) ($cfg['paranoia'] ?? 1),
+            'whitelist' => $whitelist,
+        ]);
+    }
+
+    /** Blokirani zahtjevi (ModSecurity log) za vhost. */
+    private function wafLog(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'firewall:read');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        Response::ok($this->app->agent->call('waf.rule', [
+            'action' => 'log', 'domain' => $vhost['domain'],
+        ], timeout_s: 30));
+    }
+
+    private function wafWhitelistAdd(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'firewall:write');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $rule_id = (string) ($request->str('rule_id') ?? '');
+        if (!preg_match('/^\d{1,9}$/', $rule_id)) {
+            throw new HttpException(422, 'invalid_rule_id');
+        }
+        $result = $this->app->agent->call('waf.rule', [
+            'action' => 'whitelist_add', 'domain' => $vhost['domain'], 'rule_id' => $rule_id,
+        ], timeout_s: 30);
+        $this->app->db->run(
+            "INSERT INTO waf_rules (vhost_id, rule_id, action) VALUES (?, ?, 'whitelist')",
+            [(int) $vhost['id'], $rule_id]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'firewall.waf_whitelist', ['domain' => $vhost['domain'], 'rule_id' => $rule_id], $request->ip);
+        Response::ok($result);
+    }
+
+    private function wafWhitelistDel(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'firewall:write');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $rule_id = (string) $request->param('rule');
+        if (!preg_match('/^\d{1,9}$/', $rule_id)) {
+            throw new HttpException(422, 'invalid_rule_id');
+        }
+        $result = $this->app->agent->call('waf.rule', [
+            'action' => 'whitelist_remove', 'domain' => $vhost['domain'], 'rule_id' => $rule_id,
+        ], timeout_s: 30);
+        $this->app->db->run(
+            "DELETE FROM waf_rules WHERE vhost_id = ? AND rule_id = ? AND action = 'whitelist'",
+            [(int) $vhost['id'], $rule_id]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'firewall.waf_unwhitelist', ['domain' => $vhost['domain'], 'rule_id' => $rule_id], $request->ip);
+        Response::ok($result);
     }
 
     /** Country blocking (ipset GeoIP) — admin. */
@@ -51,13 +125,19 @@ final class FirewallController extends Controller
     {
         $ctx = $this->ctx($request, 'firewall:write');
         $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $enabled = (bool) ($request->body['enabled'] ?? false);
+        $paranoia = max(1, min(4, $request->int('paranoia', 1) ?? 1));
         $task_id = $this->app->tasks->enqueue('waf.toggle', [
             'vhost_id' => (int) $vhost['id'],
             'domain' => $vhost['domain'],
-            'enabled' => (bool) ($request->body['enabled'] ?? false),
-            'paranoia' => $request->int('paranoia', 1),
+            'enabled' => $enabled,
+            'paranoia' => $paranoia,
         ], $ctx->user_id);
-        $this->app->audit->log($ctx->user_id, $ctx->email, 'firewall.waf', ['domain' => $vhost['domain'], 'enabled' => $request->body['enabled'] ?? false], $request->ip);
+        $this->app->db->run(
+            "INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
+            ['waf_' . $vhost['id'], json_encode(['enabled' => $enabled, 'paranoia' => $paranoia])]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'firewall.waf', ['domain' => $vhost['domain'], 'enabled' => $enabled], $request->ip);
         Response::ok(['task_id' => $task_id], 202);
     }
 
