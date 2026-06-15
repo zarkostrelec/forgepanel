@@ -3103,19 +3103,26 @@ async function pageUsers() {
             </td></tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`;
 
     const canEditPlan = (p) => state.me.role === 'admin' || p.owner_user_id != null;
-    document.getElementById('plans').innerHTML = `
-        <table class="data"><tbody>
-        ${plans.map((p) => `<tr>
-            <td class="mono">${esc(p.name)}${isResellerPlan(p) ? ` <span class="badge warn">${t('plan.reseller_tag')}</span>` : ''}</td>
+    const planRow = (p) => `<tr>
+            <td class="mono">${esc(p.name)}</td>
             <td class="mono">${fmtBytes(p.disk_bytes)} · ${p.max_domains} domena · ${p.max_mailboxes} mail · ${p.max_databases} baza</td>
             <td class="mono">${(JSON.parse(p.php_versions || '[]')).join(', ')}</td>
             <td class="num">${canEditPlan(p) ? `
                 <button class="btn ghost" data-pedit="${p.id}">${t('common.edit')}</button>
                 <button class="btn danger" data-pdel="${p.id}">${t('common.delete')}</button>` : ''}</td>
-        </tr>`).join('') || `<tr><td><div class="empty">0</div></td></tr>`}
-        </tbody></table>
-        <button class="btn mt" id="newplan">${icon('plus')}${t('users.new_plan')}</button>`;
+        </tr>`;
+    const planTable = (arr) => `<table class="data"><tbody>${arr.map(planRow).join('') || `<tr><td><div class="empty">0</div></td></tr>`}</tbody></table>`;
+    const hostingPlans = plans.filter((p) => !isResellerPlan(p));
+    const resellerPkgs = plans.filter(isResellerPlan);
+    document.getElementById('plans').innerHTML = `
+        ${planTable(hostingPlans)}
+        <button class="btn mt" id="newplan">${icon('plus')}${t('users.new_plan')}</button>
+        ${state.me.role === 'admin' ? `
+            <h3 class="subhead">${t('users.reseller_pkgs')}</h3>
+            ${planTable(resellerPkgs)}
+            <button class="btn mt" id="newpkg">${icon('plus')}${t('users.new_pkg')}</button>` : ''}`;
     document.getElementById('newplan').addEventListener('click', () => planModal());
+    document.getElementById('newpkg')?.addEventListener('click', () => planModal(null, true));
     main().querySelectorAll('[data-pedit]').forEach((b) => b.addEventListener('click', () => planModal(plans.find((p) => String(p.id) === b.dataset.pedit))));
     main().querySelectorAll('[data-pdel]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(t('common.confirm_delete'))) return;
@@ -3164,8 +3171,9 @@ function userModal(user = null, plans = []) {
     const edit = user != null;
     const clientPlans = plans.filter((p) => !isResellerPlan(p));
     const resellerPlans = plans.filter((p) => isResellerPlan(p));
+    const curPlan = edit && user.plan_id != null ? String(user.plan_id) : '';
     const planOpts = (arr) => `<option value="">${t('users.no_plan')}</option>` +
-        arr.map((p) => `<option value="${p.id}">${esc(p.name)} — ${p.max_domains}d/${p.max_databases}b/${p.max_mailboxes}m</option>`).join('');
+        arr.map((p) => `<option value="${p.id}" ${String(p.id) === curPlan ? 'selected' : ''}>${esc(p.name)} — ${p.max_domains}d/${p.max_databases}b/${p.max_mailboxes}m</option>`).join('');
     const modal = openModal(`
         <div class="dialog-head"><h1>${edit ? t('users.edit') : t('users.new')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="uf">
@@ -3175,10 +3183,10 @@ function userModal(user = null, plans = []) {
                 <option value="client" ${edit && user.role === 'client' ? 'selected' : ''}>client</option>
                 ${isAdmin ? `<option value="reseller" ${edit && user.role === 'reseller' ? 'selected' : ''}>reseller</option><option value="admin" ${edit && user.role === 'admin' ? 'selected' : ''}>admin</option>` : ''}
             </select></div>
-            ${!edit ? `<div class="field" id="planwrap">
+            <div class="field" id="planwrap">
                 <label id="planlabel">${t('users.plan')}</label>
                 <select name="plan_id" id="uplan" class="mono">${planOpts(clientPlans)}</select>
-                <span class="hint" id="planhint"></span></div>` : ''}
+                <span class="hint" id="planhint"></span></div>
             <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
                 <button class="btn primary">${edit ? t('common.save') : t('common.create')}</button></div>
         </form>`);
@@ -3196,6 +3204,7 @@ function userModal(user = null, plans = []) {
             planWrap.style.display = '';
             if (r === 'reseller') { uplan.innerHTML = planOpts(resellerPlans); label.textContent = t('users.reseller_pkg'); hint.textContent = t('users.reseller_pkg_hint'); }
             else { uplan.innerHTML = planOpts(clientPlans); label.textContent = t('users.plan'); hint.textContent = ''; }
+            if (curPlan) uplan.value = curPlan;
         };
         roleSel.addEventListener('change', syncPlan);
         syncPlan();
@@ -3214,12 +3223,12 @@ function userModal(user = null, plans = []) {
     });
 }
 
-function planModal(plan = null) {
+function planModal(plan = null, presetReseller = false) {
     const edit = plan != null;
     const isAdmin = state.me.role === 'admin';
     const sel = edit ? JSON.parse(plan.php_versions || '[]') : ['8.4', '8.5'];
     const v = (def, key) => edit ? plan[key] : def;
-    const isResellerPkg = edit && planFeatures(plan).reseller === true;
+    const isResellerPkg = edit ? planFeatures(plan).reseller === true : presetReseller;
     const modal = openModal(`
         <div class="dialog-head"><h1>${edit ? t('users.edit_plan') : t('users.new_plan')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="pf">

@@ -65,16 +65,22 @@ final class UsersController extends Controller
         ];
     }
 
-    /** Već raspodijeljeno klijentima resellera (zbroj limita planova njihovih aktivnih pretplata). */
-    private function resellerAllocated(int $reseller_id): array
+    /**
+     * Već raspodijeljeno klijentima resellera (zbroj limita planova njihovih aktivnih
+     * pretplata). $exclude_user_id se izostavi (npr. pri izmjeni plana tog klijenta).
+     */
+    private function resellerAllocated(int $reseller_id, int $exclude_user_id = 0): array
     {
-        $row = $this->app->db->one(
-            "SELECT COALESCE(SUM(p.max_domains),0) AS max_domains, COALESCE(SUM(p.max_mailboxes),0) AS max_mailboxes,
+        $sql = "SELECT COALESCE(SUM(p.max_domains),0) AS max_domains, COALESCE(SUM(p.max_mailboxes),0) AS max_mailboxes,
                     COALESCE(SUM(p.max_databases),0) AS max_databases, COALESCE(SUM(p.disk_bytes),0) AS disk_bytes
              FROM subscriptions s JOIN users u ON u.id = s.user_id JOIN plans p ON p.id = s.plan_id
-             WHERE u.reseller_id = ? AND s.status = 'active'",
-            [$reseller_id]
-        );
+             WHERE u.reseller_id = ? AND s.status = 'active'";
+        $params = [$reseller_id];
+        if ($exclude_user_id > 0) {
+            $sql .= ' AND u.id <> ?';
+            $params[] = $exclude_user_id;
+        }
+        $row = $this->app->db->one($sql, $params);
         return [
             'max_domains' => (int) ($row['max_domains'] ?? 0), 'max_mailboxes' => (int) ($row['max_mailboxes'] ?? 0),
             'max_databases' => (int) ($row['max_databases'] ?? 0), 'disk_bytes' => (int) ($row['disk_bytes'] ?? 0),
@@ -82,13 +88,13 @@ final class UsersController extends Controller
     }
 
     /** Reseller ne smije prodati više nego što mu paket dopušta. Bez paketa = bez gatea. */
-    private function assertResellerCapacity(int $reseller_id, int $new_plan_id): void
+    private function assertResellerCapacity(int $reseller_id, int $new_plan_id, int $exclude_user_id = 0): void
     {
         $ceiling = $this->resellerCeiling($reseller_id);
         if ($ceiling === null) {
             return;
         }
-        $alloc = $this->resellerAllocated($reseller_id);
+        $alloc = $this->resellerAllocated($reseller_id, $exclude_user_id);
         $new = $this->app->db->one(
             'SELECT max_domains, max_mailboxes, max_databases, disk_bytes FROM plans WHERE id = ?',
             [$new_plan_id]
@@ -105,9 +111,10 @@ final class UsersController extends Controller
         $ctx = $this->ctx($request, 'users:read');
         $ctx->requireRole('admin', 'reseller');
         // Reseller vidi samo svoje klijente; admin sve
+        $plan_sub = "(SELECT s.plan_id FROM subscriptions s WHERE s.user_id = u.id AND s.status = 'active' ORDER BY s.id LIMIT 1) AS plan_id";
         $rows = $ctx->isAdmin()
-            ? $this->app->db->all('SELECT u.id, u.email, u.status, u.last_login_at, r.name AS role, u.reseller_id FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.id')
-            : $this->app->db->all('SELECT u.id, u.email, u.status, u.last_login_at, r.name AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.reseller_id = ? ORDER BY u.id', [$ctx->user_id]);
+            ? $this->app->db->all("SELECT u.id, u.email, u.status, u.last_login_at, r.name AS role, u.reseller_id, $plan_sub FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.id")
+            : $this->app->db->all("SELECT u.id, u.email, u.status, u.last_login_at, r.name AS role, $plan_sub FROM users u JOIN roles r ON r.id = u.role_id WHERE u.reseller_id = ? ORDER BY u.id", [$ctx->user_id]);
         Response::ok($rows);
     }
 
@@ -238,12 +245,33 @@ final class UsersController extends Controller
             $params[] = $role_row['id'];
         }
 
-        if ($fields === []) {
-            throw new HttpException(422, 'nothing_to_update');
+        if ($fields !== []) {
+            $up = $params;
+            $up[] = $user['id'];
+            $this->app->db->run('UPDATE users SET ' . implode(', ', $fields) . ' WHERE id = ?', $up);
         }
 
-        $params[] = $user['id'];
-        $this->app->db->run('UPDATE users SET ' . implode(', ', $fields) . ' WHERE id = ?', $params);
+        // Promjena paketa/plana (opcionalno) — upsert aktivne pretplate
+        $plan_changed = false;
+        $plan_id = $request->int('plan_id');
+        if ($plan_id !== null && $plan_id > 0) {
+            $this->assertPlanOwnership($ctx, $plan_id);
+            $eff_role = $role ?? $this->roleName((int) $user['role_id']);
+            if (!$ctx->isAdmin() && $eff_role === 'client') {
+                $this->assertResellerCapacity($ctx->user_id, $plan_id, (int) $user['id']);
+            }
+            $sub = $this->app->db->one("SELECT id FROM subscriptions WHERE user_id = ? AND status = 'active' ORDER BY id LIMIT 1", [$user['id']]);
+            if ($sub === null) {
+                $this->app->db->run('INSERT INTO subscriptions (user_id, plan_id) VALUES (?, ?)', [$user['id'], $plan_id]);
+            } else {
+                $this->app->db->run('UPDATE subscriptions SET plan_id = ? WHERE id = ?', [$plan_id, $sub['id']]);
+            }
+            $plan_changed = true;
+        }
+
+        if ($fields === [] && !$plan_changed) {
+            throw new HttpException(422, 'nothing_to_update');
+        }
         $this->app->audit->log($ctx->user_id, $ctx->email, 'user.update', ['user_id' => (int) $user['id']], $request->ip);
         Response::ok();
     }
@@ -393,6 +421,12 @@ final class UsersController extends Controller
         $this->app->db->run('DELETE FROM plans WHERE id = ?', [$plan['id']]);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'plan.delete', ['plan_id' => (int) $plan['id']], $request->ip);
         Response::ok();
+    }
+
+    private function roleName(int $role_id): string
+    {
+        $row = $this->app->db->one('SELECT name FROM roles WHERE id = ?', [$role_id]);
+        return (string) ($row['name'] ?? 'client');
     }
 
     /** True ako je dani korisnik aktivan admin i jedini takav (suspend/delete bi zaključao panel). */

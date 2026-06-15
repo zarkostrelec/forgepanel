@@ -365,6 +365,8 @@
     "users.reseller_pkg_hint": "Total resources the reseller may allocate to their clients.",
     "users.reseller_quota_exceeded": "Reseller package has no free resources for this plan.",
     "users.last_admin": "This is the last active admin — it cannot be suspended or deleted (it would lock you out).",
+    "users.reseller_pkgs": "Reseller packages",
+    "users.new_pkg": "New reseller package",
     "plan.reseller_pkg": "Reseller package (group)",
     "plan.reseller_pkg_hint": "Plan meant to be assigned to resellers — defines how much they can resell in total.",
     "plan.reseller_tag": "reseller",
