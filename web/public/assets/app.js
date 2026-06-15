@@ -1480,28 +1480,52 @@ function terminalSection(vhost, container) {
     container.querySelector('#tcmd').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
 }
 
-function appsSection(vhost, container) {
+const APP_ICONS = { wordpress: 'box', nextcloud: 'cloud', ghost: 'sparkle', node: 'zap', python: 'terminal' };
+
+async function appsSection(vhost, container) {
+    container.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+    const catalog = await api('/apps/catalog').catch(() => []);
     container.innerHTML = `
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn primary" id="wpinstall">${icon('box')}${t('apps.install_wp')}</button>
-            <button class="btn" id="wpcheck">${icon('shield')}${t('apps.wp_integrity')}</button>
+        <div class="app-grid">
+            ${catalog.map((a) => `<div class="app-card">
+                <div class="app-h">${icon(APP_ICONS[a.id] || 'box')}<b>${esc(a.name)}</b></div>
+                <p class="hint">${esc(a.desc)}</p>
+                <button class="btn primary sm" data-app="${esc(a.id)}">${icon('plus')}${t('apps.install')}</button>
+            </div>`).join('')}
         </div>
+        <div class="row mt" style="gap:8px"><button class="btn sm" id="wpcheck">${icon('shield')}${t('apps.wp_integrity')}</button></div>
         <div id="appsresult" class="mt"></div>`;
-    container.querySelector('#wpinstall').addEventListener('click', async () => {
-        const db = prompt(t('apps.wp_db_prompt'), 'wp_' + vhost.domain.replace(/[^a-z0-9]/g, '_').slice(0, 40));
-        if (!db) return;
-        try {
-            const r = await api(`/vhosts/${vhost.id}/apps/wordpress`, { method: 'POST', body: { db_name: db } });
-            watchTask(r.task_id, `WordPress ${vhost.domain}`);
-            container.querySelector('#appsresult').innerHTML = `<div class="alert ok">${t('apps.wp_db_created')}: <span class="mono">${esc(db)}</span> / <span class="mono">${esc(r.db_password)}</span></div>`;
-        } catch (err) { toast(err.message, 'err'); }
-    });
+
+    const result = container.querySelector('#appsresult');
+    container.querySelectorAll('[data-app]').forEach((b) => b.addEventListener('click', () => installApp(vhost, b.dataset.app, result)));
     container.querySelector('#wpcheck').addEventListener('click', async () => {
         try {
             const r = await api(`/vhosts/${vhost.id}/apps/wordpress/checksums`, { method: 'POST' });
             watchTask(r.task_id, `WP integritet ${vhost.domain}`);
         } catch (err) { toast(err.message, 'err'); }
     });
+}
+
+async function installApp(vhost, appId, result) {
+    try {
+        if (appId === 'node' || appId === 'python') {
+            const entry = prompt(t(appId === 'node' ? 'apps.node_entry' : 'apps.python_entry'), appId === 'node' ? 'index.js' : 'app:app');
+            if (!entry) return;
+            const r = await api(`/vhosts/${vhost.id}/${appId}`, { method: 'POST', body: { entry } });
+            watchTask(r.task_id, `${appId} ${vhost.domain}`);
+            return;
+        }
+        // PHP/Node CMS — kreira bazu automatski
+        const r = await api(`/vhosts/${vhost.id}/apps/${appId}`, { method: 'POST', body: {} });
+        watchTask(r.task_id, `${appId} ${vhost.domain}`);
+        if (appId === 'wordpress') {
+            result.innerHTML = `<div class="alert ok">${t('apps.wp_db_created')}: <span class="mono">${esc(r.db_name)}</span> / <span class="mono">${esc(r.db_password)}</span></div>`;
+        } else if (appId === 'nextcloud') {
+            result.innerHTML = `<div class="alert ok">${t('apps.nc_admin')}: <span class="mono">${esc(r.admin_user)}</span> / <span class="mono">${esc(r.admin_password)}</span></div>`;
+        } else if (appId === 'ghost') {
+            result.innerHTML = `<div class="alert ok">${t('apps.ghost_started')}</div>`;
+        }
+    } catch (err) { toast(err.message, 'err'); }
 }
 
 async function stagingSection(vhost, container) {

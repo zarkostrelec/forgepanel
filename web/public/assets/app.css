@@ -921,3 +921,10 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 /* WAF whitelist inline remove */
 .linkx { background: none; border: 0; color: inherit; cursor: pointer; font: inherit; padding: 0 0 0 2px; opacity: .7; }
 .linkx:hover { opacity: 1; }
+
+/* marketplace aplikacija */
+.app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.app-card { border: 1px solid var(--line); border-radius: var(--radius, 10px); padding: 14px; background: var(--surface-2); display: flex; flex-direction: column; }
+.app-h { display: flex; align-items: center; gap: 8px; font-size: 1rem; margin-bottom: 4px; }
+.app-h svg { width: 18px; height: 18px; }
+.app-card .hint { flex: 1; margin: 4px 0 10px; }

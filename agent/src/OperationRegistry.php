@@ -49,6 +49,8 @@ final class OperationRegistry
         'waf.rule'          => Operations\WafRule::class,
         'country.block'     => Operations\CountryBlock::class,
         'node.app'          => Operations\NodeApp::class,
+        'python.app'        => Operations\PythonApp::class,
+        'apps.install'      => Operations\AppInstall::class,
         'terminal.exec'     => Operations\TerminalExec::class,
         'deliverability.check' => Operations\DeliverabilityCheck::class,
         'alarm.test'        => Operations\AlarmTest::class,

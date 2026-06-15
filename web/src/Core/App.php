@@ -81,6 +81,7 @@ final class App
             new Api\V1\MigratorController($this),
             new Api\V1\ProvisioningController($this),
             new Api\V1\NodeController($this),
+            new Api\V1\PythonController($this),
             new Api\V1\AssistantController($this),
             new Api\V1\TerminalController($this),
             new Api\V1\ModulesController($this),
