@@ -28,6 +28,76 @@ final class UsersController extends Controller
         $router->add('POST', '/api/v1/plans', $this->createPlan(...));
         $router->add('PUT', '/api/v1/plans/{id}', $this->updatePlan(...));
         $router->add('DELETE', '/api/v1/plans/{id}', $this->deletePlan(...));
+        $router->add('GET', '/api/v1/reseller/quota', $this->resellerQuota(...));
+    }
+
+    /**
+     * Reseller kvota: ukupni limit (njegov dodijeljeni paket) vs. već raspodijeljeno
+     * klijentima. Reseller vidi svoj; admin može tražiti ?reseller_id.
+     */
+    private function resellerQuota(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'users:read');
+        $ctx->requireRole('admin', 'reseller');
+        $rid = $ctx->isAdmin() && $request->query('reseller_id') !== null
+            ? (int) $request->query('reseller_id') : $ctx->user_id;
+        Response::ok([
+            'reseller_id' => $rid,
+            'ceiling' => $this->resellerCeiling($rid),
+            'allocated' => $this->resellerAllocated($rid),
+        ]);
+    }
+
+    /** Ukupni limit resellera (zbroj njegovih aktivnih pretplata-paketa) ili null ako nema paket. */
+    private function resellerCeiling(int $reseller_id): ?array
+    {
+        $row = $this->app->db->one(
+            "SELECT COALESCE(SUM(p.max_domains),0) AS max_domains, COALESCE(SUM(p.max_mailboxes),0) AS max_mailboxes,
+                    COALESCE(SUM(p.max_databases),0) AS max_databases, COALESCE(SUM(p.disk_bytes),0) AS disk_bytes,
+                    COUNT(*) AS n
+             FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+             WHERE s.user_id = ? AND s.status = 'active'",
+            [$reseller_id]
+        );
+        return ($row === null || (int) $row['n'] === 0) ? null : [
+            'max_domains' => (int) $row['max_domains'], 'max_mailboxes' => (int) $row['max_mailboxes'],
+            'max_databases' => (int) $row['max_databases'], 'disk_bytes' => (int) $row['disk_bytes'],
+        ];
+    }
+
+    /** Već raspodijeljeno klijentima resellera (zbroj limita planova njihovih aktivnih pretplata). */
+    private function resellerAllocated(int $reseller_id): array
+    {
+        $row = $this->app->db->one(
+            "SELECT COALESCE(SUM(p.max_domains),0) AS max_domains, COALESCE(SUM(p.max_mailboxes),0) AS max_mailboxes,
+                    COALESCE(SUM(p.max_databases),0) AS max_databases, COALESCE(SUM(p.disk_bytes),0) AS disk_bytes
+             FROM subscriptions s JOIN users u ON u.id = s.user_id JOIN plans p ON p.id = s.plan_id
+             WHERE u.reseller_id = ? AND s.status = 'active'",
+            [$reseller_id]
+        );
+        return [
+            'max_domains' => (int) ($row['max_domains'] ?? 0), 'max_mailboxes' => (int) ($row['max_mailboxes'] ?? 0),
+            'max_databases' => (int) ($row['max_databases'] ?? 0), 'disk_bytes' => (int) ($row['disk_bytes'] ?? 0),
+        ];
+    }
+
+    /** Reseller ne smije prodati više nego što mu paket dopušta. Bez paketa = bez gatea. */
+    private function assertResellerCapacity(int $reseller_id, int $new_plan_id): void
+    {
+        $ceiling = $this->resellerCeiling($reseller_id);
+        if ($ceiling === null) {
+            return;
+        }
+        $alloc = $this->resellerAllocated($reseller_id);
+        $new = $this->app->db->one(
+            'SELECT max_domains, max_mailboxes, max_databases, disk_bytes FROM plans WHERE id = ?',
+            [$new_plan_id]
+        ) ?? throw new HttpException(422, 'invalid_plan');
+        foreach (['max_domains', 'max_mailboxes', 'max_databases', 'disk_bytes'] as $k) {
+            if ((int) $alloc[$k] + (int) $new[$k] > (int) $ceiling[$k]) {
+                throw new HttpException(422, 'reseller_quota_exceeded');
+            }
+        }
     }
 
     private function index(Request $request): never
@@ -73,10 +143,14 @@ final class UsersController extends Controller
         );
         $user_id = $this->app->db->lastId();
 
-        // Opcionalno: odmah subscription na plan
+        // Opcionalno: odmah subscription na plan (klijent → plan; reseller → paket/kvota)
         $plan_id = $request->int('plan_id');
-        if ($plan_id !== null && $role === 'client') {
+        if ($plan_id !== null && in_array($role, ['client', 'reseller'], true)) {
             $this->assertPlanOwnership($ctx, $plan_id);
+            // Reseller koji kreira klijenta: ne smije premašiti svoj paket
+            if (!$ctx->isAdmin() && $role === 'client') {
+                $this->assertResellerCapacity($ctx->user_id, $plan_id);
+            }
             $this->app->db->run('INSERT INTO subscriptions (user_id, plan_id) VALUES (?, ?)', [$user_id, $plan_id]);
         }
 
@@ -230,8 +304,11 @@ final class UsersController extends Controller
             throw new HttpException(422, 'invalid_php_versions');
         }
 
-        // Reseller plan ne smije premašiti resellerove ukupne limite (pojednostavljeno: njegov plan)
         $owner = $ctx->isAdmin() ? null : $ctx->user_id;
+        // "Reseller paket" (grupa) = plan koji se dodjeljuje reselleru kao njegova
+        // ukupna kvota; samo admin ga smije označiti.
+        $features = is_array($request->body['features'] ?? null) ? $request->body['features'] : [];
+        $features['reseller'] = $ctx->isAdmin() && (bool) ($request->body['reseller'] ?? false);
 
         $this->app->db->run(
             'INSERT INTO plans (owner_user_id, name, disk_bytes, max_domains, max_mailboxes, max_databases, php_versions, features, cpu_quota_pct, memory_max_bytes, tasks_max)
@@ -243,7 +320,7 @@ final class UsersController extends Controller
                 max(0, $request->int('max_mailboxes', 10)),
                 max(0, $request->int('max_databases', 5)),
                 json_encode(array_values($php_versions)),
-                json_encode($request->body['features'] ?? []),
+                json_encode($features),
                 max(10, min(100, $request->int('cpu_quota_pct', 100))),
                 max(134217728, $request->int('memory_max_bytes', 536870912)),
                 max(32, $request->int('tasks_max', 128)),
@@ -269,6 +346,13 @@ final class UsersController extends Controller
             throw new HttpException(422, 'invalid_php_versions');
         }
 
+        $features = is_array($request->body['features'] ?? null)
+            ? $request->body['features']
+            : (json_decode($plan['features'] ?: '{}', true) ?: []);
+        if (array_key_exists('reseller', $request->body)) {
+            $features['reseller'] = $ctx->isAdmin() && (bool) $request->body['reseller'];
+        }
+
         $this->app->db->run(
             'UPDATE plans SET name = ?, disk_bytes = ?, max_domains = ?, max_mailboxes = ?, max_databases = ?, php_versions = ?, features = ?, cpu_quota_pct = ?, memory_max_bytes = ?, tasks_max = ? WHERE id = ?',
             [
@@ -278,7 +362,7 @@ final class UsersController extends Controller
                 max(0, $request->int('max_mailboxes', (int) $plan['max_mailboxes'])),
                 max(0, $request->int('max_databases', (int) $plan['max_databases'])),
                 json_encode(array_values($php_versions)),
-                json_encode($request->body['features'] ?? json_decode($plan['features'] ?: '[]', true)),
+                json_encode($features),
                 max(10, min(100, $request->int('cpu_quota_pct', (int) $plan['cpu_quota_pct']))),
                 max(134217728, $request->int('memory_max_bytes', (int) $plan['memory_max_bytes'])),
                 max(32, $request->int('tasks_max', (int) $plan['tasks_max'])),

@@ -3045,13 +3045,20 @@ async function pageUsers() {
     <div class="page-head"><div class="spacer"></div>
         <button class="btn" id="brand">${t('users.branding')}</button>
         <button class="btn primary" id="newu">${icon('plus')}${t('users.new')}</button></div>
+    <div id="quota"></div>
     <div class="card" id="list">${t('common.loading')}</div>
     <div class="card mt"><h2>${t('users.plans')}</h2><div id="plans">${t('common.loading')}</div></div>`;
 
-    document.getElementById('newu').addEventListener('click', () => userModal());
     document.getElementById('brand').addEventListener('click', brandingModal);
 
     const [users, plans] = await Promise.all([api('/users'), api('/plans')]);
+    document.getElementById('newu').addEventListener('click', () => userModal(null, plans));
+
+    // Reseller: prikaz vlastite kvote (paket vs. raspodijeljeno klijentima)
+    if (state.me.role === 'reseller') {
+        const q = await api('/reseller/quota').catch(() => null);
+        if (q && q.ceiling) document.getElementById('quota').innerHTML = resellerQuotaCard(q);
+    }
     document.getElementById('list').innerHTML = users.length ? `
         <table class="data"><thead><tr><th>${t('auth.email')}</th><th>Rola</th><th>Status</th><th class="hide-sm">Zadnja prijava</th><th></th></tr></thead><tbody>
         ${users.map((u) => `<tr>
@@ -3069,7 +3076,7 @@ async function pageUsers() {
     document.getElementById('plans').innerHTML = `
         <table class="data"><tbody>
         ${plans.map((p) => `<tr>
-            <td class="mono">${esc(p.name)}</td>
+            <td class="mono">${esc(p.name)}${isResellerPlan(p) ? ` <span class="badge warn">${t('plan.reseller_tag')}</span>` : ''}</td>
             <td class="mono">${fmtBytes(p.disk_bytes)} · ${p.max_domains} domena · ${p.max_mailboxes} mail · ${p.max_databases} baza</td>
             <td class="mono">${(JSON.parse(p.php_versions || '[]')).join(', ')}</td>
             <td class="num">${canEditPlan(p) ? `
@@ -3090,7 +3097,7 @@ async function pageUsers() {
         try { await api(`/users/${b.dataset.toggle}/status`, { method: 'PUT', body: { status: b.dataset.status === 'active' ? 'suspended' : 'active' } }); pageUsers(); }
         catch (err) { toast(err.message, 'err'); }
     }));
-    main().querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => userModal(users.find((u) => String(u.id) === b.dataset.edit))));
+    main().querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => userModal(users.find((u) => String(u.id) === b.dataset.edit), plans)));
     main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(t('common.confirm_delete'))) return;
         try { await api(`/users/${b.dataset.del}`, { method: 'DELETE' }); pageUsers(); }
@@ -3098,41 +3105,96 @@ async function pageUsers() {
     }));
 }
 
-function userModal(user = null) {
+function planFeatures(p) { try { return JSON.parse(p.features || '{}') || {}; } catch { return {}; } }
+const isResellerPlan = (p) => planFeatures(p).reseller === true;
+
+// reseller kvota: paket (ceiling) vs. raspodijeljeno klijentima (allocated)
+function resellerQuotaCard(q) {
+    const c = q.ceiling, a = q.allocated;
+    const bar = (label, used, limit, fmt = (x) => x) => {
+        const pct = limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0;
+        const tone = pct >= 90 ? 'meter-bad' : (pct >= 75 ? 'meter-warn' : 'meter-ok');
+        return `<div class="usage-item"><div class="row" style="justify-content:space-between">
+            <span>${label}</span><span class="mono small">${fmt(used)} / ${fmt(limit)}</span></div>
+            <div class="meter"><span class="${tone}" style="width:${pct}%"></span></div></div>`;
+    };
+    return `<div class="card" style="margin-bottom:var(--gap)">
+        <div class="card-head"><h2>${t('reseller.quota')}</h2></div>
+        <p class="hint">${t('reseller.quota_hint')}</p>
+        ${bar(t('nav.websites'), a.max_domains, c.max_domains)}
+        ${bar(t('dash.mailboxes'), a.max_mailboxes, c.max_mailboxes)}
+        ${bar(t('nav.databases'), a.max_databases, c.max_databases)}
+        ${bar(t('dash.disk'), a.disk_bytes, c.disk_bytes, fmtBytes)}
+    </div>`;
+}
+
+function userModal(user = null, plans = []) {
     const isAdmin = state.me.role === 'admin';
     const edit = user != null;
+    const clientPlans = plans.filter((p) => !isResellerPlan(p));
+    const resellerPlans = plans.filter((p) => isResellerPlan(p));
+    const planOpts = (arr) => `<option value="">${t('users.no_plan')}</option>` +
+        arr.map((p) => `<option value="${p.id}">${esc(p.name)} — ${p.max_domains}d/${p.max_databases}b/${p.max_mailboxes}m</option>`).join('');
     const modal = openModal(`
         <div class="dialog-head"><h1>${edit ? t('users.edit') : t('users.new')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="uf">
             <div class="field"><label>${t('auth.email')}</label><input name="email" type="email" required class="mono" value="${edit ? esc(user.email) : ''}"></div>
             <div class="field"><label>${t('auth.password')}</label><input name="password" type="password" ${edit ? '' : 'required'} minlength="12" placeholder="${edit ? t('users.password_keep') : ''}"></div>
-            <div class="field"><label>Rola</label><select name="role" ${edit && !isAdmin ? 'disabled' : ''}>
+            <div class="field"><label>Rola</label><select name="role" id="urole" ${edit && !isAdmin ? 'disabled' : ''}>
                 <option value="client" ${edit && user.role === 'client' ? 'selected' : ''}>client</option>
                 ${isAdmin ? `<option value="reseller" ${edit && user.role === 'reseller' ? 'selected' : ''}>reseller</option><option value="admin" ${edit && user.role === 'admin' ? 'selected' : ''}>admin</option>` : ''}
             </select></div>
+            ${!edit ? `<div class="field" id="planwrap">
+                <label id="planlabel">${t('users.plan')}</label>
+                <select name="plan_id" id="uplan" class="mono">${planOpts(clientPlans)}</select>
+                <span class="hint" id="planhint"></span></div>` : ''}
             <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
                 <button class="btn primary">${edit ? t('common.save') : t('common.create')}</button></div>
         </form>`);
+
+    // Plan select ovisi o roli: client → klijentski planovi; reseller → reseller paketi
+    const roleSel = modal.querySelector('#urole');
+    const planWrap = modal.querySelector('#planwrap');
+    if (roleSel && planWrap) {
+        const syncPlan = () => {
+            const r = roleSel.value;
+            const uplan = modal.querySelector('#uplan');
+            const label = modal.querySelector('#planlabel');
+            const hint = modal.querySelector('#planhint');
+            if (r === 'admin') { planWrap.style.display = 'none'; return; }
+            planWrap.style.display = '';
+            if (r === 'reseller') { uplan.innerHTML = planOpts(resellerPlans); label.textContent = t('users.reseller_pkg'); hint.textContent = t('users.reseller_pkg_hint'); }
+            else { uplan.innerHTML = planOpts(clientPlans); label.textContent = t('users.plan'); hint.textContent = ''; }
+        };
+        roleSel.addEventListener('change', syncPlan);
+        syncPlan();
+    }
+
     modal.querySelector('#uf').addEventListener('submit', async (e) => {
         e.preventDefault();
         const body = Object.fromEntries(new FormData(e.target));
         if (edit && !body.password) delete body.password; // ne mijenjaj lozinku ako je prazna
+        if (body.plan_id === '' || body.plan_id == null) delete body.plan_id;
         try {
             if (edit) await api(`/users/${user.id}`, { method: 'PUT', body });
             else await api('/users', { method: 'POST', body });
             modal.close(); pageUsers();
-        } catch (err) { toast(err.message, 'err'); }
+        } catch (err) { toast(t('users.' + err.message) !== 'users.' + err.message ? t('users.' + err.message) : err.message, 'err'); }
     });
 }
 
 function planModal(plan = null) {
     const edit = plan != null;
+    const isAdmin = state.me.role === 'admin';
     const sel = edit ? JSON.parse(plan.php_versions || '[]') : ['8.4', '8.5'];
     const v = (def, key) => edit ? plan[key] : def;
+    const isResellerPkg = edit && planFeatures(plan).reseller === true;
     const modal = openModal(`
         <div class="dialog-head"><h1>${edit ? t('users.edit_plan') : t('users.new_plan')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="pf">
             <div class="field"><label>Naziv</label><input name="name" required value="${edit ? esc(plan.name) : ''}"></div>
+            ${isAdmin ? `<label class="inline" style="gap:8px;margin-bottom:10px"><input type="checkbox" name="reseller" ${isResellerPkg ? 'checked' : ''}> ${t('plan.reseller_pkg')}</label>
+                <span class="hint" style="display:block;margin:-6px 0 12px">${t('plan.reseller_pkg_hint')}</span>` : ''}
             <div class="grid cols-2">
                 <div class="field"><label>Disk (GB)</label><input name="disk_gb" type="number" value="${edit ? Math.round(plan.disk_bytes / 1073741824) : 10}" class="mono"></div>
                 <div class="field"><label>Max domena</label><input name="max_domains" type="number" value="${v(5, 'max_domains')}" class="mono"></div>
@@ -3157,6 +3219,7 @@ function planModal(plan = null) {
             max_mailboxes: Number(f.max_mailboxes),
             max_databases: Number(f.max_databases),
             php_versions: php,
+            reseller: f.reseller === 'on',
         };
         try {
             if (edit) await api(`/plans/${plan.id}`, { method: 'PUT', body });
