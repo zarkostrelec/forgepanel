@@ -424,7 +424,7 @@ const RAIL = [
     { id: 'backups', icon: 'download', label: 'nav.backups', key: 'a', pages: ['backups'] },
     { id: 'monitoring', icon: 'pulse', label: 'nav.monitoring', key: 'm', pages: ['monitoring', 'tasks'] },
     { id: 'protect', icon: 'shield', label: 'nav.protect', key: 'p', pages: ['ssl', 'dns', 'cloudflare', 'security', 'firewall'] },
-    { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config', 'system'] },
+    { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config', 'system', 'distribution'] },
     { id: 'users', icon: 'users', label: 'nav.users', key: 'o', roles: ['admin', 'reseller'], pages: ['users'] },
 ];
 const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
@@ -432,7 +432,7 @@ const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
 const TAB_GROUPS = {
     monitoring: [['monitoring', 'nav.monitoring', 'pulse'], ['tasks', 'nav.tasks', 'clock']],
     protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['cloudflare', 'nav.cloudflare', 'cloud', 'admin'], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
-    server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history'], ['system', 'nav.system', 'gear']],
+    server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history'], ['system', 'nav.system', 'gear'], ['distribution', 'nav.distribution', 'download']],
 };
 
 // tab strip za grupirane stranice (Zaštita: SSL · DNS · Sigurnost · Firewall, itd.)
@@ -2873,6 +2873,90 @@ function pageAssistant() {
 }
 
 // ---------------------------------------------------------------- config time-machine (admin)
+async function pageDistribution() {
+    setActive('distribution');
+    main().innerHTML = `${tabsHtml('server', 'distribution')}<div class="empty">${t('common.loading')}</div>`;
+    const [keys, node, releases] = await Promise.all([
+        api('/distribution/keys').catch(() => ({})),
+        api('/distribution/node').catch(() => ({})),
+        api('/distribution/releases').catch(() => []),
+    ]);
+    main().innerHTML = `${tabsHtml('server', 'distribution')}
+    <div class="card"><div class="card-head"><h2>${t('dist.master')}</h2></div>
+        <p class="hint" style="margin:0 0 var(--gap)">${t('dist.master_intro')}</p>
+        ${keys.has_key ? `
+            <div class="field"><label>${t('dist.pubkey')}</label>
+                <input class="mono" readonly value="${esc(keys.public_key || '')}" onclick="this.select()">
+                <span class="hint">${t('dist.pubkey_hint')}</span></div>` : `
+            <button class="btn" id="keygen">${icon('key')}${t('dist.keygen')}</button>`}
+        <form id="pubf" class="addform">
+            <div class="addform-h">${t('dist.publish')}</div>
+            <div class="grid cols-3">
+                <div class="field"><label>${t('dist.version')}</label><input name="version" class="mono" placeholder="1.0.1" required></div>
+                <div class="field"><label>${t('dist.channel')}</label><select name="channel" class="mono"><option>stable</option><option>beta</option></select></div>
+                <div class="field"><label>min_version</label><input name="min_version" class="mono" placeholder="1.0.0"></div>
+                <div class="field span-all"><label>${t('dist.url')}</label><input name="package_url" class="mono" placeholder="https://.../forgepanel-1.0.1.tar.gz" required></div>
+                <div class="field span-all"><label>SHA-256</label><input name="sha256" class="mono" placeholder="64 hex znakova" required></div>
+                <div class="field span-all"><label>${t('dist.notes')}</label><input name="notes" placeholder="Što je novo…"></div>
+            </div>
+            <div class="addform-foot"><button class="btn primary" ${keys.has_key ? '' : 'disabled'}>${t('dist.publish_btn')}</button></div>
+        </form>
+        ${releases.length ? `<table class="data mt"><thead><tr><th>${t('dist.version')}</th><th>${t('dist.channel')}</th><th class="hide-sm">SHA-256</th><th class="hide-sm">${t('dist.published')}</th></tr></thead><tbody>
+            ${releases.map((r) => `<tr><td class="mono">${esc(r.version)}</td><td><span class="badge ${r.channel === 'beta' ? 'warn' : 'ok'}">${esc(r.channel)}</span></td>
+                <td class="mono hide-sm" style="font-size:var(--fs-xs)">${esc(String(r.sha256).slice(0, 16))}…</td><td class="hide-sm">${fmtDate(r.published_at)}</td></tr>`).join('')}</tbody></table>` : ''}
+    </div>
+
+    <div class="card mt"><div class="card-head"><h2>${t('dist.node')}</h2></div>
+        <p class="hint" style="margin:0 0 var(--gap)">${t('dist.node_intro')}</p>
+        <form id="nodef">
+            <div class="grid cols-2">
+                <div class="field"><label>${t('dist.update_server')}</label><input name="update_server" class="mono" placeholder="https://master.example.com:8443" value="${esc(node.update_server || '')}"></div>
+                <div class="field"><label>${t('dist.channel')}</label><select name="update_channel" class="mono"><option ${node.update_channel === 'stable' ? 'selected' : ''}>stable</option><option ${node.update_channel === 'beta' ? 'selected' : ''}>beta</option></select></div>
+            </div>
+            <div class="field"><label>${t('dist.master_pubkey')}</label><input name="update_pubkey" class="mono" placeholder="base64 javni ključ mastera" value="${esc(node.update_pubkey || '')}"></div>
+            <div style="display:flex;gap:8px"><button class="btn primary">${t('common.save')}</button>
+                <button type="button" class="btn" id="checkupd">${icon('refresh')}${t('dist.check')}</button></div>
+        </form>
+        <div id="checkbox" class="mt"></div>
+        <div class="hint mt mono">${t('dist.current')}: v${esc(node.current || '1.0.0')}</div>
+    </div>`;
+
+    document.getElementById('keygen')?.addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        try { await api('/distribution/keygen', { method: 'POST', body: {} }); toast(t('dist.key_created'), 'ok'); pageDistribution(); }
+        catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+    });
+    main().querySelector('#pubf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try { await api('/distribution/releases', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); toast(t('dist.published'), 'ok'); pageDistribution(); }
+        catch (err) { toast(err.message, 'err'); }
+    });
+    main().querySelector('#nodef').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try { await api('/distribution/node', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); toast(t('system.saved'), 'ok'); }
+        catch (err) { toast(err.message, 'err'); }
+    });
+    document.getElementById('checkupd').addEventListener('click', async () => {
+        const box = document.getElementById('checkbox');
+        box.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+        try {
+            const r = await api('/distribution/check');
+            if (!r.configured) { box.innerHTML = `<div class="alert warn">${t('dist.not_configured')}</div>`; return; }
+            box.innerHTML = r.update_available
+                ? `<div class="alert ok" style="display:flex;align-items:center;gap:10px">
+                    <span style="flex:1">${t('dist.available')}: <strong class="mono">v${esc(r.latest)}</strong> (${t('dist.current')} v${esc(r.current)})${r.notes ? ` — ${esc(r.notes)}` : ''}</span>
+                    <button class="btn primary sm" id="applyupd">${icon('download')}${t('dist.apply')}</button></div>`
+                : `<div class="alert ok">${t('dist.uptodate')} (v${esc(r.current)})</div>`;
+            document.getElementById('applyupd')?.addEventListener('click', async (e) => {
+                if (!confirm(t('dist.apply_confirm'))) return;
+                e.target.disabled = true;
+                try { const a = await api('/distribution/apply', { method: 'POST' }); watchTask(a.task_id, `panel update v${a.version}`); toast(t('dist.applying'), 'ok'); }
+                catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+            });
+        } catch (err) { box.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+    });
+}
+
 async function pageSystem() {
     setActive('system');
     main().innerHTML = `${tabsHtml('server', 'system')}<div class="card">${t('common.loading')}</div>`;
@@ -3309,6 +3393,7 @@ const ROUTES = [
     [/^#\/firewall$/, pageFirewall],
     [/^#\/config$/, pageConfig],
     [/^#\/system$/, pageSystem],
+    [/^#\/distribution$/, pageDistribution],
     [/^#\/about$/, pageAbout],
     [/^#\/assistant$/, pageAssistant],
     [/^#\/users$/, pageUsers],

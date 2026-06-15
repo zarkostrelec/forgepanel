@@ -522,6 +522,20 @@ CREATE TABLE staging_envs (
     FOREIGN KEY (staging_vhost_id) REFERENCES vhosts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 33. releases — distribucija panel updatea (mothership): potpisani release-ovi koje nodovi povlače
+CREATE TABLE releases (
+    id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    version         VARCHAR(32) NOT NULL,
+    channel         ENUM('stable','beta') NOT NULL DEFAULT 'stable',
+    package_url     VARCHAR(512) NOT NULL,                 -- URL tarballa (https)
+    sha256          CHAR(64) NOT NULL,                     -- checksum paketa
+    signature       TEXT NOT NULL,                         -- ed25519 detached potpis kanonskog manifesta (base64)
+    notes           TEXT NULL,
+    min_version     VARCHAR(32) NULL,                      -- najniža verzija s koje je dozvoljen skok
+    published_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_version_channel (version, channel)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Početni podaci
 INSERT INTO roles (name, permissions) VALUES
     ('admin',    '{"*": true}'),

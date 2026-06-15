@@ -36,6 +36,7 @@ final class OperationRegistry
         'git.deploy'        => Operations\GitDeploy::class,
         'updates.scan'      => Operations\UpdatesScan::class,
         'updates.apply'     => Operations\UpdatesApply::class,
+        'panel.self_update' => Operations\PanelSelfUpdate::class,
         'docker.create'     => Operations\DockerCreate::class,
         'docker.action'     => Operations\DockerAction::class,
         'docker.proxy_map'  => Operations\DockerProxyMap::class,
