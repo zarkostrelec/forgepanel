@@ -11,7 +11,10 @@ final class Response
         http_response_code($status);
         self::securityHeaders();
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        // JSON_INVALID_UTF8_SUBSTITUTE: poruke iz vanjskih alata (npr. php-fpm -t stderr) mogu
+        // imati ne-UTF8 bajtove — bez ovog json_encode vrati false → prazan body → "bad_response"
+        $out = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        echo $out !== false ? $out : '{"ok":false,"error":"encode_error"}';
         exit;
     }
 

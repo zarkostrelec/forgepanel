@@ -59,16 +59,17 @@ final class VhostsController extends Controller
             $clean[$key] = $value;
         }
 
-        $this->app->agent->call('vhost.php_settings', [
+        $this->app->db->run('UPDATE vhosts SET php_settings = ? WHERE id = ?', [json_encode($clean), $vhost['id']]);
+        // Async task: reload php-fpm servisa (isti servis poslužuje i panel) NE smije
+        // ići sinkrono unutar requesta — prekinuo bi sam taj request (bad_response).
+        $task_id = $this->app->tasks->enqueue('vhost.php_settings', [
             'vhost_id' => (int) $vhost['id'],
             'domain' => $vhost['domain'],
             'php_version' => $vhost['php_version'],
             'settings' => $clean,
-        ], timeout_s: 60);
-
-        $this->app->db->run('UPDATE vhosts SET php_settings = ? WHERE id = ?', [json_encode($clean), $vhost['id']]);
+        ], $ctx->user_id);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.php_settings', ['domain' => $vhost['domain']], $request->ip);
-        Response::ok(['settings' => $clean]);
+        Response::ok(['task_id' => $task_id, 'settings' => $clean], 202);
     }
 
     /** Per-domena izbor: nginx (default, brže) ili nginx → Apache (.htaccess/WordPress). */

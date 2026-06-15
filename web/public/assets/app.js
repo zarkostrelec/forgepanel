@@ -1358,8 +1358,11 @@ async function pageWebsiteDetail(id) {
         for (const [k, v] of fd.entries()) { if (String(v).trim() !== '') settings[k] = String(v).trim(); }
         const btn = e.target.querySelector('button[type=submit],button.primary');
         if (btn) btn.disabled = true;
-        try { await api(`/vhosts/${id}/php-settings`, { method: 'PUT', body: { settings } }); toast(t('php.saved'), 'ok'); }
-        catch (err) { toast(err.message, 'err'); }
+        try {
+            const r = await api(`/vhosts/${id}/php-settings`, { method: 'PUT', body: { settings } });
+            if (r.task_id) watchTask(r.task_id, `PHP postavke ${vhost.domain}`);
+            toast(t('php.saved'), 'ok');
+        } catch (err) { toast(err.message, 'err'); }
         finally { if (btn) btn.disabled = false; }
     });
 
