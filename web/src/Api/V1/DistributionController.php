@@ -146,6 +146,7 @@ final class DistributionController extends Controller
             'update_server'  => $this->setting('update_server', ''),
             'update_channel' => $this->setting('update_channel', 'stable'),
             'update_pubkey'  => $this->setting('update_pubkey', ''),
+            'update_auto'    => $this->setting('panel_update_auto', 'manual'),
             'current'        => $this->setting('panel_version', '1.0.0'),
         ]);
     }
@@ -165,10 +166,12 @@ final class DistributionController extends Controller
         if ($pubkey !== '' && (base64_decode($pubkey, true) === false || strlen((string) base64_decode($pubkey)) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES)) {
             throw new HttpException(422, 'invalid_pubkey');
         }
+        $auto = ($request->str('update_auto') ?? 'manual') === 'auto' ? 'auto' : 'manual';
         $this->store('update_server', $server);
         $this->store('update_channel', $channel);
         $this->store('update_pubkey', $pubkey);
-        $this->app->audit->log($ctx->user_id, $ctx->email, 'distribution.node_config', ['server' => $server], $request->ip);
+        $this->store('panel_update_auto', $auto);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'distribution.node_config', ['server' => $server, 'auto' => $auto], $request->ip);
         Response::ok();
     }
 

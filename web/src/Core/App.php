@@ -92,6 +92,7 @@ final class App
             new Api\V1\TokensController($this),
             new Api\V1\SettingsController($this),
             new Api\V1\DistributionController($this),
+            new Api\V1\LicensingController($this),
         ];
         foreach ($controllers as $controller) {
             $controller->register($this->router);

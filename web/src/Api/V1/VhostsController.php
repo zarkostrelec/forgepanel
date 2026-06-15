@@ -145,6 +145,7 @@ final class VhostsController extends Controller
     private function create(Request $request): never
     {
         $ctx = $this->ctx($request, 'vhosts:write');
+        $this->requireActiveLicense();
 
         $domain = strtolower(trim($request->str('domain') ?? ''));
         if (!preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $domain)) {

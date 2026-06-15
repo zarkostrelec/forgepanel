@@ -424,7 +424,7 @@ const RAIL = [
     { id: 'backups', icon: 'download', label: 'nav.backups', key: 'a', pages: ['backups'] },
     { id: 'monitoring', icon: 'pulse', label: 'nav.monitoring', key: 'm', pages: ['monitoring', 'tasks'] },
     { id: 'protect', icon: 'shield', label: 'nav.protect', key: 'p', pages: ['ssl', 'dns', 'cloudflare', 'security', 'firewall'] },
-    { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config', 'system', 'distribution'] },
+    { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config', 'system', 'distribution', 'licensing'] },
     { id: 'users', icon: 'users', label: 'nav.users', key: 'o', roles: ['admin', 'reseller'], pages: ['users'] },
 ];
 const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
@@ -432,7 +432,7 @@ const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
 const TAB_GROUPS = {
     monitoring: [['monitoring', 'nav.monitoring', 'pulse'], ['tasks', 'nav.tasks', 'clock']],
     protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['cloudflare', 'nav.cloudflare', 'cloud', 'admin'], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
-    server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history'], ['system', 'nav.system', 'gear'], ['distribution', 'nav.distribution', 'download']],
+    server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history'], ['system', 'nav.system', 'gear'], ['distribution', 'nav.distribution', 'download'], ['licensing', 'nav.licensing', 'key']],
 };
 
 // tab strip za grupirane stranice (Zaštita: SSL · DNS · Sigurnost · Firewall, itd.)
@@ -2873,6 +2873,77 @@ function pageAssistant() {
 }
 
 // ---------------------------------------------------------------- config time-machine (admin)
+const licBadge = (s) => `<span class="badge ${({ active: 'ok', suspended: 'warn', expired: 'warn', revoked: 'err' }[s]) || ''}">${esc(s || '—')}</span>`;
+
+async function pageLicensing() {
+    setActive('licensing');
+    main().innerHTML = `${tabsHtml('server', 'licensing')}<div class="empty">${t('common.loading')}</div>`;
+    const [licenses, node, keys] = await Promise.all([
+        api('/licenses').catch(() => []),
+        api('/license').catch(() => ({})),
+        api('/distribution/keys').catch(() => ({})),
+    ]);
+    main().innerHTML = `${tabsHtml('server', 'licensing')}
+    <div class="card"><div class="card-head"><h2>${t('lic.node')}</h2></div>
+        <p class="hint" style="margin:0 0 var(--gap)">${t('lic.node_intro')}</p>
+        <form id="licf" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:240px;margin:0"><label>${t('lic.key')}</label>
+                <input name="license_key" class="mono" value="${esc(node.license_key || '')}" placeholder="FP-XXXX-XXXX-XXXX-XXXX-XXXX"></div>
+            <button class="btn primary">${node.configured ? t('lic.recheck') : t('lic.activate')}</button>
+        </form>
+        ${node.configured ? `<div class="mt">${t('lic.status')}: ${licBadge(node.status)} · <span class="mono">${esc(node.tier || '')}</span>${node.expires_at ? ` · ${t('lic.expires')} ${fmtDate(node.expires_at)}` : ''}</div>
+            <div class="hint mt mono">fingerprint: ${esc(node.fingerprint || '')}</div>` : ''}
+    </div>
+    ${keys.has_key ? `
+    <div class="card mt"><div class="card-head"><h2>${t('lic.master')}</h2><span class="spacer"></span>
+        <button class="btn primary" id="newlic">${icon('plus')}${t('lic.new')}</button></div>
+        ${licenses.length ? `<table class="data"><thead><tr><th>${t('lic.key')}</th><th>Tier</th><th>${t('lic.status')}</th><th class="hide-sm">${t('lic.expires')}</th><th class="hide-sm">${t('lic.customer')}</th><th class="num">${t('lic.activations')}</th><th></th></tr></thead><tbody>
+            ${licenses.map((l) => `<tr>
+                <td class="mono">${esc(l.license_key)}</td><td class="mono">${esc(l.tier)}</td>
+                <td>${licBadge(l.status)}</td><td class="hide-sm">${l.expires_at ? fmtDate(l.expires_at) : '∞'}</td>
+                <td class="hide-sm">${esc(l.customer || '')}</td><td class="num mono">${l.activations}</td>
+                <td class="num">
+                    <button class="btn ghost" data-lictoggle="${l.id}" data-status="${esc(l.status)}">${l.status === 'active' ? t('lic.suspend') : t('lic.reactivate')}</button>
+                    <button class="btn danger" data-licdel="${l.id}">${t('common.delete')}</button></td></tr>`).join('')}</tbody></table>`
+            : `<div class="empty">${t('lic.none')}</div>`}
+    </div>` : `<div class="card mt"><div class="empty">${t('lic.need_key')}</div></div>`}`;
+
+    main().querySelector('#licf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try { const r = await api('/license', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); toast(`${t('lic.activated')}: ${r.status || '—'}`, 'ok'); pageLicensing(); }
+        catch (err) { toast(t('lic.' + err.message) !== 'lic.' + err.message ? t('lic.' + err.message) : err.message, 'err'); }
+    });
+    document.getElementById('newlic')?.addEventListener('click', () => newLicenseModal());
+    main().querySelectorAll('[data-lictoggle]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api(`/licenses/${b.dataset.lictoggle}`, { method: 'PUT', body: { status: b.dataset.status === 'active' ? 'suspended' : 'active' } }); pageLicensing(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+    main().querySelectorAll('[data-licdel]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('common.confirm_delete'))) return;
+        try { await api(`/licenses/${b.dataset.licdel}`, { method: 'DELETE' }); pageLicensing(); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+}
+
+function newLicenseModal() {
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('lic.new')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="nlf">
+            <div class="grid cols-2">
+                <div class="field"><label>Tier</label><select name="tier" class="mono"><option>standard</option><option>pro</option><option>enterprise</option></select></div>
+                <div class="field"><label>${t('lic.expires')}</label><input name="expires_at" type="date"></div>
+            </div>
+            <div class="field"><label>${t('lic.customer')}</label><input name="customer" placeholder="Ime / tvrtka"></div>
+            <div class="field"><label>${t('dist.notes')}</label><input name="notes"></div>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button><button class="btn primary">${t('common.create')}</button></div>
+        </form>`);
+    modal.querySelector('#nlf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try { const r = await api('/licenses', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); modal.close(); toast(`${t('lic.created')}: ${r.license_key}`, 'ok'); pageLicensing(); }
+        catch (err) { toast(err.message, 'err'); }
+    });
+}
+
 async function pageDistribution() {
     setActive('distribution');
     main().innerHTML = `${tabsHtml('server', 'distribution')}<div class="empty">${t('common.loading')}</div>`;
@@ -2914,7 +2985,8 @@ async function pageDistribution() {
                 <div class="field"><label>${t('dist.channel')}</label><select name="update_channel" class="mono"><option ${node.update_channel === 'stable' ? 'selected' : ''}>stable</option><option ${node.update_channel === 'beta' ? 'selected' : ''}>beta</option></select></div>
             </div>
             <div class="field"><label>${t('dist.master_pubkey')}</label><input name="update_pubkey" class="mono" placeholder="base64 javni ključ mastera" value="${esc(node.update_pubkey || '')}"></div>
-            <div style="display:flex;gap:8px"><button class="btn primary">${t('common.save')}</button>
+            <label class="chk"><input type="checkbox" name="update_auto" value="auto" ${node.update_auto === 'auto' ? 'checked' : ''}> ${t('dist.auto')}</label>
+            <div style="display:flex;gap:8px;margin-top:10px"><button class="btn primary">${t('common.save')}</button>
                 <button type="button" class="btn" id="checkupd">${icon('refresh')}${t('dist.check')}</button></div>
         </form>
         <div id="checkbox" class="mt"></div>
@@ -3394,6 +3466,7 @@ const ROUTES = [
     [/^#\/config$/, pageConfig],
     [/^#\/system$/, pageSystem],
     [/^#\/distribution$/, pageDistribution],
+    [/^#\/licensing$/, pageLicensing],
     [/^#\/about$/, pageAbout],
     [/^#\/assistant$/, pageAssistant],
     [/^#\/users$/, pageUsers],
@@ -3422,6 +3495,21 @@ async function enter() {
     renderShell();
     if (!location.hash) location.hash = '#/dashboard';
     await route();
+    licenseBanner();
+}
+
+// Banner kad je licenca ovog panela konfigurirana ali NIJE aktivna (admin)
+async function licenseBanner() {
+    if (state.me.role !== 'admin') return;
+    try {
+        const l = await api('/license');
+        if (!l.configured || l.status === 'active' || l.status === '') return;
+        const bar = document.createElement('div');
+        bar.className = 'license-bar';
+        bar.innerHTML = `${icon('lock')}<span>${t('lic.banner_' + l.status) !== 'lic.banner_' + l.status ? t('lic.banner_' + l.status) : t('lic.banner_inactive')}</span>
+            <a href="#/licensing">${t('nav.licensing')}</a>`;
+        document.querySelector('.main')?.prepend(bar);
+    } catch { /* tiho */ }
 }
 
 document.documentElement.dataset.theme = state.theme;

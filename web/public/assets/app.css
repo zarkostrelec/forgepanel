@@ -885,3 +885,10 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 .php-foot .hint { flex: 1; }
 @media (max-width: 720px) { .grid.cols-3 { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 480px) { .grid.cols-3 { grid-template-columns: 1fr; } }
+
+/* Licencni banner (node s neaktivnom licencom) */
+.license-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+    background: var(--warn-soft); color: var(--warn-deep); font-size: var(--fs-sm);
+    border-bottom: 1px solid color-mix(in oklab, var(--warn) 35%, transparent); }
+.license-bar svg { width: 15px; height: 15px; flex-shrink: 0; }
+.license-bar a { margin-left: auto; color: var(--warn-deep); font-weight: 600; text-decoration: underline; }

@@ -536,6 +536,36 @@ CREATE TABLE releases (
     UNIQUE KEY uq_version_channel (version, channel)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 34. schema_migrations — praćenje primijenjenih DB migracija (self-update iz paketa)
+CREATE TABLE schema_migrations (
+    filename        VARCHAR(255) PRIMARY KEY,
+    applied_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 35. licenses — licencni model (master prodaje/izdaje licence za korištenje panela)
+CREATE TABLE licenses (
+    id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    license_key     VARCHAR(64) NOT NULL UNIQUE,
+    tier            VARCHAR(32) NOT NULL DEFAULT 'standard',
+    status          ENUM('active','suspended','revoked') NOT NULL DEFAULT 'active',
+    customer        VARCHAR(128) NULL,
+    expires_at      DATETIME NULL,
+    notes           TEXT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 36. license_activations — koji su paneli (fingerprint) aktivirali licencu
+CREATE TABLE license_activations (
+    id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    license_id      INT UNSIGNED NOT NULL,
+    fingerprint     VARCHAR(64) NOT NULL,
+    version         VARCHAR(32) NULL,
+    ip              VARCHAR(45) NULL,
+    last_seen       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_license_fp (license_id, fingerprint),
+    FOREIGN KEY (license_id) REFERENCES licenses(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Početni podaci
 INSERT INTO roles (name, permissions) VALUES
     ('admin',    '{"*": true}'),

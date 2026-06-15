@@ -94,7 +94,14 @@ final class PanelSelfUpdate extends Operation
         if (is_dir("$root/modules")) {
             Proc::mustRun(['rsync', '-a', "$root/modules/", self::TARGET . '/modules/']);
         }
+        if (is_dir("$root/database")) {
+            Proc::mustRun(['rsync', '-a', "$root/database/", self::TARGET . '/database/']);
+        }
         @chmod(self::TARGET . '/agent/bin/forge-agentd', 0o755);
+
+        // DB migracije iz paketa (idempotentno preko schema_migrations)
+        $this->runMigrations($context);
+
         $this->db->run(
             "INSERT INTO settings (`key`, value) VALUES ('panel_version', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
             [json_encode($version)]
@@ -110,6 +117,31 @@ final class PanelSelfUpdate extends Operation
         $context->progress(100);
         $context->output("Update na v{$version} primijenjen. Agent se restarta za par sekundi.\n");
         return ['version' => $version, 'backup' => $backup];
+    }
+
+    /** Primijeni nove migracije iz paketa (svaki .sql jednom, praćeno u schema_migrations). */
+    private function runMigrations(TaskContext $context): void
+    {
+        $this->db->run(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (filename VARCHAR(255) PRIMARY KEY,
+             applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+        $dir = self::TARGET . '/database/migrations';
+        if (!is_dir($dir)) {
+            return;
+        }
+        $applied = array_column($this->db->all('SELECT filename FROM schema_migrations'), 'filename');
+        $files = glob($dir . '/*.sql') ?: [];
+        sort($files);
+        foreach ($files as $file) {
+            $name = basename($file);
+            if (in_array($name, $applied, true)) {
+                continue;
+            }
+            Proc::mustRun(['mariadb', 'forgepanel'], stdin: (string) file_get_contents($file));
+            $this->db->run('INSERT INTO schema_migrations (filename) VALUES (?)', [$name]);
+            $context->output("Migracija: $name\n");
+        }
     }
 
     /** @param array<string,mixed> $m */

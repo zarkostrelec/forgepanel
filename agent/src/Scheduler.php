@@ -40,6 +40,130 @@ final class Scheduler
         $this->every('updates_auto', 900, $this->enqueueAutoUpdates(...));
         $this->every('suite_watch', 24 * 3600, $this->watchSuites(...));
         $this->every('vhost_stats', 1800, $this->refreshVhostStats(...));
+        $this->every('panel_update', 4 * 3600, $this->checkPanelUpdate(...));
+        $this->every('license_check', 6 * 3600, $this->checkLicense(...));
+    }
+
+    /** Postavka iz settings tablice (JSON string) ili ''. */
+    private function settingStr(string $key): string
+    {
+        $row = $this->db->one('SELECT value FROM settings WHERE `key` = ?', [$key]);
+        if ($row === null) {
+            return '';
+        }
+        $v = json_decode((string) $row['value'], true);
+        return is_string($v) ? $v : '';
+    }
+
+    /** Kanonski oblik manifesta/payloada za ed25519 verifikaciju. @param array<string,mixed> $m */
+    private static function canonicalSigned(array $m, array $keys): string
+    {
+        $out = [];
+        foreach ($keys as $k) {
+            $out[$k] = (string) ($m[$k] ?? '');
+        }
+        return (string) json_encode($out, JSON_UNESCAPED_SLASHES);
+    }
+
+    /** HTTPS GET/POST na master uz verificiran TLS. @return ?array<string,mixed> data ili null */
+    private function masterCall(string $url, ?array $post = null): ?array
+    {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20,
+            CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
+        ]);
+        if ($post !== null) {
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($post, JSON_UNESCAPED_SLASHES));
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        }
+        $raw = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+        $data = is_string($raw) ? json_decode($raw, true) : null;
+        if ($code !== 200 || !is_array($data) || ($data['ok'] ?? false) !== true) {
+            return null;
+        }
+        return $data['data'] ?? [];
+    }
+
+    /**
+     * Svaka 4 h: provjeri ima li master noviju verziju panela. Verificira ed25519 potpis.
+     * Auto politika → enqueue self_update; inače notifikacija adminima (jednom po verziji).
+     */
+    private function checkPanelUpdate(): void
+    {
+        $server = rtrim($this->settingStr('update_server'), '/');
+        $pub = $this->settingStr('update_pubkey');
+        $channel = $this->settingStr('update_channel') ?: 'stable';
+        $current = $this->settingStr('panel_version') ?: '1.0.0';
+        if ($server === '' || $pub === '') {
+            return;
+        }
+        $d = $this->masterCall("$server/api/v1/distribution/manifest?channel=" . rawurlencode($channel));
+        if ($d === null || !isset($d['manifest'], $d['signature'])) {
+            return;
+        }
+        $manifest = $d['manifest'];
+        $keys = ['version', 'channel', 'package_url', 'sha256', 'min_version', 'published_at'];
+        if (!sodium_crypto_sign_verify_detached(base64_decode((string) $d['signature']), self::canonicalSigned($manifest, $keys), base64_decode($pub))) {
+            return;
+        }
+        if (!version_compare((string) $manifest['version'], $current, '>')) {
+            return;
+        }
+        $pending = $this->db->one("SELECT 1 FROM tasks WHERE op = 'panel.self_update' AND status IN ('pending', 'running')");
+        if ($pending !== null) {
+            return;
+        }
+        if ($this->settingStr('panel_update_auto') === 'auto') {
+            $this->db->run(
+                "INSERT INTO tasks (op, params) VALUES ('panel.self_update', ?)",
+                [json_encode(['manifest' => $manifest, 'signature' => $d['signature'], 'pubkey' => $pub], JSON_UNESCAPED_SLASHES)]
+            );
+            return;
+        }
+        // notifikacija — jednom po verziji
+        $notif_key = 'panel_update_notified_' . preg_replace('/[^0-9A-Za-z._-]/', '', (string) $manifest['version']);
+        if ($this->settingStr($notif_key) !== '') {
+            return;
+        }
+        foreach ($this->db->all("SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name = 'admin'") as $a) {
+            $this->db->run(
+                "INSERT INTO notifications (user_id, severity, title, body) VALUES (?, 'info', ?, ?)",
+                [$a['id'], "Panel update v{$manifest['version']} dostupan", 'Server → Distribucija → Primijeni update.']
+            );
+        }
+        $this->db->run("INSERT INTO settings (`key`, value) VALUES (?, '\"1\"') ON DUPLICATE KEY UPDATE value = value", [$notif_key]);
+    }
+
+    /**
+     * Svakih 6 h: re-validacija licence na masteru (hvata suspend/revoke/istek).
+     * Verificira potpis tokena; sprema status u settings. Offline = zadrži zadnji token.
+     */
+    private function checkLicense(): void
+    {
+        $server = rtrim($this->settingStr('update_server'), '/');
+        $pub = $this->settingStr('update_pubkey');
+        $key = $this->settingStr('license_key');
+        if ($server === '' || $pub === '' || $key === '') {
+            return;
+        }
+        $d = $this->masterCall("$server/api/v1/license/check", [
+            'key' => $key, 'fingerprint' => $this->settingStr('license_fingerprint'),
+        ]);
+        if ($d === null || !isset($d['license'], $d['signature'])) {
+            return; // offline → zadrži postojeći status
+        }
+        $payload = $d['license'];
+        $keys = ['key', 'tier', 'status', 'expires_at', 'fingerprint', 'issued_at'];
+        if (!sodium_crypto_sign_verify_detached(base64_decode((string) $d['signature']), self::canonicalSigned($payload, $keys), base64_decode($pub))) {
+            return;
+        }
+        $this->db->run("INSERT INTO settings (`key`, value) VALUES ('license_status', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [json_encode((string) $payload['status'])]);
+        $this->db->run("INSERT INTO settings (`key`, value) VALUES ('license_token', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [json_encode(json_encode($d, JSON_UNESCAPED_SLASHES))]);
     }
 
     /** Svakih 30 min: osvježi disk (du) i tip aplikacije po aktivnom vhostu (Siteovi lista). */

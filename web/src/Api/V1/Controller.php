@@ -6,6 +6,7 @@ namespace ForgePanel\Web\Api\V1;
 
 use ForgePanel\Web\Core\App;
 use ForgePanel\Web\Core\AuthContext;
+use ForgePanel\Web\Core\HttpException;
 use ForgePanel\Web\Core\Request;
 use ForgePanel\Web\Core\Router;
 
@@ -39,6 +40,22 @@ abstract class Controller
             return $this->app->config->get($key, $default);
         } catch (\Throwable) {
             return (string) ($default ?? '');
+        }
+    }
+
+    /**
+     * Licencni gate: ako je panel node s konfiguriranom licencom koja NIJE aktivna
+     * (suspended/expired/revoked) → blokiraj mutacije. Master i standalone (bez ključa)
+     * nisu gateani. Default 'active' (settings ne pune → ne zaključavaj slučajno).
+     */
+    protected function requireActiveLicense(): void
+    {
+        if ($this->setting('license_key', '') === '') {
+            return;
+        }
+        $status = $this->setting('license_status', 'active');
+        if ($status !== '' && $status !== 'active') {
+            throw new HttpException(402, 'license_' . $status);
         }
     }
 
