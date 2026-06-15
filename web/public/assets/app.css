@@ -973,3 +973,8 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 .card > .hint:last-child, .card > p.hint:last-child { margin-bottom: 0; }
 /* dugmad u card-headu poravnata po sredini i ne lome se */
 .card-head .btn { flex: 0 0 auto; }
+
+/* editor tier opcija licence */
+.tier-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; max-width: 360px; }
+.tier-row input { flex: 1; }
+.tier-row .btn.icon { flex: 0 0 auto; }

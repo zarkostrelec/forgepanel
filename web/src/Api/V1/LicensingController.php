@@ -29,12 +29,64 @@ final class LicensingController extends Controller
         $router->add('POST', '/api/v1/licenses', $this->create(...));
         $router->add('PUT', '/api/v1/licenses/{id}', $this->update(...));
         $router->add('DELETE', '/api/v1/licenses/{id}', $this->remove(...));
+        $router->add('GET', '/api/v1/license/tiers', $this->tiersGet(...));
+        $router->add('PUT', '/api/v1/license/tiers', $this->tiersSet(...));
         // PUBLIC — node ↔ master
         $router->add('POST', '/api/v1/license/activate', $this->activate(...));
         $router->add('POST', '/api/v1/license/check', $this->validateKey(...));
         // NODE (admin) — vlastiti status / aktivacija
         $router->add('GET', '/api/v1/license', $this->nodeStatus(...));
         $router->add('PUT', '/api/v1/license', $this->nodeConfigure(...));
+    }
+
+    /** Konfigurabilna lista tierova (settings.license_tiers) ili default. @return list<string> */
+    private function tiers(): array
+    {
+        $row = $this->app->db->one("SELECT value FROM settings WHERE `key` = 'license_tiers'");
+        if ($row !== null) {
+            $v = json_decode((string) $row['value'], true);
+            if (is_array($v) && $v !== []) {
+                return array_values(array_filter(array_map('strval', $v)));
+            }
+        }
+        return self::TIERS;
+    }
+
+    private function tiersGet(Request $request): never
+    {
+        $this->adminCtx($request);
+        Response::ok(['tiers' => $this->tiers()]);
+    }
+
+    /** Master uređuje dostupne tier opcije (kategorije licenci). */
+    private function tiersSet(Request $request): never
+    {
+        $ctx = $this->adminCtx($request);
+        $in = $request->body['tiers'] ?? null;
+        if (!is_array($in) || $in === [] || count($in) > 20) {
+            throw new HttpException(422, 'invalid_tiers');
+        }
+        $clean = [];
+        foreach ($in as $t) {
+            $t = strtolower(trim((string) $t));
+            if ($t === '') {
+                continue;
+            }
+            if (!preg_match('/^[a-z0-9][a-z0-9 _-]{0,31}$/', $t)) {
+                throw new HttpException(422, 'invalid_tier');
+            }
+            $clean[$t] = true; // dedup
+        }
+        $clean = array_keys($clean);
+        if ($clean === []) {
+            throw new HttpException(422, 'invalid_tiers');
+        }
+        $this->app->db->run(
+            "INSERT INTO settings (`key`, value) VALUES ('license_tiers', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
+            [json_encode(array_values($clean), JSON_UNESCAPED_SLASHES)]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'license.tiers_update', ['tiers' => $clean], $request->ip);
+        Response::ok(['tiers' => $clean]);
     }
 
     // ───────────── MASTER ─────────────
@@ -51,8 +103,9 @@ final class LicensingController extends Controller
     private function create(Request $request): never
     {
         $ctx = $this->adminCtx($request);
-        $tier = $request->str('tier') ?? 'standard';
-        if (!in_array($tier, self::TIERS, true)) {
+        $tiers = $this->tiers();
+        $tier = $request->str('tier') ?? ($tiers[0] ?? 'standard');
+        if (!in_array($tier, $tiers, true)) {
             throw new HttpException(422, 'invalid_tier');
         }
         $key = $this->genKey();
@@ -84,7 +137,7 @@ final class LicensingController extends Controller
             $args[] = $this->parseExpiry($request->str('expires_at'));
         }
         if ($request->str('tier') !== null) {
-            if (!in_array($request->str('tier'), self::TIERS, true)) {
+            if (!in_array($request->str('tier'), $this->tiers(), true)) {
                 throw new HttpException(422, 'invalid_tier');
             }
             $fields[] = 'tier = ?';

@@ -3338,11 +3338,13 @@ const licBadge = (s) => `<span class="badge ${({ active: 'ok', suspended: 'warn'
 async function pageLicensing() {
     setActive('licensing');
     main().innerHTML = `${tabsHtml('server', 'licensing')}<div class="empty">${t('common.loading')}</div>`;
-    const [licenses, node, keys] = await Promise.all([
+    const [licenses, node, keys, tiersResp] = await Promise.all([
         api('/licenses').catch(() => []),
         api('/license').catch(() => ({})),
         api('/distribution/keys').catch(() => ({})),
+        api('/license/tiers').catch(() => ({ tiers: ['standard', 'pro', 'enterprise'] })),
     ]);
+    const tiers = tiersResp.tiers || ['standard', 'pro', 'enterprise'];
     main().innerHTML = `${tabsHtml('server', 'licensing')}
     <div class="card"><div class="card-head"><h2>${t('lic.node')}</h2></div>
         <p class="hint" style="margin:0 0 var(--gap)">${t('lic.node_intro')}</p>
@@ -3355,6 +3357,14 @@ async function pageLicensing() {
             <div class="hint mt mono">fingerprint: ${esc(node.fingerprint || '')}</div>` : ''}
     </div>
     ${keys.has_key ? `
+    <div class="card mt"><div class="card-head"><h2>${icon('key')}${t('lic.tiers')}</h2></div>
+        <p class="hint">${t('lic.tiers_hint')}</p>
+        <div id="tierlist">${tiers.map((tr) => tierRowHtml(tr)).join('')}</div>
+        <div class="row mt" style="gap:8px;align-items:center">
+            <button type="button" class="btn sm" id="tieradd">${icon('plus')}${t('lic.tier_add')}</button>
+            <span class="spacer"></span>
+            <button type="button" class="btn primary sm" id="tiersave">${t('common.save')}</button></div>
+    </div>
     <div class="card mt"><div class="card-head"><h2>${t('lic.master')}</h2><span class="spacer"></span>
         <button class="btn primary" id="newlic">${icon('plus')}${t('lic.new')}</button></div>
         ${licenses.length ? `<table class="data"><thead><tr><th>${t('lic.key')}</th><th>Tier</th><th>${t('lic.status')}</th><th class="hide-sm">${t('lic.expires')}</th><th class="hide-sm">${t('lic.customer')}</th><th class="num">${t('lic.activations')}</th><th></th></tr></thead><tbody>
@@ -3373,7 +3383,24 @@ async function pageLicensing() {
         try { const r = await api('/license', { method: 'PUT', body: Object.fromEntries(new FormData(e.target)) }); toast(`${t('lic.activated')}: ${r.status || '—'}`, 'ok'); pageLicensing(); }
         catch (err) { toast(t('lic.' + err.message) !== 'lic.' + err.message ? t('lic.' + err.message) : err.message, 'err'); }
     });
-    document.getElementById('newlic')?.addEventListener('click', () => newLicenseModal());
+    document.getElementById('newlic')?.addEventListener('click', () => newLicenseModal(tiers));
+
+    // Editor tier opcija (master)
+    const tierList = document.getElementById('tierlist');
+    tierList?.addEventListener('click', (e) => {
+        const del = e.target.closest('[data-tierdel]');
+        if (del) del.closest('.tier-row')?.remove();
+    });
+    document.getElementById('tieradd')?.addEventListener('click', () => {
+        tierList.insertAdjacentHTML('beforeend', tierRowHtml(''));
+        tierList.lastElementChild.querySelector('input')?.focus();
+    });
+    document.getElementById('tiersave')?.addEventListener('click', async () => {
+        const vals = [...tierList.querySelectorAll('input')].map((i) => i.value.trim().toLowerCase()).filter(Boolean);
+        if (!vals.length) return toast(t('lic.tiers_empty'), 'err');
+        try { await api('/license/tiers', { method: 'PUT', body: { tiers: vals } }); toast(t('lic.tiers_saved'), 'ok'); pageLicensing(); }
+        catch (err) { toast(t('lic.' + err.message) !== 'lic.' + err.message ? t('lic.' + err.message) : err.message, 'err'); }
+    });
     main().querySelectorAll('[data-lictoggle]').forEach((b) => b.addEventListener('click', async () => {
         try { await api(`/licenses/${b.dataset.lictoggle}`, { method: 'PUT', body: { status: b.dataset.status === 'active' ? 'suspended' : 'active' } }); pageLicensing(); }
         catch (err) { toast(err.message, 'err'); }
@@ -3385,12 +3412,14 @@ async function pageLicensing() {
     }));
 }
 
-function newLicenseModal() {
+const tierRowHtml = (v = '') => `<div class="tier-row"><input class="mono" value="${esc(v)}" maxlength="32" placeholder="tier" pattern="[a-z0-9][a-z0-9 _-]{0,31}"><button type="button" class="btn ghost icon" data-tierdel title="${t('common.delete')}">${icon('x')}</button></div>`;
+
+function newLicenseModal(tiers = ['standard', 'pro', 'enterprise']) {
     const modal = openModal(`
         <div class="dialog-head"><h1>${t('lic.new')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="nlf">
             <div class="grid cols-2">
-                <div class="field"><label>Tier</label><select name="tier" class="mono"><option>standard</option><option>pro</option><option>enterprise</option></select></div>
+                <div class="field"><label>Tier</label><select name="tier" class="mono">${tiers.map((tr) => `<option>${esc(tr)}</option>`).join('')}</select></div>
                 <div class="field"><label>${t('lic.expires')}</label><input name="expires_at" type="date"></div>
             </div>
             <div class="field"><label>${t('lic.customer')}</label><input name="customer" placeholder="Ime / tvrtka"></div>
