@@ -12,13 +12,45 @@ final class PhpFpm
 {
     private const DISABLE_FUNCTIONS = 'exec,passthru,shell_exec,system,proc_open,popen,pcntl_exec,pcntl_fork,dl';
 
+    /** Per-domena podesivi PHP ini-ovi (Plesk-style) + dozvoljeni format vrijednosti. */
+    private const TUNABLES = [
+        'memory_limit'        => '/^(-1|\d{1,6}[KMGkmg]?)$/',
+        'max_execution_time'  => '/^\d{1,6}$/',
+        'max_input_time'      => '/^-?\d{1,6}$/',
+        'post_max_size'       => '/^\d{1,6}[KMGkmg]?$/',
+        'upload_max_filesize' => '/^\d{1,6}[KMGkmg]?$/',
+        'max_input_vars'      => '/^\d{1,6}$/',
+        'opcache.enable'      => '/^[01]$/',
+        'display_errors'      => '/^(On|Off|on|off|0|1)$/',
+        'disable_functions'   => '/^[a-zA-Z0-9_,]{0,500}$/',
+    ];
+
     public static function poolPath(string $php_version, string $sys_user): string
     {
         return "/etc/php/{$php_version}/fpm/pool.d/{$sys_user}.conf";
     }
 
-    public static function writePool(string $php_version, string $sys_user, string $vhost_root): void
+    /** @param array<string, mixed>|null $settings per-domena PHP override */
+    public static function writePool(string $php_version, string $sys_user, string $vhost_root, ?array $settings = null): void
     {
+        // disable_functions: korisnik smije zamijeniti default ako pošalje vlastiti
+        $disable = self::DISABLE_FUNCTIONS;
+        if (isset($settings['disable_functions']) && preg_match(self::TUNABLES['disable_functions'], (string) $settings['disable_functions'])) {
+            $disable = (string) $settings['disable_functions'];
+        }
+
+        // ostali podesivi ini-ovi (validacija formata — sprječava INI injection)
+        $overrides = '';
+        foreach (self::TUNABLES as $key => $rule) {
+            if ($key === 'disable_functions' || !isset($settings[$key])) {
+                continue;
+            }
+            $value = trim((string) $settings[$key]);
+            if ($value !== '' && preg_match($rule, $value)) {
+                $overrides .= "\nphp_admin_value[{$key}] = {$value}";
+            }
+        }
+
         $pool = <<<INI
         ; ForgePanel pool — {$sys_user}
         [{$sys_user}]
@@ -38,14 +70,14 @@ final class PhpFpm
         php_admin_value[open_basedir] = {$vhost_root}:/tmp
         php_admin_value[upload_tmp_dir] = {$vhost_root}/tmp
         php_admin_value[session.save_path] = {$vhost_root}/tmp
-        php_admin_value[disable_functions] = %s
+        php_admin_value[disable_functions] = {$disable}
         php_admin_value[error_log] = {$vhost_root}/logs/php_error.log
         php_admin_flag[log_errors] = on
         INI;
 
         $conf_path = self::poolPath($php_version, $sys_user);
         $backup = is_file($conf_path) ? file_get_contents($conf_path) : null;
-        file_put_contents($conf_path, sprintf($pool, self::DISABLE_FUNCTIONS) . "\n");
+        file_put_contents($conf_path, $pool . $overrides . "\n");
 
         $unit = "php{$php_version}-fpm";
         $test = Proc::run(["php-fpm{$php_version}", '-t']);

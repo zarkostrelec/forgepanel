@@ -28,10 +28,12 @@ final class VhostPhpSet extends Operation
         $new = Validator::phpVersion($params['new_version']);
         $vhost_root = Validator::VHOST_ROOT . '/' . $domain;
 
-        $row = $this->db->one('SELECT web_backend FROM vhosts WHERE id = ?', [(int) $params['vhost_id']]);
+        $row = $this->db->one('SELECT web_backend, php_settings FROM vhosts WHERE id = ?', [(int) $params['vhost_id']]);
         $backend = (string) ($row['web_backend'] ?? 'nginx');
+        // promjena verzije zadržava per-domena PHP override
+        $settings = is_array($row) ? (json_decode((string) ($row['php_settings'] ?? ''), true) ?: []) : [];
 
-        PhpFpm::writePool($new, $sys_user, $vhost_root);
+        PhpFpm::writePool($new, $sys_user, $vhost_root, $settings);
         NginxConf::writeAndReload(
             NginxConf::VHOST_CONF_DIR . "/$domain.conf",
             NginxConf::templateFor($backend, $domain, $vhost_root . '/httpdocs', $new, $sys_user)

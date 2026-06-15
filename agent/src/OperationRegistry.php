@@ -18,6 +18,7 @@ final class OperationRegistry
         'vhost.create'      => Operations\VhostCreate::class,
         'vhost.delete'      => Operations\VhostDelete::class,
         'vhost.php_set'     => Operations\VhostPhpSet::class,
+        'vhost.php_settings' => Operations\VhostPhpSettings::class,
         'vhost.suspend'     => Operations\VhostSuspend::class,
         'vhost.backend_set' => Operations\VhostBackendSet::class,
         'dns.install'       => Operations\DnsInstall::class,

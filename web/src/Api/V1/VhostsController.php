@@ -13,6 +13,19 @@ final class VhostsController extends Controller
 {
     private const PHP_VERSIONS = ['8.1', '8.2', '8.3', '8.4', '8.5'];
 
+    /** Per-domena podesivi PHP ini-ovi (Plesk-style) + dozvoljeni format. */
+    private const PHP_SETTING_RULES = [
+        'memory_limit'        => '/^(-1|\d{1,6}[KMGkmg]?)$/',
+        'max_execution_time'  => '/^\d{1,6}$/',
+        'max_input_time'      => '/^-?\d{1,6}$/',
+        'post_max_size'       => '/^\d{1,6}[KMGkmg]?$/',
+        'upload_max_filesize' => '/^\d{1,6}[KMGkmg]?$/',
+        'max_input_vars'      => '/^\d{1,6}$/',
+        'opcache.enable'      => '/^[01]$/',
+        'display_errors'      => '/^(On|Off|on|off|0|1)$/',
+        'disable_functions'   => '/^[a-zA-Z0-9_,]{0,500}$/',
+    ];
+
     public function register(Router $router): void
     {
         $router->add('GET', '/api/v1/vhosts', $this->index(...));
@@ -20,7 +33,42 @@ final class VhostsController extends Controller
         $router->add('GET', '/api/v1/vhosts/{id}', $this->show(...));
         $router->add('DELETE', '/api/v1/vhosts/{id}', $this->delete(...));
         $router->add('PUT', '/api/v1/vhosts/{id}/php', $this->setPhp(...));
+        $router->add('PUT', '/api/v1/vhosts/{id}/php-settings', $this->setPhpSettings(...));
         $router->add('PUT', '/api/v1/vhosts/{id}/backend', $this->setBackend(...));
+    }
+
+    /** Uređivanje PHP ini postavki po domeni (kao Plesk) → FPM pool + reload. */
+    private function setPhpSettings(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'vhosts:write');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+
+        $in = is_array($request->body['settings'] ?? null) ? $request->body['settings'] : [];
+        $clean = [];
+        foreach (self::PHP_SETTING_RULES as $key => $rule) {
+            if (!array_key_exists($key, $in)) {
+                continue;
+            }
+            $value = trim((string) $in[$key]);
+            if ($value === '') {
+                continue; // prazno = PHP default (ne forsiramo override)
+            }
+            if (!preg_match($rule, $value)) {
+                throw new HttpException(422, 'invalid_php_setting');
+            }
+            $clean[$key] = $value;
+        }
+
+        $this->app->agent->call('vhost.php_settings', [
+            'vhost_id' => (int) $vhost['id'],
+            'domain' => $vhost['domain'],
+            'php_version' => $vhost['php_version'],
+            'settings' => $clean,
+        ], timeout_s: 60);
+
+        $this->app->db->run('UPDATE vhosts SET php_settings = ? WHERE id = ?', [json_encode($clean), $vhost['id']]);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.php_settings', ['domain' => $vhost['domain']], $request->ip);
+        Response::ok(['settings' => $clean]);
     }
 
     /** Per-domena izbor: nginx (default, brže) ili nginx → Apache (.htaccess/WordPress). */

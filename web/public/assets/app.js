@@ -1001,7 +1001,7 @@ const sitesList = (vhosts, selectedId) => vhosts.length ? `
     ${vhosts.map((v) => `
         <tr class="row-link ${v.id === selectedId ? 'selected' : ''}" data-vhost="${v.id}">
             <td><div class="site-cell"><span class="status-dot ${dotKind(v)}"></span>
-                <div><span class="mono site-name">${esc(v.domain)}</span>
+                <div><a href="#/websites/${v.id}" class="mono site-name" data-open>${esc(v.domain)}</a>
                 ${appLabel(v.app_type) ? `<div class="sub">${appLabel(v.app_type)}</div>` : ''}</div></div></td>
             <td class="mono hide-sm sub2">${stackText(v)}</td>
             <td class="mono hide-md num sub2">${v.traffic_7d != null ? fmtNum(v.traffic_7d) : '—'}</td>
@@ -1106,6 +1106,8 @@ async function pageWebsites() {
             list.querySelectorAll('.row-link').forEach((r) => r.classList.toggle('selected', Number(r.dataset.vhost) === selectedId));
             renderPanel();
         }));
+        // klik na ime stranice otvara detalje (href navigira), ne samo select panela
+        list.querySelectorAll('[data-open]').forEach((a) => a.addEventListener('click', (e) => e.stopPropagation()));
     };
 
     renderList();
@@ -1198,6 +1200,34 @@ async function createVhostModal() {
     });
 }
 
+// PHP postavke po domeni (Plesk-style) — override u FPM pool; prazno = PHP default
+function phpSettingsCard(vhost) {
+    const ps = (() => { try { return JSON.parse(vhost.php_settings || '{}') || {}; } catch { return {}; } })();
+    const v = (k) => esc(ps[k] ?? '');
+    const sel = (k, opts) => `<select name="${k}" class="mono"><option value="">${t('php.default')}</option>${opts.map(([val, lbl]) =>
+        `<option value="${val}" ${String(ps[k] ?? '') === val ? 'selected' : ''}>${lbl}</option>`).join('')}</select>`;
+    const num = [
+        ['memory_limit', '128M'], ['max_execution_time', '30'], ['max_input_time', '60'],
+        ['post_max_size', '8M'], ['upload_max_filesize', '2M'], ['max_input_vars', '1000'],
+    ];
+    return `
+    <div class="card mt">
+        <div class="page-head"><h2>${t('php.title')}</h2><span class="spacer"></span>
+            <span class="hint mono">PHP ${esc(vhost.php_version)}</span></div>
+        <form id="phpform">
+            <div class="grid cols-3">
+                ${num.map(([k, ph]) => `<div class="field"><label>${k}</label><input name="${k}" class="mono" placeholder="${ph}" value="${v(k)}"></div>`).join('')}
+                <div class="field"><label>opcache.enable</label>${sel('opcache.enable', [['1', 'on'], ['0', 'off']])}</div>
+                <div class="field"><label>display_errors</label>${sel('display_errors', [['On', 'On'], ['Off', 'Off']])}</div>
+            </div>
+            <div class="field"><label>disable_functions</label>
+                <input name="disable_functions" class="mono" placeholder="exec,system,shell_exec,passthru" value="${v('disable_functions')}">
+                <span class="hint">${t('php.hint')}</span></div>
+            <button class="btn primary" type="submit">${t('common.save')}</button>
+        </form>
+    </div>`;
+}
+
 async function pageWebsiteDetail(id) {
     setActive('websites');
     main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
@@ -1242,6 +1272,7 @@ async function pageWebsiteDetail(id) {
             <div id="fm"></div>
         </div>
     </div>
+    ${phpSettingsCard(vhost)}
     <div class="grid cols-2 mt">
         <div class="card">
             <div class="page-head"><h2>${t('cron.title')}</h2></div>
@@ -1318,6 +1349,18 @@ async function pageWebsiteDetail(id) {
             const r = await api(`/vhosts/${id}/backups`, { method: 'POST', body: {} });
             watchTask(r.task_id, `backup ${vhost.domain}`);
         } catch (err) { toast(err.message, 'err'); }
+    });
+
+    main().querySelector('#phpform')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const settings = {};
+        for (const [k, v] of fd.entries()) { if (String(v).trim() !== '') settings[k] = String(v).trim(); }
+        const btn = e.target.querySelector('button[type=submit],button.primary');
+        if (btn) btn.disabled = true;
+        try { await api(`/vhosts/${id}/php-settings`, { method: 'PUT', body: { settings } }); toast(t('php.saved'), 'ok'); }
+        catch (err) { toast(err.message, 'err'); }
+        finally { if (btn) btn.disabled = false; }
     });
 
     fileManager(vhost, main().querySelector('#fm'), '/httpdocs');

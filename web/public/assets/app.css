@@ -771,6 +771,8 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 .status-dot.ok { background: var(--ok); } .status-dot.warn { background: var(--warn); }
 .status-dot.info { background: var(--info); } .status-dot.err { background: var(--danger-deep, #e5484d); }
 .site-name { font-weight: 600; }
+a.site-name { color: var(--ink); text-decoration: none; }
+a.site-name:hover { color: var(--accent-deep); text-decoration: underline; }
 .sites-table .sub { color: var(--ink-3); font-size: var(--fs-xs); margin-top: 1px; }
 .sites-table .sub2 { color: var(--ink-2); }
 .sites-table .num { text-align: right; }

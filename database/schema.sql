@@ -71,6 +71,7 @@ CREATE TABLE vhosts (
     app_type        VARCHAR(32) NULL,                      -- detekcija aplikacije (wordpress/woocommerce/laravel/node/astro/static/php)
     traffic_7d      BIGINT UNSIGNED NULL,                  -- broj zahtjeva (access.log) zadnjih 7 dana
     traffic_spark   TEXT NULL,                             -- JSON: 24 satna bucketa za sparkline
+    php_settings    JSON NULL,                             -- per-domena PHP override (memory_limit, upload_max_filesize, ...)
     stats_at        DATETIME NULL,                         -- zadnje osvježavanje statistika
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
