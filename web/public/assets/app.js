@@ -2775,7 +2775,7 @@ async function pageDeliverability() {
     ]);
 
     main().innerHTML = `${tabsHtml('mail', 'deliverability')}
-    <div class="grid cols-2">
+    <div class="grid cols-2 top">
         <div class="card" id="validator">
             <div class="card-head"><h2>${icon('check')}${t('deliver.validator')}</h2></div>
             <p class="hint">${t('deliver.validator_hint')}</p>
