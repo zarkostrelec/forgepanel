@@ -168,6 +168,10 @@ final class UsersController extends Controller
         if (!in_array($status, ['active', 'suspended'], true)) {
             throw new HttpException(422, 'invalid_status');
         }
+        // Ne dopusti zaključavanje panela: zadnji aktivni admin ne smije u suspended
+        if ($status === 'suspended' && $this->isLastActiveAdmin((int) $user['id'])) {
+            throw new HttpException(422, 'last_admin');
+        }
         $this->app->db->run('UPDATE users SET status = ? WHERE id = ?', [$status, $user['id']]);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'user.status', ['user_id' => $user['id'], 'status' => $status], $request->ip);
         Response::ok();
@@ -251,6 +255,9 @@ final class UsersController extends Controller
         $user = $this->targetUser($ctx, (int) $request->param('id'));
         if ((int) $user['id'] === $ctx->user_id) {
             throw new HttpException(422, 'cannot_delete_self');
+        }
+        if ($this->isLastActiveAdmin((int) $user['id'])) {
+            throw new HttpException(422, 'last_admin');
         }
         $this->app->db->run('DELETE FROM users WHERE id = ?', [$user['id']]);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'user.delete', ['user_id' => $user['id']], $request->ip);
@@ -386,6 +393,24 @@ final class UsersController extends Controller
         $this->app->db->run('DELETE FROM plans WHERE id = ?', [$plan['id']]);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'plan.delete', ['plan_id' => (int) $plan['id']], $request->ip);
         Response::ok();
+    }
+
+    /** True ako je dani korisnik aktivan admin i jedini takav (suspend/delete bi zaključao panel). */
+    private function isLastActiveAdmin(int $user_id): bool
+    {
+        $target = $this->app->db->one(
+            "SELECT 1 FROM users u JOIN roles r ON r.id = u.role_id
+             WHERE u.id = ? AND r.name = 'admin' AND u.status = 'active'",
+            [$user_id]
+        );
+        if ($target === null) {
+            return false;
+        }
+        $count = $this->app->db->one(
+            "SELECT COUNT(*) AS n FROM users u JOIN roles r ON r.id = u.role_id
+             WHERE r.name = 'admin' AND u.status = 'active'"
+        );
+        return (int) ($count['n'] ?? 0) <= 1;
     }
 
     /** Reseller smije dirati samo svoje klijente. @return array<string, mixed> */

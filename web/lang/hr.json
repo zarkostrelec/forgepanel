@@ -364,6 +364,7 @@
     "users.reseller_pkg": "Reseller paket (kvota)",
     "users.reseller_pkg_hint": "Ukupni resursi koje reseller smije podijeliti svojim klijentima.",
     "users.reseller_quota_exceeded": "Reseller paket nema dovoljno slobodnih resursa za ovaj plan.",
+    "users.last_admin": "Ovo je zadnji aktivni admin — ne može se suspendirati ni obrisati (zaključao bi panel).",
     "plan.reseller_pkg": "Reseller paket (grupa)",
     "plan.reseller_pkg_hint": "Plan namijenjen dodjeli resellerima — definira koliko ukupno mogu prodati dalje.",
     "plan.reseller_tag": "reseller",

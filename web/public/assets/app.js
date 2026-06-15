@@ -3123,15 +3123,16 @@ async function pageUsers() {
         catch (err) { toast(err.message, 'err'); }
     }));
 
+    const userErr = (err) => toast(t('users.' + err.message) !== 'users.' + err.message ? t('users.' + err.message) : err.message, 'err');
     main().querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', async () => {
         try { await api(`/users/${b.dataset.toggle}/status`, { method: 'PUT', body: { status: b.dataset.status === 'active' ? 'suspended' : 'active' } }); pageUsers(); }
-        catch (err) { toast(err.message, 'err'); }
+        catch (err) { userErr(err); }
     }));
     main().querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => userModal(users.find((u) => String(u.id) === b.dataset.edit), plans)));
     main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(t('common.confirm_delete'))) return;
         try { await api(`/users/${b.dataset.del}`, { method: 'DELETE' }); pageUsers(); }
-        catch (err) { toast(err.message, 'err'); }
+        catch (err) { userErr(err); }
     }));
 }
 
