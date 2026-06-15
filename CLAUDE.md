@@ -4,6 +4,27 @@
 
 ---
 
+## ⚙️ DEPLOY NA LIVE (elite) — PROČITATI PRVO, NE OTKRIVATI IZNOVA
+
+Server `elite` ima **dvije odvojene putanje** (to je čest izvor zabune):
+
+| | Putanja | Uloga |
+|---|---|---|
+| **git checkout** | `/opt/forgepanel-src` | ovaj repo (`git pull` ide ovdje) |
+| **nginx docroot** | `/opt/forgepanel/web/public` | ono što se STVARNO servira |
+
+`/opt/forgepanel` je **zasebna kopija, NIJE symlink** na `-src`. Zato `git pull` u `-src` sam po sebi **ne** mijenja ono što korisnik vidi — treba sinkronizirati `-src → /opt/forgepanel`. Nginx config: `/etc/nginx/conf.d/forgepanel-panel.conf`.
+
+**Deploy (kao root na serveru):**
+```bash
+cd /opt/forgepanel-src && ./deploy.sh
+```
+Skripta: `git reset --hard origin/main` → `rsync -src → /opt/forgepanel` (bez `--delete`) → `systemctl reload nginx`. Statički asseti (`web/public/assets/app.*`) ne trebaju restart, samo **hard refresh (Ctrl+Shift+R)** u browseru. Ako se mijenjao `agent/` ili `web/src` (PHP): `systemctl restart forge-agentd php8.4-fpm`.
+
+Push uvijek na **main** (vidi pravila niže); `origin/main` je istina, lokalni `main` u nekim okruženjima može biti nepovezana grana — tada `git checkout -B main origin/main` prije rada.
+
+---
+
 ## 0. ANALIZA POSTOJEĆIH PANELA (temelj odluka)
 
 ### Plesk
