@@ -365,6 +365,7 @@
     "brand.host": "Panel domain",
     "brand.host_hint": "Own domain with own SSL; clients never see the ForgePanel brand.",
     "brand.saved": "White-label saved",
+    "brand.preview": "live preview",
     "staging.title": "Staging",
     "staging.create": "New staging",
     "staging.none": "No staging environments.",

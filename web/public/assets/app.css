@@ -932,3 +932,13 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 /* migrator dry-run pregled */
 .mig-block { padding: 10px 0; border-top: 1px solid var(--line-2); }
 .mig-block:first-of-type { border-top: 0; }
+
+/* white-label živi pregled */
+.brand-preview { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 10px;
+    background: var(--surface-2); border: 1px solid var(--line); margin-bottom: 16px; }
+.brand-mark { width: 40px; height: 40px; border-radius: 9px; display: grid; place-items: center;
+    background: var(--accent); color: #fff; overflow: hidden; }
+.brand-mark img { width: 100%; height: 100%; object-fit: contain; }
+.brand-mark svg { width: 22px; height: 22px; }
+.brand-pv-name { font-weight: 600; font-size: 1.05rem; }
+.brand-pv-sub { color: var(--ink-3); font-size: var(--fs-xs); }

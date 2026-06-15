@@ -3171,15 +3171,39 @@ function brandingModal() {
     const modal = openModal(`
         <div class="dialog-head"><h1>${t('users.branding')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="bf">
-            <div class="field"><label>${t('brand.name')}</label><input name="panel_name" value="${esc(b.panel_name ?? 'ForgePanel')}"></div>
-            <div class="field"><label>${t('brand.accent')}</label><input name="accent" type="color" value="${esc(b.accent ?? '#f59e0b')}" style="height:38px"></div>
+            <div class="brand-preview" id="bprev">
+                <div class="brand-mark" id="pvmark">${b.logo_url ? `<img src="${esc(b.logo_url)}" alt="">` : icon('zap')}</div>
+                <div><div class="brand-pv-name" id="pvname">${esc(b.panel_name ?? 'ForgePanel')}</div>
+                    <div class="brand-pv-sub mono">${t('brand.preview')}</div></div>
+                <button type="button" class="btn sm primary" id="pvbtn" style="margin-left:auto">${t('common.save')}</button>
+            </div>
+            <div class="grid cols-2">
+                <div class="field"><label>${t('brand.name')}</label><input name="panel_name" value="${esc(b.panel_name ?? 'ForgePanel')}"></div>
+                <div class="field"><label>${t('brand.accent')}</label><input name="accent" type="color" value="${esc(b.accent ?? '#10b981')}" style="height:38px"></div>
+            </div>
             <div class="field"><label>${t('brand.host')}</label><input name="panel_host" class="mono" placeholder="panel.mojadomena.hr" value="${esc(b.panel_host ?? '')}">
                 <span class="hint">${t('brand.host_hint')}</span></div>
-            <div class="field"><label>Logo URL (https)</label><input name="logo_url" class="mono" value="${esc(b.logo_url ?? '')}"></div>
+            <div class="field"><label>Logo URL (https)</label><input name="logo_url" class="mono" placeholder="https://…/logo.svg" value="${esc(b.logo_url ?? '')}"></div>
             <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
                 <button class="btn primary">${t('common.save')}</button></div>
-        </form>`);
-    modal.querySelector('#bf').addEventListener('submit', async (e) => {
+        </form>`, { wide: true });
+
+    const form = modal.querySelector('#bf');
+    const prev = modal.querySelector('#bprev');
+    // Live preview dok korisnik tipka
+    const sync = () => {
+        const f = Object.fromEntries(new FormData(form));
+        modal.querySelector('#pvname').textContent = f.panel_name || 'ForgePanel';
+        prev.style.setProperty('--accent', f.accent);
+        modal.querySelector('#pvbtn').style.background = f.accent;
+        const mark = modal.querySelector('#pvmark');
+        if (f.logo_url && /^https:\/\//.test(f.logo_url)) mark.innerHTML = `<img src="${esc(f.logo_url)}" alt="">`;
+        else mark.innerHTML = icon('zap');
+    };
+    form.addEventListener('input', sync);
+    sync();
+
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const f = Object.fromEntries(new FormData(e.target));
         if (!f.logo_url) delete f.logo_url;
@@ -3188,6 +3212,11 @@ function brandingModal() {
             const r = await api('/branding', { method: 'PUT', body: f });
             state.branding = r;
             document.documentElement.style.setProperty('--accent', r.accent);
+            // Primijeni odmah na shell (logo, naziv, title) — bez reloada
+            document.title = r.panel_name || 'ForgePanel';
+            document.querySelectorAll('.rail-label').forEach((el) => { el.textContent = r.panel_name; });
+            const railLogo = document.querySelector('.rail-logo');
+            if (railLogo) railLogo.title = r.panel_name;
             modal.close();
             toast(t('brand.saved'));
         } catch (err) { toast(err.message, 'err'); }

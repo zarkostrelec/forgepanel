@@ -365,6 +365,7 @@
     "brand.host": "Panel domena",
     "brand.host_hint": "Vlastita domena s vlastitim SSL-om; klijenti ne vide ForgePanel brend.",
     "brand.saved": "White-label spremljen",
+    "brand.preview": "živi pregled",
     "staging.title": "Staging",
     "staging.create": "Novi staging",
     "staging.none": "Nema staging okruženja.",
