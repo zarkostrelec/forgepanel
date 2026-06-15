@@ -892,3 +892,16 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
     border-bottom: 1px solid color-mix(in oklab, var(--warn) 35%, transparent); }
 .license-bar svg { width: 15px; height: 15px; flex-shrink: 0; }
 .license-bar a { margin-left: auto; color: var(--warn-deep); font-weight: 600; text-decoration: underline; }
+
+/* deliverability (mail health) */
+.deliver-check { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line-2); }
+.deliver-check:first-child { border-top: 0; }
+.deliver-check .badge { margin-top: 2px; flex-shrink: 0; }
+.deliver-check .hint { margin-top: 3px; }
+.deliver-check .small { color: var(--ink-3); word-break: break-all; }
+.dmarc-report { padding: 12px 0; border-top: 1px solid var(--line-2); }
+.dmarc-report:first-child { border-top: 0; padding-top: 0; }
+.meter { display: flex; height: 8px; border-radius: 5px; overflow: hidden; background: var(--surface-3); margin: 6px 0; }
+.meter span { display: block; height: 100%; }
+.meter-ok { background: var(--ok); }
+.meter-bad { background: var(--err); }

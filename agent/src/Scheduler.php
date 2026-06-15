@@ -42,6 +42,53 @@ final class Scheduler
         $this->every('vhost_stats', 1800, $this->refreshVhostStats(...));
         $this->every('panel_update', 4 * 3600, $this->checkPanelUpdate(...));
         $this->every('license_check', 6 * 3600, $this->checkLicense(...));
+        $this->every('rbl_monitor', 24 * 3600, $this->checkRbls(...));
+        $this->every('dmarc_ingest', 3600, $this->ingestDmarc(...));
+    }
+
+    /**
+     * Dnevno: provjeri server IP na 30+ RBL lista. Nova listanja (kojih prije nije
+     * bilo) → notifikacija adminima. Najveća rupa svih panela — svi plaćaju vanjski servis.
+     */
+    private function checkRbls(): void
+    {
+        $ip = $this->settingStr('server_ipv4');
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            return;
+        }
+        $prev = [];
+        foreach ($this->db->all(
+            'SELECT rbl, listed FROM rbl_checks r
+             WHERE ip = ? AND checked_at = (SELECT MAX(checked_at) FROM rbl_checks WHERE ip = r.ip AND rbl = r.rbl)',
+            [$ip]
+        ) as $row) {
+            $prev[(string) $row['rbl']] = (bool) $row['listed'];
+        }
+        $new_listings = [];
+        foreach (System\Deliverability::checkRbls($ip) as $r) {
+            $this->db->run('INSERT INTO rbl_checks (ip, rbl, listed) VALUES (?, ?, ?)', [$ip, $r['rbl'], (int) $r['listed']]);
+            if ($r['listed'] && !($prev[$r['rbl']] ?? false)) {
+                $new_listings[] = $r['rbl'];
+            }
+        }
+        if ($new_listings === []) {
+            return;
+        }
+        foreach ($this->db->all("SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name = 'admin'") as $a) {
+            $this->db->run(
+                "INSERT INTO notifications (user_id, severity, title, body) VALUES (?, 'error', ?, ?)",
+                [$a['id'], "Server IP listan na RBL ($ip)", 'Nove liste: ' . implode(', ', $new_listings)]
+            );
+        }
+    }
+
+    /** Svaki sat: ingest DMARC rua izvještaja iz panel mailboxa (ako je mail instaliran). */
+    private function ingestDmarc(): void
+    {
+        if ($this->db->one("SELECT 1 FROM components WHERE name = 'postfix' AND status = 'installed'") === null) {
+            return;
+        }
+        System\DmarcIngest::run($this->db);
     }
 
     /** Postavka iz settings tablice (JSON string) ili ''. */

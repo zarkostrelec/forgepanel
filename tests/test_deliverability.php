@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use ForgePanel\Agent\System\CpanelImport;
 use ForgePanel\Agent\System\Deliverability;
+use ForgePanel\Agent\System\DmarcIngest;
+use ForgePanel\Agent\System\MailQueue;
 
 // DMARC report parsing
 $dmarc_xml = <<<XML
@@ -37,6 +39,37 @@ T::assertSame(5, $report['rows'][0]['count'], 'DMARC count');
 T::assertSame('pass', $report['rows'][0]['dkim'], 'DMARC dkim pass');
 T::assertSame('quarantine', $report['rows'][1]['disposition'], 'DMARC disposition quarantine');
 T::assertThrows(\RuntimeException::class, fn () => Deliverability::parseDmarcReport('<nije>validan'), 'DMARC odbija loš XML');
+
+// DMARC ingest — izvlačenje XML-a iz raznih MIME omotača
+$plain_email = "From: dmarc@google.com\r\nSubject: report\r\nContent-Type: text/xml\r\n\r\n" . $dmarc_xml;
+$extracted = DmarcIngest::extractReports($plain_email);
+T::assertSame(1, count($extracted), 'DMARC ingest: plain text/xml izvučen');
+T::assert(str_contains($extracted[0], '<feedback'), 'DMARC ingest: sadrži feedback');
+
+// gzip prilog (base64) u multipart poruci
+$gz = base64_encode((string) gzencode($dmarc_xml));
+$mime = "Content-Type: multipart/mixed; boundary=\"BND\"\r\n\r\n"
+    . "--BND\r\nContent-Type: text/plain\r\n\r\nReport attached.\r\n"
+    . "--BND\r\nContent-Type: application/gzip; name=\"report.xml.gz\"\r\n"
+    . "Content-Transfer-Encoding: base64\r\n"
+    . "Content-Disposition: attachment; filename=\"report.xml.gz\"\r\n\r\n$gz\r\n--BND--\r\n";
+$extracted_gz = DmarcIngest::extractReports($mime);
+T::assertSame(1, count($extracted_gz), 'DMARC ingest: gzip prilog raspakiran');
+T::assert(str_contains($extracted_gz[0], 'google.com'), 'DMARC ingest: gzip sadržaj parsiran');
+
+// Poruka bez izvještaja → ništa
+T::assertSame(0, count(DmarcIngest::extractReports("Content-Type: text/plain\r\n\r\nbok")), 'DMARC ingest: nema priloga');
+
+// Postfix queue parser
+$queue_json = '{"queue_name":"deferred","queue_id":"A1B2C3D4","arrival_time":1718000000,"message_size":2048,"sender":"a@example.com","recipients":[{"address":"x@dest.com","delay_reason":"connection refused"}]}' . "\n"
+    . "garbage line\n"
+    . '{"queue_name":"active","queue_id":"FFEE99","sender":"b@example.com","message_size":512,"recipients":[{"address":"y@dest.com"}]}';
+$parsed_q = MailQueue::parseQueue($queue_json);
+T::assertSame(2, count($parsed_q), 'MailQueue: 2 poruke, smeće preskočeno');
+T::assertSame('A1B2C3D4', $parsed_q[0]['queue_id'], 'MailQueue: queue_id');
+T::assertSame('connection refused', $parsed_q[0]['reason'], 'MailQueue: razlog deferrala');
+T::assertSame('deferred', $parsed_q[0]['queue_name'], 'MailQueue: queue_name');
+T::assertSame(['x@dest.com'], $parsed_q[0]['recipients'], 'MailQueue: primatelji');
 
 // cPanel cpmove parser — sintetička struktura
 $tmp = sys_get_temp_dir() . '/cpmove-test-' . getmypid();

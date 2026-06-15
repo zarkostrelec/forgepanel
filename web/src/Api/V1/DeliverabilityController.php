@@ -15,8 +15,14 @@ final class DeliverabilityController extends Controller
     public function register(Router $router): void
     {
         $router->add('GET', '/api/v1/deliverability/rbl', $this->rbl(...));
+        $router->add('GET', '/api/v1/deliverability/rbl/history', $this->rblHistory(...));
         $router->add('POST', '/api/v1/deliverability/validate', $this->validate(...));
         $router->add('GET', '/api/v1/deliverability/dmarc', $this->dmarcReports(...));
+        $router->add('POST', '/api/v1/deliverability/dmarc/ingest', $this->dmarcIngest(...));
+        $router->add('GET', '/api/v1/deliverability/queue', $this->queue(...));
+        $router->add('POST', '/api/v1/deliverability/queue/flush', $this->queueFlush(...));
+        $router->add('POST', '/api/v1/deliverability/queue/delete-all', $this->queueDeleteAll(...));
+        $router->add('DELETE', '/api/v1/deliverability/queue/{id}', $this->queueDelete(...));
     }
 
     private function rbl(Request $request): never
@@ -63,6 +69,66 @@ final class DeliverabilityController extends Controller
                 $ctx->subscription_ids
             ));
         Response::ok($rows);
+    }
+
+    /** Zadnji spremljeni RBL rezultat po listi (scheduler ga osvježava dnevno). */
+    private function rblHistory(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'mail:read');
+        $ctx->requireRole('admin');
+        $ip = $this->serverIp();
+        $rows = $this->app->db->all(
+            'SELECT rbl, listed, checked_at FROM rbl_checks r
+             WHERE ip = ? AND checked_at = (SELECT MAX(checked_at) FROM rbl_checks WHERE ip = r.ip AND rbl = r.rbl)
+             ORDER BY listed DESC, rbl',
+            [$ip]
+        );
+        Response::ok(['ip' => $ip, 'results' => $rows]);
+    }
+
+    /** Mail queue (postfix) — pregled. Samo admin. */
+    private function queue(Request $request): never
+    {
+        $this->ctx($request, 'mail:read')->requireRole('admin');
+        Response::ok($this->app->agent->call('deliverability.check', ['action' => 'queue'], timeout_s: 30));
+    }
+
+    private function queueFlush(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'mail:write');
+        $ctx->requireRole('admin');
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.queue_flush', null, $request->ip);
+        Response::ok($this->app->agent->call('deliverability.check', ['action' => 'queue_flush'], timeout_s: 40));
+    }
+
+    private function queueDeleteAll(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'mail:write');
+        $ctx->requireRole('admin');
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.queue_delete_all', null, $request->ip);
+        Response::ok($this->app->agent->call('deliverability.check', ['action' => 'queue_delete_all'], timeout_s: 60));
+    }
+
+    private function queueDelete(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'mail:write');
+        $ctx->requireRole('admin');
+        $id = (string) $request->param('id');
+        if (!preg_match('/^[0-9A-F]{6,32}$/', $id)) {
+            throw new HttpException(422, 'invalid_queue_id');
+        }
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.queue_delete', ['queue_id' => $id], $request->ip);
+        Response::ok($this->app->agent->call('deliverability.check', ['action' => 'queue_delete', 'queue_id' => $id], timeout_s: 30));
+    }
+
+    /** Ručno pokreni DMARC rua ingest iz panel mailboxa. Samo admin. */
+    private function dmarcIngest(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'mail:write');
+        $ctx->requireRole('admin');
+        $result = $this->app->agent->call('deliverability.check', ['action' => 'dmarc_ingest'], timeout_s: 120);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.dmarc_ingest', $result, $request->ip);
+        Response::ok($result);
     }
 
     private function serverIp(): string

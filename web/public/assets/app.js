@@ -419,7 +419,7 @@ const RAIL = [
     { id: 'websites', icon: 'globe', label: 'nav.websites', key: 's', pages: ['websites'] },
     { id: 'files', icon: 'folder', label: 'nav.files', key: 'f', pages: ['files'] },
     { id: 'databases', icon: 'db', label: 'nav.databases', key: 'b', pages: ['databases'] },
-    { id: 'mail', icon: 'mail', label: 'nav.mail', key: 'e', pages: ['mail'] },
+    { id: 'mail', icon: 'mail', label: 'nav.mail', key: 'e', pages: ['mail', 'deliverability'] },
     { id: 'docker', icon: 'box', label: 'nav.docker', key: 'k', pages: ['docker'] },
     { id: 'backups', icon: 'download', label: 'nav.backups', key: 'a', pages: ['backups'] },
     { id: 'monitoring', icon: 'pulse', label: 'nav.monitoring', key: 'm', pages: ['monitoring', 'tasks'] },
@@ -430,6 +430,7 @@ const RAIL = [
 const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
 
 const TAB_GROUPS = {
+    mail: [['mail', 'nav.mail', 'mail'], ['deliverability', 'nav.deliverability', 'activity']],
     monitoring: [['monitoring', 'nav.monitoring', 'pulse'], ['tasks', 'nav.tasks', 'clock']],
     protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['cloudflare', 'nav.cloudflare', 'cloud', 'admin'], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
     server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history'], ['system', 'nav.system', 'gear'], ['distribution', 'nav.distribution', 'download'], ['licensing', 'nav.licensing', 'key']],
@@ -2430,6 +2431,7 @@ async function pageMail() {
     const status = await api('/mail/status');
     if (!status.installed) {
         main().innerHTML = `
+        ${tabsHtml('mail', 'mail')}
         <div class="card"><div class="empty">
             <p>${t('mail.not_installed')}</p>
             ${state.me.role === 'admin' ? `<button class="btn primary" id="setup">${t('mail.install')}</button>` : ''}
@@ -2446,6 +2448,7 @@ async function pageMail() {
 
     const wm = status.webmail;
     main().innerHTML = `
+    ${tabsHtml('mail', 'mail')}
     <div class="page-head"><div class="spacer"></div>
         ${wm?.hostname
             ? `<a class="btn" href="https://${esc(wm.hostname)}" target="_blank" rel="noopener">${icon('mail')}${t('mail.webmail')}</a>`
@@ -2576,6 +2579,181 @@ async function mailDomainDetail(domainId, domainName, domain) {
     container.querySelectorAll('[data-delal]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(t('common.confirm_delete'))) return;
         try { await api(`/mail/domains/${domainId}/aliases/${b.dataset.delal}`, { method: 'DELETE' }); mailDomainDetail(domainId, domainName, domain); }
+        catch (err) { toast(err.message, 'err'); }
+    }));
+}
+
+// ---------------------------------------------------------------- deliverability (mail health)
+async function pageDeliverability() {
+    setActive('deliverability');
+    const isAdmin = state.me.role === 'admin';
+    main().innerHTML = `${tabsHtml('mail', 'deliverability')}<div class="empty">${t('common.loading')}</div>`;
+
+    const [domains, dmarc] = await Promise.all([
+        api('/mail/domains').catch(() => []),
+        api('/deliverability/dmarc').catch(() => []),
+    ]);
+
+    main().innerHTML = `${tabsHtml('mail', 'deliverability')}
+    <div class="grid cols-2">
+        <div class="card" id="validator">
+            <div class="card-head"><h2>${icon('check')}${t('deliver.validator')}</h2></div>
+            <p class="hint">${t('deliver.validator_hint')}</p>
+            <form id="valf" class="row" style="gap:8px;align-items:flex-end">
+                <div class="field" style="flex:1;margin:0"><label>${t('vhost.domain')}</label>
+                    <input name="domain" required class="mono" list="maildoms" placeholder="example.com"
+                        value="${esc(domains[0]?.domain ?? '')}"></div>
+                <button class="btn primary">${icon('search')}${t('deliver.check')}</button>
+            </form>
+            <datalist id="maildoms">${domains.map((d) => `<option value="${esc(d.domain)}">`).join('')}</datalist>
+            <div id="valres" class="mt"></div>
+        </div>
+        ${isAdmin ? `<div class="card" id="rblcard">
+            <div class="card-head"><h2>${icon('shield')}${t('deliver.rbl')}</h2>
+                <button class="btn sm" id="rblnow">${icon('refresh')}${t('deliver.check_now')}</button></div>
+            <p class="hint">${t('deliver.rbl_hint')}</p>
+            <div id="rblres">${t('common.loading')}</div>
+        </div>` : `<div class="card"><div class="empty">${t('deliver.rbl_admin_only')}</div></div>`}
+    </div>
+
+    <div class="card" id="dmarccard">
+        <div class="card-head"><h2>${icon('activity')}${t('deliver.dmarc')}</h2>
+            ${isAdmin ? `<button class="btn sm" id="dmarcingest">${icon('download')}${t('deliver.ingest')}</button>` : ''}</div>
+        <p class="hint">${t('deliver.dmarc_hint')}</p>
+        ${dmarcHtml(dmarc)}
+    </div>
+
+    ${isAdmin ? `<div class="card" id="queuecard">
+        <div class="card-head"><h2>${icon('mail')}${t('deliver.queue')}</h2>
+            <span class="spacer"></span>
+            <button class="btn sm" id="qflush">${icon('play')}${t('deliver.flush')}</button>
+            <button class="btn sm danger" id="qdelall">${t('deliver.delete_all')}</button></div>
+        <p class="hint">${t('deliver.queue_hint')}</p>
+        <div id="queueres">${t('common.loading')}</div>
+    </div>` : ''}`;
+
+    // Validator (wizard)
+    document.getElementById('valf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const domain = new FormData(e.target).get('domain');
+        const box = document.getElementById('valres');
+        box.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+        try {
+            const r = await api('/deliverability/validate', { method: 'POST', body: { domain } });
+            box.innerHTML = validatorHtml(r.validation);
+        } catch (err) { box.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+    });
+
+    if (isAdmin) {
+        document.getElementById('rblnow').addEventListener('click', async (e) => {
+            e.target.disabled = true;
+            document.getElementById('rblres').innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+            try { await api('/deliverability/rbl'); } catch (err) { toast(err.message, 'err'); }
+            await loadRbl();
+            e.target.disabled = false;
+        });
+        document.getElementById('dmarcingest').addEventListener('click', async (e) => {
+            e.target.disabled = true;
+            try {
+                const r = await api('/deliverability/dmarc/ingest', { method: 'POST' });
+                toast(`${t('deliver.ingested')}: ${r.ingested} / ${r.scanned}`);
+                pageDeliverability();
+            } catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+        });
+        document.getElementById('qflush').addEventListener('click', async () => {
+            try { renderQueue(await api('/deliverability/queue/flush', { method: 'POST' })); toast(t('deliver.flushed')); }
+            catch (err) { toast(err.message, 'err'); }
+        });
+        document.getElementById('qdelall').addEventListener('click', async () => {
+            if (!confirm(t('deliver.confirm_delete_all'))) return;
+            try { renderQueue(await api('/deliverability/queue/delete-all', { method: 'POST' })); }
+            catch (err) { toast(err.message, 'err'); }
+        });
+        loadRbl();
+        loadQueue();
+    }
+}
+
+function validatorHtml(v) {
+    const row = (label, ok, detail, fix) => `
+        <div class="deliver-check">
+            <span class="badge ${ok ? 'ok' : 'err'}">${ok ? t('deliver.pass') : t('deliver.fail')}</span>
+            <div><b>${label}</b>${detail ? `<div class="mono small">${esc(detail)}</div>` : ''}
+                ${fix ? `<div class="hint">${icon('info')}${esc(fix)}</div>` : ''}</div>
+        </div>`;
+    const spf = v.spf, dkim = v.dkim, dmarc = v.dmarc;
+    return `
+        ${row('SPF', spf.found && !spf.issue, spf.record, spf.found ? (spf.issue ?? null) : t('deliver.spf_missing'))}
+        ${row('DKIM', dkim.found, dkim.found ? 'forge._domainkey' : null, dkim.found ? null : t('deliver.dkim_missing'))}
+        ${row('DMARC' + (dmarc.policy ? ` · p=${esc(dmarc.policy)}` : ''), dmarc.found && dmarc.policy !== 'none', dmarc.record,
+            !dmarc.found ? t('deliver.dmarc_missing') : (dmarc.policy === 'none' ? t('deliver.dmarc_none') : null))}`;
+}
+
+function dmarcHtml(reports) {
+    if (!reports.length) return `<div class="empty">${t('deliver.dmarc_empty')}</div>`;
+    return reports.map((rep) => {
+        const p = typeof rep.parsed === 'string' ? JSON.parse(rep.parsed) : rep.parsed;
+        const rows = p.rows ?? [];
+        let pass = 0, fail = 0;
+        rows.forEach((r) => { const c = Number(r.count) || 0; (r.dkim === 'pass' || r.spf === 'pass') ? pass += c : fail += c; });
+        const total = pass + fail || 1;
+        return `<div class="dmarc-report">
+            <div class="row" style="justify-content:space-between"><b class="mono">${esc(rep.domain)}</b>
+                <span class="small">${esc(rep.org)} · ${esc(rep.date_range)}</span></div>
+            <div class="meter"><span class="meter-ok" style="width:${(pass / total * 100).toFixed(0)}%"></span>
+                <span class="meter-bad" style="width:${(fail / total * 100).toFixed(0)}%"></span></div>
+            <div class="small">${t('deliver.aligned')}: <b style="color:var(--ok)">${pass}</b> ·
+                ${t('deliver.unaligned')}: <b style="color:var(--err)">${fail}</b></div>
+            ${fail > 0 ? `<table class="data mt"><thead><tr><th>IP</th><th class="num">${t('deliver.count')}</th><th>DKIM</th><th>SPF</th><th>${t('deliver.disposition')}</th></tr></thead><tbody>
+                ${rows.filter((r) => r.dkim !== 'pass' && r.spf !== 'pass').slice(0, 8).map((r) => `<tr>
+                    <td class="mono">${esc(r.source_ip)}</td><td class="num mono">${Number(r.count) || 0}</td>
+                    <td><span class="badge ${r.dkim === 'pass' ? 'ok' : 'err'}">${esc(r.dkim)}</span></td>
+                    <td><span class="badge ${r.spf === 'pass' ? 'ok' : 'err'}">${esc(r.spf)}</span></td>
+                    <td class="mono">${esc(r.disposition)}</td></tr>`).join('')}</tbody></table>` : ''}
+        </div>`;
+    }).join('');
+}
+
+async function loadRbl() {
+    const box = document.getElementById('rblres');
+    if (!box) return;
+    const data = await api('/deliverability/rbl/history').catch(() => ({ ip: '', results: [] }));
+    const listed = data.results.filter((r) => r.listed);
+    box.innerHTML = `
+        <div class="row" style="gap:8px;align-items:center">
+            <span class="mono">${esc(data.ip || '—')}</span>
+            ${data.results.length
+                ? (listed.length
+                    ? `<span class="badge err">${listed.length} ${t('deliver.listed')}</span>`
+                    : `<span class="badge ok">${t('deliver.clean')}</span>`)
+                : `<span class="badge warn">${t('deliver.not_checked')}</span>`}
+            ${data.results[0]?.checked_at ? `<span class="small" style="margin-left:auto">${fmtDate(data.results[0].checked_at)}</span>` : ''}
+        </div>
+        ${listed.length ? `<div class="mt">${listed.map((r) => `<div class="mono small" style="color:var(--err)">${icon('x')}${esc(r.rbl)}</div>`).join('')}</div>` : ''}`;
+}
+
+async function loadQueue() {
+    try { renderQueue(await api('/deliverability/queue')); }
+    catch (err) { const b = document.getElementById('queueres'); if (b) b.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+}
+
+function renderQueue(q) {
+    const box = document.getElementById('queueres');
+    if (!box) return;
+    const byq = Object.entries(q.by_queue || {}).map(([k, v]) => `${esc(k)}: ${v}`).join(' · ');
+    box.innerHTML = `
+        <div class="row" style="gap:8px;align-items:center"><span class="badge ${q.total ? 'warn' : 'ok'}">${q.total} ${t('deliver.in_queue')}</span>
+            ${byq ? `<span class="small">${byq}</span>` : ''}</div>
+        ${q.messages?.length ? `<table class="data mt"><thead><tr><th>ID</th><th>${t('deliver.sender')}</th><th class="hide-sm">${t('deliver.recipient')}</th><th class="hide-sm">${t('deliver.reason')}</th><th></th></tr></thead><tbody>
+            ${q.messages.map((m) => `<tr>
+                <td class="mono small">${esc(m.queue_id)}</td>
+                <td class="mono small">${esc(m.sender || '—')}</td>
+                <td class="mono small hide-sm">${esc((m.recipients || []).join(', ').slice(0, 60))}</td>
+                <td class="small hide-sm">${esc((m.reason || '').slice(0, 50))}</td>
+                <td class="num"><button class="btn sm danger" data-qdel="${esc(m.queue_id)}">${t('common.delete')}</button></td>
+            </tr>`).join('')}</tbody></table>` : `<div class="empty mt">${t('deliver.queue_empty')}</div>`}`;
+    box.querySelectorAll('[data-qdel]').forEach((b) => b.addEventListener('click', async () => {
+        try { renderQueue(await api(`/deliverability/queue/${b.dataset.qdel}`, { method: 'DELETE' })); }
         catch (err) { toast(err.message, 'err'); }
     }));
 }
@@ -3453,6 +3631,7 @@ const ROUTES = [
     [/^#\/files$/, pageFiles],
     [/^#\/databases$/, pageDatabases],
     [/^#\/mail$/, pageMail],
+    [/^#\/deliverability$/, pageDeliverability],
     [/^#\/dns$/, pageDns],
     [/^#\/cloudflare$/, pageCloudflare],
     [/^#\/backups$/, pageBackups],
