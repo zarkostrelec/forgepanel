@@ -1207,8 +1207,8 @@ function phpSettingsCard(vhost) {
     const sel = (k, opts) => `<select name="${k}" class="mono"><option value="">${t('php.default')}</option>${opts.map(([val, lbl]) =>
         `<option value="${val}" ${String(ps[k] ?? '') === val ? 'selected' : ''}>${lbl}</option>`).join('')}</select>`;
     const num = [
-        ['memory_limit', '128M'], ['max_execution_time', '30'], ['max_input_time', '60'],
-        ['post_max_size', '8M'], ['upload_max_filesize', '2M'], ['max_input_vars', '1000'],
+        ['memory_limit', '256M'], ['max_execution_time', '120'], ['max_input_time', '120'],
+        ['post_max_size', '128M'], ['upload_max_filesize', '128M'], ['max_input_vars', '5000'],
     ];
     return `
     <div class="card mt">

@@ -12,6 +12,17 @@ final class PhpFpm
 {
     private const DISABLE_FUNCTIONS = 'exec,passthru,shell_exec,system,proc_open,popen,pcntl_exec,pcntl_fork,dl';
 
+    /** Optimizirani defaulti (veći od PHP stock vrijednosti) — korisnički override ih gazi. */
+    private const DEFAULTS = [
+        'memory_limit'        => '256M',
+        'max_execution_time'  => '120',
+        'max_input_time'      => '120',
+        'post_max_size'       => '128M',
+        'upload_max_filesize' => '128M',
+        'max_input_vars'      => '5000',
+        'opcache.enable'      => '1',
+    ];
+
     /** Per-domena podesivi PHP ini-ovi (Plesk-style) + dozvoljeni format vrijednosti. */
     private const TUNABLES = [
         'memory_limit'        => '/^(-1|\d{1,6}[KMGkmg]?)$/',
@@ -39,16 +50,20 @@ final class PhpFpm
             $disable = (string) $settings['disable_functions'];
         }
 
-        // ostali podesivi ini-ovi (validacija formata — sprječava INI injection)
-        $overrides = '';
+        // optimizirani defaulti + korisnički override (validacija formata sprječava INI injection)
+        $effective = self::DEFAULTS;
         foreach (self::TUNABLES as $key => $rule) {
             if ($key === 'disable_functions' || !isset($settings[$key])) {
                 continue;
             }
             $value = trim((string) $settings[$key]);
             if ($value !== '' && preg_match($rule, $value)) {
-                $overrides .= "\nphp_admin_value[{$key}] = {$value}";
+                $effective[$key] = $value;
             }
+        }
+        $overrides = '';
+        foreach ($effective as $key => $value) {
+            $overrides .= "\nphp_admin_value[{$key}] = {$value}";
         }
 
         $pool = <<<INI

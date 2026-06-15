@@ -66,7 +66,7 @@
     "cron.command": "Naredba",
     "php.title": "PHP postavke",
     "php.default": "default",
-    "php.hint": "Prazno polje = PHP default. Vrijednosti se primjenjuju na FPM pool domene.",
+    "php.hint": "Prazno polje = optimizirani default (npr. memory_limit 256M, upload 128M). Primjenjuje se na FPM pool domene.",
     "php.saved": "PHP postavke spremljene",
     "cron.empty": "Nema cron poslova.",
     "cron.add": "Novi cron posao",
