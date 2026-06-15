@@ -10,7 +10,7 @@ const state = {
     activeTasks: new Map(),
     aiThread: (() => { try { return JSON.parse(localStorage.getItem('fp_ai_thread') || '[]'); } catch { return []; } })(),
     aiOpen: false,
-    railExpanded: localStorage.getItem('fp_rail') === '1',
+    railExpanded: localStorage.getItem('fp_rail') !== '0',
     monTimer: null,
     monRange: localStorage.getItem('fp_mon_range') || '2h',
     monRefresh: localStorage.getItem('fp_mon_refresh') || '0',
@@ -453,7 +453,7 @@ function renderShell() {
             <button class="rail-collapse" id="railtoggle" aria-label="${t('nav.toggle')}" title="${t('nav.toggle')}">${icon('chevR')}</button>
             <div class="rail-logo" title="${esc(brandName())}">${state.branding?.logo_url
                 ? `<img src="${esc(state.branding.logo_url)}" alt="${esc(brandName())}">`
-                : icon('zap')}<span class="rail-label">${esc(brandName())}</span></div>
+                : icon('zap')}<span class="rail-label">${brandName() === 'ForgePanel' ? 'Forge<b>Panel</b>' : esc(brandName())}</span><span class="rail-ver">v3</span></div>
             ${RAIL.filter(railVisible).map((r) => `
             <div class="rail-item">
                 <button class="rail-btn" data-rail="${r.id}" data-go="#/${r.pages[0]}" aria-label="${t(r.label)}">${icon(r.icon)}<span class="rail-label">${t(r.label)}</span></button>
@@ -469,7 +469,10 @@ function renderShell() {
                 <button class="rail-btn" data-go="#/profile" data-rail="profile" aria-label="${t('profile.title')}">${icon('key')}<span class="rail-label">${t('profile.title')}</span></button>
                 <span class="rail-tip">${t('profile.title')}</span>
             </div>
-            <button class="rail-avatar" aria-label="${esc(state.me.email)}">${esc(initials)}</button>
+            <button class="rail-user" aria-label="${esc(state.me.email)}">
+                <span class="av">${esc(initials)}</span>
+                <span class="who">${esc(state.me.email.split('@')[0])}<small>${esc(state.me.role)} · root</small></span>
+            </button>
         </nav>
         <div class="main">
             <header class="topbar">
@@ -501,7 +504,7 @@ function renderShell() {
         toggleTheme();
         e.currentTarget.innerHTML = icon(state.theme === 'dark' ? 'sun' : 'moon');
     });
-    $app.querySelector('.rail-avatar').addEventListener('click', (e) => {
+    $app.querySelector('.rail-user').addEventListener('click', (e) => {
         e.stopPropagation();
         const existing = document.querySelector('.user-pop');
         if (existing) return existing.remove();
@@ -785,6 +788,90 @@ function svcUptime(props) {
 
 const SEV = { ok: 'var(--ok)', err: 'var(--danger)', warn: 'var(--warn)', info: 'var(--info)' };
 
+// ---- NOVA HUD viz primitivi (instrument strip, kružni gaugeovi, topologija) ----
+// Široka sparkline koja se rasteže na container (viewBox + non-scaling-stroke)
+function stripSpark(values, color = 'var(--accent)') {
+    const v = (values || []).filter((x) => Number.isFinite(x));
+    if (v.length < 2) return '';
+    const W = 300, H = 42, max = Math.max(...v) * 1.15 || 1, step = W / (v.length - 1);
+    const pts = v.map((x, i) => `${(i * step).toFixed(1)},${(H - 3 - (x / max) * (H - 8)).toFixed(1)}`);
+    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="100%">
+        <polygon points="0,${H} ${pts.join(' ')} ${W},${H}" fill="${color}" opacity="0.13"/>
+        <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
+}
+
+// Kružni gauge (donji raspor "gap", obojeni luk + tickovi)
+function gaugeSvg({ value = 0, max = 100, color = 'var(--accent)', label = '', unit = '%', sub = '', dp = 0 }) {
+    const r = 46, c = 2 * Math.PI * r, gap = 0.26, arc = c * (1 - gap);
+    const frac = Math.max(0, Math.min(1, value / max));
+    const rot = 90 + gap * 180, cx = 66, cy = 66;
+    let ticks = '';
+    for (let i = 0; i <= 10; i++) {
+        const ang = (rot + (arc / c) * 360 * (i / 10)) * Math.PI / 180;
+        const x1 = cx + (r + 7) * Math.cos(ang), y1 = cy + (r + 7) * Math.sin(ang);
+        const x2 = cx + (r + 11) * Math.cos(ang), y2 = cy + (r + 11) * Math.sin(ang);
+        ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--line-strong)" stroke-width="1"/>`;
+    }
+    return `<div class="gauge">
+        <svg viewBox="0 0 132 132" class="gauge-svg">
+            <g opacity="0.5">${ticks}</g>
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line-strong)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${arc.toFixed(1)} ${c.toFixed(1)}" transform="rotate(${rot} ${cx} ${cy})"/>
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(arc * frac).toFixed(1)} ${c.toFixed(1)}" transform="rotate(${rot} ${cx} ${cy})" style="transition:stroke-dasharray .6s cubic-bezier(.16,1,.3,1)"/>
+        </svg>
+        <div class="gauge-center"><div class="gauge-val tnum">${value.toFixed(dp)}<span class="u">${unit}</span></div><div class="gauge-sub">${sub}</div></div>
+        <div class="gauge-label">${label}</div></div>`;
+}
+
+// Animirana topologija servera (čvorovi + tekući paketi po vezama)
+function topologyViz(services, cfConnected) {
+    const up = (re) => Object.entries(services).some(([n, p]) => re.test(n) && p.ActiveState === 'active');
+    const phpKey = Object.keys(services).find((n) => /php.*fpm/i.test(n));
+    const chain = [{ label: 'Internet', ok: true }];
+    if (cfConnected) chain.push({ label: 'Cloudflare', ok: true });
+    chain.push({ label: 'nginx', ok: up(/^nginx/) });
+    chain.push({ label: phpKey ? phpKey.replace('-fpm', '') : 'php-fpm', ok: phpKey ? services[phpKey].ActiveState === 'active' : false });
+    const dbs = Object.entries(services).filter(([n]) => /maria|mysql|redis/i.test(n)).map(([n, p]) => ({ label: n, ok: p.ActiveState === 'active' }));
+    if (!dbs.length) dbs.push({ label: 'db', ok: false });
+
+    const W = 880, H = 180, NW = 78, NH = 38;
+    const x0 = 60, x1 = 640, step = chain.length > 1 ? (x1 - x0) / (chain.length - 1) : 0;
+    const pos = chain.map((nd, i) => ({ ...nd, x: x0 + step * i, y: 90 }));
+    const dbX = 800;
+    const dbPos = dbs.map((d, i) => ({ ...d, x: dbX, y: dbs.length === 1 ? 90 : 60 + i * 60 }));
+    const last = pos[pos.length - 1];
+
+    const node = (nd, i) => `<g transform="translate(${(nd.x - NW / 2).toFixed(0)} ${(nd.y - NH / 2).toFixed(0)})" class="topo-node-g" style="--i:${i}">
+        <rect x="0" y="0" width="${NW}" height="${NH}" rx="9" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <circle cx="13" cy="${NH / 2}" r="3" fill="${nd.ok ? 'var(--ok)' : 'var(--danger)'}"/>
+        <text x="24" y="${NH / 2 + 4}" fill="var(--ink-2)" font-size="10.5" font-family="var(--font-mono)">${esc(nd.label).slice(0, 9)}</text></g>`;
+
+    const linkPaths = [];
+    for (let i = 1; i < pos.length; i++) linkPaths.push([pos[i - 1], pos[i]]);
+    dbPos.forEach((d) => linkPaths.push([last, d]));
+
+    const links = linkPaths.map(([A, B], i) => {
+        const ax = A.x + NW / 2, bx = B.x - NW / 2, mx = (ax + bx) / 2;
+        const d = `M ${ax.toFixed(0)} ${A.y} C ${mx.toFixed(0)} ${A.y}, ${mx.toFixed(0)} ${B.y}, ${bx.toFixed(0)} ${B.y}`;
+        return `<path d="${d}" fill="none" stroke="var(--line-strong)" stroke-width="1.5"/>
+            <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 10" class="topo-flow"/>
+            <circle r="2.6" fill="var(--info)"><animateMotion dur="${(2.4 + (i % 3) * 0.5).toFixed(1)}s" repeatCount="indefinite" path="${d}"/></circle>`;
+    }).join('');
+
+    return `<div class="topo-viz"><svg viewBox="0 0 ${W} ${H}" class="topo-svg" preserveAspectRatio="xMidYMid meet">
+        ${links}
+        ${pos.map(node).join('')}
+        ${dbPos.map((d, i) => node(d, pos.length + i)).join('')}
+    </svg></div>`;
+}
+
+const stripMetric = ({ label, tag = '', val, sub, spark = '', end = false }) => `
+    <div class="metric${end ? ' metric-end' : ''}">
+        <div class="m-head"><span class="m-label">${label}</span>${tag ? `<span class="m-tag">${tag}</span>` : ''}</div>
+        <div class="m-val tnum">${val}</div>
+        <div class="m-sub">${sub}</div>
+        ${spark ? `<div class="m-spark">${spark}</div>` : ''}
+    </div>`;
+
 async function refreshDashboard(cfConnected) {
     const body = document.getElementById('dashbody');
     if (!body) return;
@@ -805,26 +892,35 @@ async function refreshDashboard(cfConnected) {
     const sv = Object.entries(services);
     const healthy = sv.filter(([, p]) => p.ActiveState === 'active').length;
 
-    // KPI kartice (pravi podaci)
-    const kpis = [];
+    // ── instrument strip (5 metrika, otvoreni hairline raspored) ──
+    const uptimeTxt = metrics ? `${Math.floor(metrics.uptime_s / 86400)}d ${Math.floor((metrics.uptime_s % 86400) / 3600)}h` : '—';
+    const problems = vhosts.filter((v) => v.status === 'error' || v.status === 'suspended').length;
+    let stripHtml = '';
+    const gauges = [];
     if (metrics) {
         const cpuPct = metrics.cpu_pct ?? Math.min(100, metrics.load[0] / metrics.cpu_count * 100);
-        kpis.push(metricCard({ label: 'CPU', value: Math.round(cpuPct), unit: '%',
-            sub: `load ${metrics.load.map((l) => l.toFixed(2)).join(' · ')}`,
-            sparkHtml: spark(cpuHist.slice(-44).map((p) => Number(p.value))) }));
-        kpis.push(metricCard({ label: 'RAM', value: fmtBytes(metrics.mem_total_bytes - metrics.mem_available_bytes).replace(/ .*/, ''),
-            unit: `/ ${fmtBytes(metrics.mem_total_bytes)}`, sub: `${Math.round((1 - metrics.mem_available_bytes / metrics.mem_total_bytes) * 100)}% iskorišteno`,
-            sparkHtml: spark(memHist.slice(-44).map((p) => Number(p.value)), { color: 'var(--info)' }) }));
-        kpis.push(metricCard({ label: 'Disk', value: fmtBytes(metrics.disk_total_bytes - metrics.disk_free_bytes).replace(/ .*/, ''),
-            unit: `/ ${fmtBytes(metrics.disk_total_bytes)}`, sub: `${Math.round((1 - metrics.disk_free_bytes / metrics.disk_total_bytes) * 100)}% · ${fmtBytes(metrics.disk_free_bytes)} slobodno` }));
-        kpis.push(metricCard({ label: 'Mreža', value: lastVal(netRx) != null ? fmtBytes(lastVal(netRx)).replace(/ .*/, '') : '—',
-            unit: lastVal(netRx) != null ? fmtBytes(lastVal(netRx)).replace(/^[\d.,]+ /, '') + '/s' : '', sub: 'dolazni promet',
-            sparkHtml: spark(netRx.slice(-44).map((p) => Number(p.value)), { color: 'var(--ok)' }) }));
+        const ramUsed = metrics.mem_total_bytes - metrics.mem_available_bytes;
+        const ramPct = Math.round((1 - metrics.mem_available_bytes / metrics.mem_total_bytes) * 100);
+        const diskUsed = metrics.disk_total_bytes - metrics.disk_free_bytes;
+        const diskPct = Math.round((1 - metrics.disk_free_bytes / metrics.disk_total_bytes) * 100);
+        const netNow = lastVal(netRx);
+        const valUnit = (bytes, suffix = '') => `${fmtBytes(bytes).replace(/ .*/, '')}<span class="u">${fmtBytes(bytes).replace(/^[\d.,]+ /, '')}${suffix}</span>`;
+        stripHtml =
+            stripMetric({ label: 'CPU', tag: `${metrics.cpu_count} vCPU`, val: `${Math.round(cpuPct)}<span class="u">%</span>`, sub: `load ${metrics.load.map((l) => l.toFixed(2)).join(' · ')}`, spark: stripSpark(cpuHist.slice(-48).map((p) => Number(p.value)), 'var(--accent)') }) +
+            stripMetric({ label: 'RAM', tag: fmtBytes(metrics.mem_total_bytes), val: valUnit(ramUsed), sub: `${ramPct}% iskorišteno`, spark: stripSpark(memHist.slice(-48).map((p) => Number(p.value)), 'var(--info)') }) +
+            stripMetric({ label: 'Disk', tag: fmtBytes(metrics.disk_total_bytes), val: valUnit(diskUsed), sub: `${fmtBytes(metrics.disk_free_bytes)} slobodno` }) +
+            stripMetric({ label: 'Mreža', tag: '↓ in', val: netNow != null ? valUnit(netNow, '/s') : '—', sub: 'dolazni promet', spark: stripSpark(netRx.slice(-48).map((p) => Number(p.value)), 'var(--accent)') }) +
+            stripMetric({ label: t('nav.websites'), val: String(vhosts.length), sub: `<span class="dot-good"></span>${upCount} aktivnih · ${problems} problema`, end: true });
+        gauges.push(gaugeSvg({ value: Math.round(cpuPct), max: 100, color: 'var(--accent)', label: 'CPU', unit: '%', sub: `${metrics.cpu_count} vCPU` }));
+        gauges.push(gaugeSvg({ value: ramPct, max: 100, color: 'var(--info)', label: 'RAM', unit: '%', sub: `${fmtBytes(ramUsed)} / ${fmtBytes(metrics.mem_total_bytes)}` }));
+        gauges.push(gaugeSvg({ value: diskPct, max: 100, color: 'var(--ok)', label: 'DISK', unit: '%', sub: `${fmtBytes(diskUsed)} / ${fmtBytes(metrics.disk_total_bytes)}` }));
+        gauges.push(gaugeSvg({ value: metrics.load[0], max: Math.max(1, metrics.cpu_count), color: 'var(--warn)', label: 'LOAD', unit: '', sub: '1 min avg', dp: 2 }));
+    } else {
+        stripHtml = stripMetric({ label: t('nav.websites'), val: String(vhosts.length), sub: `${upCount} aktivnih`, end: true });
     }
-    kpis.push(metricCard({ label: t('nav.websites'), value: vhosts.length, sub: `${upCount} aktivnih` }));
 
     body.innerHTML = `
-    <div class="grid cols-5" style="margin-bottom:var(--gap)">${kpis.slice(0, 5).join('')}</div>
+    <div class="strip">${stripHtml}</div>
 
     ${insights.items.length ? `
     <div class="ai-box dash-ai" style="margin-bottom:var(--gap)">
@@ -839,27 +935,19 @@ async function refreshDashboard(cfConnected) {
         </div>
     </div>` : ''}
 
-    <div class="grid split">
-        <div style="display:flex;flex-direction:column;gap:var(--gap);min-width:0">
-            <div class="card flush">
-                <div class="card-head"><h2>${t('dash.topology')}</h2><span class="spacer"></span>
-                    <span class="badge ${healthy === sv.length ? 'ok' : 'warn'}">${healthy}/${sv.length} ${t('dash.healthy')}</span></div>
-                <div class="topo">
-                    <span class="topo-node">${dot('ok')} Internet</span>
-                    ${cfConnected ? `<span class="topo-link"></span><span class="topo-node">${icon('cloud')} Cloudflare</span>` : ''}
-                    <span class="topo-link"></span><span class="topo-node">${dot(serviceUp(services, 'nginx') ? 'ok' : 'err')} nginx</span>
-                    <span class="topo-link"></span><span class="topo-stack">
-                        ${sv.filter(([n]) => /fpm|apache2/.test(n)).map(([n, p]) => `<span class="topo-node sm">${dot(p.ActiveState === 'active' ? 'ok' : 'err')} ${esc(n.replace('-fpm', ''))}</span>`).join('') || `<span class="topo-node sm">${dot('warn')} php-fpm</span>`}
-                    </span>
-                    <span class="topo-link"></span><span class="topo-stack">
-                        ${sv.filter(([n]) => /maria|mysql|redis/.test(n)).map(([n, p]) => `<span class="topo-node sm">${dot(p.ActiveState === 'active' ? 'ok' : 'err')} ${esc(n)}</span>`).join('') || `<span class="topo-node sm">${dot('warn')} db</span>`}
-                    </span>
-                </div>
-                <div class="topo-foot mono">uptime ${metrics ? Math.floor(metrics.uptime_s / 86400) + 'd ' + Math.floor((metrics.uptime_s % 86400) / 3600) + 'h' : '—'} · Ubuntu 26.04 LTS</div>
-            </div>
-            <div class="card flush">
-                <div class="card-head"><h2>${t('dash.services')}</h2><span class="spacer"></span>
-                    <button class="btn small" id="chkupd">${icon('refresh')}${t('dash.check_updates')}</button>
+    <div class="dash-grid">
+        <div class="dash-left">
+            <section class="card flush hud">
+                <div class="card-head"><h2>${t('dash.topology')}</h2>
+                    <span class="badge ${healthy === sv.length ? 'ok' : 'warn'}">${healthy}/${sv.length} ${t('dash.healthy')}</span>
+                    <span class="spacer"></span>
+                    <span class="topo-meta mono hide-sm">uptime <b>${uptimeTxt}</b> · Ubuntu <b>26.04 LTS</b></span></div>
+                ${gauges.length ? `<div class="gauge-row">${gauges.join('')}</div>` : ''}
+                ${topologyViz(services, cfConnected)}
+            </section>
+            <section class="card flush">
+                <div class="card-head"><h2>${t('dash.services')}</h2><span class="count">${sv.length} procesa</span><span class="spacer"></span>
+                    <button class="btn small ghost" id="chkupd">${icon('refresh')}${t('dash.check_updates')}</button>
                     <a class="btn small" href="#/monitoring">${t('dash.all')} ${icon('chevR')}</a></div>
                 <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th></tr></thead><tbody>
                 ${sv.map(([name, p]) => `<tr>
@@ -869,10 +957,10 @@ async function refreshDashboard(cfConnected) {
                     <td class="mono num">${p.mem_bytes != null ? fmtBytes(p.mem_bytes) : '—'}</td>
                     <td class="mono num hide-sm">${svcUptime(p)}</td></tr>`).join('')}
                 </tbody></table>
-            </div>
+            </section>
         </div>
-        <div style="display:flex;flex-direction:column;gap:var(--gap);min-width:0">
-            <div class="card flush">
+        <div class="dash-right">
+            <section class="card flush">
                 <div class="card-head"><h2>${t('dash.live_events')}</h2><span class="spacer"></span>
                     <span class="live-dot">${dot('ok', true)} live</span></div>
                 <div class="feed">${feed.events.length ? feed.events.map((e) => `
@@ -881,8 +969,8 @@ async function refreshDashboard(cfConnected) {
                         <span class="feed-ico" style="color:${SEV[e.severity] || 'var(--ink-3)'}">${icon(feedIcon(e.kind, e.severity))}</span>
                         <span class="feed-text">${esc(e.text)}</span>
                     </div>`).join('') : `<div class="empty">Nema događaja u zadnja 24 h</div>`}</div>
-            </div>
-            <div class="card flush">
+            </section>
+            <section class="card flush">
                 <div class="card-head"><h2>${t('dash.recent_deploys')}</h2></div>
                 ${feed.deploys.length ? feed.deploys.map((d) => `
                     <div class="feed-row">
@@ -890,8 +978,8 @@ async function refreshDashboard(cfConnected) {
                         <span class="mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(d.domain)}</span>
                         <span class="mono hide-sm" style="color:var(--ink-3);font-size:var(--fs-xs)">${esc(d.branch || '')} ${d.last_commit ? esc(String(d.last_commit).slice(0, 7)) : ''}</span>
                         <span style="margin-left:auto;color:var(--ink-3);font-size:var(--fs-xs);white-space:nowrap">${timeAgo(d.last_deploy_at)}</span>
-                    </div>`).join('') : `<div class="empty">Nema deploya</div>`}
-            </div>
+                    </div>`).join('') : `<div class="empty">${t('dash.no_deploys') !== 'dash.no_deploys' ? t('dash.no_deploys') : 'Nema deploya'}</div>`}
+            </section>
         </div>
     </div>`;
 
