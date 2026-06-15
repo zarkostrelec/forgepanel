@@ -942,3 +942,9 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 .brand-mark svg { width: 22px; height: 22px; }
 .brand-pv-name { font-weight: 600; font-size: 1.05rem; }
 .brand-pv-sub { color: var(--ink-3); font-size: var(--fs-xs); }
+
+/* grid bez rastezanja stupaca na jednaku visinu (mail mailboxi/aliasi) */
+.grid.top { align-items: start; }
+/* mail detail kartice — h2 razmak + manje prazno stanje */
+.grid.top .card > h2 { margin: 0 0 12px; font-size: var(--fs-base); }
+.grid.top .card .empty { padding: 18px 0; }

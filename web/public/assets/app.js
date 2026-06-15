@@ -2665,7 +2665,7 @@ async function mailDomainDetail(domainId, domainName, domain) {
     ]);
 
     container.innerHTML = `
-    <div class="grid cols-2 mt">
+    <div class="grid cols-2 mt top">
         <div class="card">
             <h2>${t('mail.mailboxes')} — <span class="mono">${esc(domainName)}</span></h2>
             ${mailboxes.length ? `<table class="data"><tbody>
@@ -2766,14 +2766,14 @@ async function pageDeliverability() {
         </div>` : `<div class="card"><div class="empty">${t('deliver.rbl_admin_only')}</div></div>`}
     </div>
 
-    <div class="card" id="dmarccard">
+    <div class="card mt" id="dmarccard">
         <div class="card-head"><h2>${icon('activity')}${t('deliver.dmarc')}</h2>
             ${isAdmin ? `<button class="btn sm" id="dmarcingest">${icon('download')}${t('deliver.ingest')}</button>` : ''}</div>
         <p class="hint">${t('deliver.dmarc_hint')}</p>
         ${dmarcHtml(dmarc)}
     </div>
 
-    ${isAdmin ? `<div class="card" id="queuecard">
+    ${isAdmin ? `<div class="card mt" id="queuecard">
         <div class="card-head"><h2>${icon('mail')}${t('deliver.queue')}</h2>
             <span class="spacer"></span>
             <button class="btn sm" id="qflush">${icon('play')}${t('deliver.flush')}</button>
