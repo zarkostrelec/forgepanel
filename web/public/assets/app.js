@@ -424,7 +424,7 @@ const RAIL = [
     { id: 'backups', icon: 'download', label: 'nav.backups', key: 'a', pages: ['backups'] },
     { id: 'monitoring', icon: 'pulse', label: 'nav.monitoring', key: 'm', pages: ['monitoring', 'tasks'] },
     { id: 'protect', icon: 'shield', label: 'nav.protect', key: 'p', pages: ['ssl', 'dns', 'cloudflare', 'security', 'firewall'] },
-    { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config', 'system', 'distribution', 'licensing'] },
+    { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config', 'system', 'migrator', 'distribution', 'licensing'] },
     { id: 'users', icon: 'users', label: 'nav.users', key: 'o', roles: ['admin', 'reseller'], pages: ['users'] },
 ];
 const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
@@ -433,7 +433,7 @@ const TAB_GROUPS = {
     mail: [['mail', 'nav.mail', 'mail'], ['deliverability', 'nav.deliverability', 'activity']],
     monitoring: [['monitoring', 'nav.monitoring', 'pulse'], ['tasks', 'nav.tasks', 'clock']],
     protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['cloudflare', 'nav.cloudflare', 'cloud', 'admin'], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
-    server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history'], ['system', 'nav.system', 'gear'], ['distribution', 'nav.distribution', 'download'], ['licensing', 'nav.licensing', 'key']],
+    server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history'], ['system', 'nav.system', 'gear'], ['migrator', 'nav.migrator', 'upload'], ['distribution', 'nav.distribution', 'download'], ['licensing', 'nav.licensing', 'key']],
 };
 
 // tab strip za grupirane stranice (Zaštita: SSL · DNS · Sigurnost · Firewall, itd.)
@@ -3394,6 +3394,84 @@ async function pageSystem() {
     });
 }
 
+// ---------------------------------------------------------------- migrator (admin)
+async function pageMigrator() {
+    setActive('migrator');
+    main().innerHTML = `${tabsHtml('server', 'migrator')}
+    <div class="card" style="max-width:760px">
+        <div class="card-head"><h2>${t('migrator.title')}</h2></div>
+        <p class="hint">${t('migrator.intro')}</p>
+        <form id="upf">
+            <div class="grid cols-2">
+                <div class="field"><label>${t('migrator.source')}</label>
+                    <select name="type" class="mono"><option value="cpanel">cPanel (cpmove)</option><option value="plesk">Plesk (backup XML)</option></select></div>
+                <div class="field"><label>${t('migrator.archive')}</label>
+                    <input type="file" name="archive" accept=".tar,.gz,.tgz,.zip" required></div>
+            </div>
+            <button class="btn primary">${icon('upload')}${t('migrator.upload')}</button>
+        </form>
+        <div id="migout" class="mt"></div>
+    </div>`;
+
+    main().querySelector('#upf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const out = document.getElementById('migout');
+        const fd = new FormData(e.target);
+        out.innerHTML = `<div class="empty">${t('migrator.uploading')}</div>`;
+        try {
+            const up = await apiUpload('/migrator/upload', fd);
+            out.innerHTML = `<div class="empty">${t('migrator.analyzing')}</div>`;
+            const parsed = await api(`/migrator/${up.token}/analyze`);
+            renderMigratorReport(out, up.token, up.type, parsed);
+        } catch (err) { out.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+    });
+}
+
+async function renderMigratorReport(out, token, type, parsed) {
+    const subs = await api('/subscriptions').catch(() => []);
+    const list = (arr, max = 20) => (arr || []).slice(0, max).map((x) => `<span class="badge">${esc(x)}</span>`).join(' ') || '—';
+    out.innerHTML = `
+        <div class="alert ok">${t('migrator.found')} — ${type}</div>
+        <div class="mig-block"><b>${t('nav.websites')} (${(parsed.domains || []).length})</b><div class="mt">${list(parsed.domains)}</div></div>
+        <div class="mig-block"><b>${t('nav.databases')} (${(parsed.databases || []).length})</b><div class="mt">${list(parsed.databases)}</div></div>
+        <div class="mig-block"><b>${t('dash.mailboxes')} (${(parsed.email_accounts || []).length})</b><div class="mt">${list(parsed.email_accounts)}</div></div>
+        <form id="impf" class="mt">
+            <div class="field" style="max-width:360px"><label>${t('migrator.target_sub')}</label>
+                <select name="subscription_id" class="mono" required>
+                    ${subs.map((s) => `<option value="${s.id}">#${s.id} — ${esc(s.email || '')} (${esc(s.plan || '')})</option>`).join('')}
+                </select></div>
+            <button class="btn primary">${icon('download')}${t('migrator.import')}</button>
+            <span class="hint">${t('migrator.import_hint')}</span>
+        </form>
+        <div id="impout" class="mt"></div>`;
+
+    out.querySelector('#impf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!confirm(t('migrator.confirm_import'))) return;
+        const subscription_id = Number(new FormData(e.target).get('subscription_id'));
+        const impout = document.getElementById('impout');
+        impout.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+        try {
+            const r = await api(`/migrator/${token}/import`, { method: 'POST', body: { subscription_id } });
+            impout.innerHTML = `<div class="alert ok">
+                ${t('migrator.imported')}: ${r.vhosts.length} ${t('nav.websites')}, ${r.databases.length} ${t('nav.databases')}.
+                ${r.skipped.length ? `<div class="mt small">${t('migrator.skipped')}: ${r.skipped.map(esc).join(', ')}</div>` : ''}</div>`;
+        } catch (err) { impout.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+    });
+}
+
+// multipart upload (api() je JSON-only)
+async function apiUpload(path, formData) {
+    const res = await fetch(`/api/v1${path}`, {
+        method: 'POST',
+        headers: { ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}) },
+        body: formData,
+    });
+    const json = await res.json().catch(() => ({ ok: false, error: 'bad_response' }));
+    if (!json.ok) throw new Error(json.error ?? `http_${res.status}`);
+    return json.data;
+}
+
 async function pageAbout() {
     setActive('about', [t('nav.about')]);
     const b = brandName();
@@ -3859,6 +3937,7 @@ const ROUTES = [
     [/^#\/firewall$/, pageFirewall],
     [/^#\/config$/, pageConfig],
     [/^#\/system$/, pageSystem],
+    [/^#\/migrator$/, pageMigrator],
     [/^#\/distribution$/, pageDistribution],
     [/^#\/licensing$/, pageLicensing],
     [/^#\/about$/, pageAbout],

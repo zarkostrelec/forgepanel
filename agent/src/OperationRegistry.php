@@ -45,6 +45,7 @@ final class OperationRegistry
         'firewall.action'   => Operations\FirewallAction::class,
         'config.history'    => Operations\ConfigHistory::class,
         'migrator.cpanel_parse' => Operations\MigratorCpanelParse::class,
+        'migrator.plesk_parse' => Operations\MigratorPleskParse::class,
         'waf.toggle'        => Operations\WafToggle::class,
         'waf.rule'          => Operations\WafRule::class,
         'country.block'     => Operations\CountryBlock::class,

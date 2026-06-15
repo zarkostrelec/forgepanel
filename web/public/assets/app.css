@@ -928,3 +928,7 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 .app-h { display: flex; align-items: center; gap: 8px; font-size: 1rem; margin-bottom: 4px; }
 .app-h svg { width: 18px; height: 18px; }
 .app-card .hint { flex: 1; margin: 4px 0 10px; }
+
+/* migrator dry-run pregled */
+.mig-block { padding: 10px 0; border-top: 1px solid var(--line-2); }
+.mig-block:first-of-type { border-top: 0; }

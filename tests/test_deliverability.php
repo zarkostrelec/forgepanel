@@ -6,6 +6,7 @@ use ForgePanel\Agent\System\CpanelImport;
 use ForgePanel\Agent\System\Deliverability;
 use ForgePanel\Agent\System\DmarcIngest;
 use ForgePanel\Agent\System\MailQueue;
+use ForgePanel\Agent\System\PleskImport;
 
 // DMARC report parsing
 $dmarc_xml = <<<XML
@@ -95,3 +96,31 @@ T::assertSame('testuser', $parsed['username'], 'cpmove username iz cp/');
 // cleanup
 exec('rm -rf ' . escapeshellarg($tmp));
 T::assertThrows(\RuntimeException::class, fn () => CpanelImport::parse('/nepostojeci/dir-' . getmypid()), 'cpmove odbija ne-cPanel strukturu');
+
+// Plesk backup XML parser — sintetička struktura
+$ptmp = sys_get_temp_dir() . '/plesk-test-' . getmypid();
+mkdir($ptmp, 0o755, true);
+file_put_contents("$ptmp/backup_info.xml", <<<XML
+<?xml version="1.0"?>
+<migration-dump>
+  <domain name="example.com">
+    <mailsystem><mailusers>
+      <mailuser name="info"/>
+      <mailuser name="sales"/>
+    </mailusers></mailsystem>
+    <database name="ex_wp" type="mysql">
+      <dbuser name="ex_dbu"/>
+    </database>
+  </domain>
+  <subdomain name="shop.example.com"/>
+</migration-dump>
+XML);
+$pp = PleskImport::parse($ptmp);
+T::assert(in_array('example.com', $pp['domains'], true), 'Plesk domena');
+T::assert(in_array('shop.example.com', $pp['domains'], true), 'Plesk subdomena');
+T::assert(in_array('ex_wp', $pp['databases'], true), 'Plesk baza');
+T::assert(in_array('ex_dbu', $pp['db_users'], true), 'Plesk DB user');
+T::assert(in_array('info@example.com', $pp['email_accounts'], true), 'Plesk mailbox');
+T::assertSame('example.com', $pp['main_domain'], 'Plesk main domain');
+exec('rm -rf ' . escapeshellarg($ptmp));
+T::assertThrows(\RuntimeException::class, fn () => PleskImport::parse('/nepostojeci/plesk-' . getmypid()), 'Plesk odbija ne-Plesk strukturu');
