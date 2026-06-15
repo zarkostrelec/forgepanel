@@ -20,6 +20,43 @@ final class DashboardController extends Controller
     {
         $router->add('GET', '/api/v1/dashboard/feed', $this->feed(...));
         $router->add('GET', '/api/v1/dashboard/insights', $this->insights(...));
+        $router->add('GET', '/api/v1/dashboard/usage', $this->usage(...));
+    }
+
+    /**
+     * Potrošnja plana pozivatelja (disk, domene, mailboxi, baze) vs. limiti —
+     * klijentski dashboard. Zbroj preko svih pretplata korisnika.
+     */
+    private function usage(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'monitoring:read');
+        $sids = $ctx->subscription_ids;
+        if ($sids === [] && $ctx->isAdmin()) {
+            $sids = [$this->adminSubscription($ctx)];
+        }
+        if ($sids === []) {
+            Response::ok(['disk' => null, 'domains' => null, 'mailboxes' => null, 'databases' => null]);
+        }
+        $in = implode(',', array_fill(0, count($sids), '?'));
+
+        $limits = $this->app->db->one(
+            "SELECT COALESCE(SUM(p.disk_bytes),0) AS disk, COALESCE(SUM(p.max_domains),0) AS domains,
+                    COALESCE(SUM(p.max_mailboxes),0) AS mailboxes, COALESCE(SUM(p.max_databases),0) AS databases
+             FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.id IN ($in)",
+            $sids
+        ) ?? ['disk' => 0, 'domains' => 0, 'mailboxes' => 0, 'databases' => 0];
+
+        $disk_used = (int) ($this->app->db->one("SELECT COALESCE(SUM(disk_bytes),0) AS u FROM vhosts WHERE subscription_id IN ($in)", $sids)['u'] ?? 0);
+        $domains_used = (int) ($this->app->db->one("SELECT COUNT(*) AS u FROM vhosts WHERE subscription_id IN ($in)", $sids)['u'] ?? 0);
+        $mb_used = (int) ($this->app->db->one("SELECT COUNT(*) AS u FROM mailboxes m JOIN mail_domains d ON d.id = m.mail_domain_id WHERE d.subscription_id IN ($in)", $sids)['u'] ?? 0);
+        $db_used = (int) ($this->app->db->one("SELECT COUNT(*) AS u FROM db_databases WHERE subscription_id IN ($in)", $sids)['u'] ?? 0);
+
+        Response::ok([
+            'disk' => ['used' => $disk_used, 'limit' => (int) $limits['disk']],
+            'domains' => ['used' => $domains_used, 'limit' => (int) $limits['domains']],
+            'mailboxes' => ['used' => $mb_used, 'limit' => (int) $limits['mailboxes']],
+            'databases' => ['used' => $db_used, 'limit' => (int) $limits['databases']],
+        ]);
     }
 
     /** Spojeni kronološki feed: audit (kurirani opovi) + taskovi + uptime promjene. */

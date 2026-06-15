@@ -50,6 +50,7 @@ final class OperationRegistry
         'node.app'          => Operations\NodeApp::class,
         'terminal.exec'     => Operations\TerminalExec::class,
         'deliverability.check' => Operations\DeliverabilityCheck::class,
+        'alarm.test'        => Operations\AlarmTest::class,
         'staging.clone'     => Operations\StagingClone::class,
         'apps.wp_install'   => Operations\WpInstall::class,
         'apps.wp_checksums' => Operations\WpChecksums::class,

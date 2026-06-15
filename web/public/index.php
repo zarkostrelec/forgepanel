@@ -32,6 +32,14 @@ if (preg_match('#^/lang/([a-z]{2})\.json$#', $path, $m)) {
     }
 }
 
+// Javna status stranica (bez logina) — /status/<token> servira samostalni HTML
+if (preg_match('#^/status/[a-f0-9]{32}$#', $path)) {
+    Response::securityHeaders();
+    header('Content-Type: text/html; charset=utf-8');
+    readfile(__DIR__ . '/status.html');
+    exit;
+}
+
 // SPA shell — sve što nije API vraća UI (hash routing na klijentu)
 if (!str_starts_with($path, '/api/')) {
     Response::securityHeaders();

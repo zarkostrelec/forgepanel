@@ -87,6 +87,7 @@ final class App
             new Api\V1\ServersController($this),
             new Api\V1\TasksController($this),
             new Api\V1\MonitoringController($this),
+            new Api\V1\StatusController($this),
             new Api\V1\DashboardController($this),
             new Api\V1\SslController($this),
             new Api\V1\TokensController($this),

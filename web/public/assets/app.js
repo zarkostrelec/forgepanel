@@ -935,21 +935,92 @@ async function pageDashboard() {
     bindVhostRows();
 }
 
-// klijentski dashboard (bez admin metrika) — zadrži jednostavan prikaz
+// klijentski dashboard — potrošnja plana, SSL istek, statusi, status stranica
 async function pageDashboardClient() {
     main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
-    const [vhosts, certs] = await Promise.all([api('/vhosts').catch(() => []), api('/ssl').catch(() => [])]);
+    const [vhosts, certs, usage, status] = await Promise.all([
+        api('/vhosts').catch(() => []),
+        api('/ssl').catch(() => []),
+        api('/dashboard/usage').catch(() => ({})),
+        api('/status').catch(() => ({ enabled: false })),
+    ]);
     const upCount = vhosts.filter((v) => v.status === 'active').length;
+    // SSL pri isteku (≤ 14 dana) iz vhost liste (ssl_days) ili ssl_certs
+    const expiring = vhosts.filter((v) => v.ssl_days != null && v.ssl_days <= 14);
+
+    const usageBar = (u, label, fmt = (x) => x) => {
+        if (!u || !u.limit) return '';
+        const pct = Math.min(100, Math.round(u.used / u.limit * 100));
+        const tone = pct >= 90 ? 'meter-bad' : (pct >= 75 ? 'meter-warn' : 'meter-ok');
+        return `<div class="usage-item">
+            <div class="row" style="justify-content:space-between"><span>${label}</span>
+                <span class="mono small">${fmt(u.used)} / ${fmt(u.limit)}</span></div>
+            <div class="meter"><span class="${tone}" style="width:${pct}%"></span></div></div>`;
+    };
+
     main().innerHTML = `
     <div class="grid cols-4" style="margin-bottom:var(--gap)">
-        ${metricCard({ label: t('nav.websites'), value: vhosts.length, sub: `${upCount} aktivnih` })}
-        ${metricCard({ label: t('nav.ssl'), value: certs.length })}
+        ${metricCard({ label: t('nav.websites'), value: vhosts.length, sub: `${upCount} ${t('dash.active')}` })}
+        ${metricCard({ label: t('nav.ssl'), value: certs.length, sub: expiring.length ? `${expiring.length} ${t('dash.expiring')}` : '' })}
+        ${metricCard({ label: t('dash.mailboxes'), value: usage.mailboxes?.used ?? 0, sub: usage.mailboxes?.limit ? `/ ${usage.mailboxes.limit}` : '' })}
+        ${metricCard({ label: t('nav.databases'), value: usage.databases?.used ?? 0, sub: usage.databases?.limit ? `/ ${usage.databases.limit}` : '' })}
     </div>
-    <div class="card flush">
+    <div class="grid cols-2">
+        <div class="card">
+            <div class="card-head"><h2>${t('dash.plan_usage')}</h2></div>
+            ${usageBar(usage.disk, t('dash.disk'), fmtBytes)}
+            ${usageBar(usage.domains, t('nav.websites'))}
+            ${usageBar(usage.mailboxes, t('dash.mailboxes'))}
+            ${usageBar(usage.databases, t('nav.databases'))}
+            ${!usage.disk?.limit ? `<div class="empty">${t('dash.no_plan')}</div>` : ''}
+        </div>
+        <div class="card" id="statuscard">
+            <div class="card-head"><h2>${t('dash.status_page')}</h2></div>
+            <p class="hint">${t('dash.status_hint')}</p>
+            <div id="statusbody"></div>
+        </div>
+    </div>
+    ${expiring.length ? `<div class="card flush mt">
+        <div class="card-head"><h2>${t('dash.ssl_expiring')}</h2></div>
+        <table class="data"><tbody>${expiring.map((v) => `<tr>
+            <td class="mono">${esc(v.domain)}</td>
+            <td class="num"><span class="badge ${v.ssl_days < 5 ? 'err' : 'warn'}">${v.ssl_days} ${t('dash.days')}</span></td>
+        </tr>`).join('')}</tbody></table></div>` : ''}
+    <div class="card flush mt">
         <div class="card-head"><h2>${t('nav.websites')}</h2></div>
         ${vhostTable(vhosts.slice(0, 12))}
     </div>`;
     bindVhostRows();
+    renderStatusCard(status);
+}
+
+function renderStatusCard(status) {
+    const box = document.getElementById('statusbody');
+    if (!box) return;
+    if (status.enabled && status.token) {
+        const url = status.url || `${location.origin}/status/${status.token}`;
+        box.innerHTML = `
+            <div class="field"><label>${t('dash.status_url')}</label>
+                <input class="mono" readonly value="${esc(url)}" id="statusurl"></div>
+            <div class="row" style="gap:8px">
+                <a class="btn sm" href="${esc(url)}" target="_blank" rel="noopener">${icon('arrowUR')}${t('dash.open')}</a>
+                <button class="btn sm" id="statuscopy">${t('dash.copy')}</button>
+                <button class="btn sm danger" id="statusoff">${t('dash.disable')}</button>
+            </div>`;
+        box.querySelector('#statuscopy').addEventListener('click', () => {
+            navigator.clipboard?.writeText(url); toast(t('dash.copied'));
+        });
+        box.querySelector('#statusoff').addEventListener('click', async () => {
+            try { await api('/status', { method: 'DELETE' }); renderStatusCard({ enabled: false }); }
+            catch (err) { toast(err.message, 'err'); }
+        });
+    } else {
+        box.innerHTML = `<button class="btn primary" id="statuson">${icon('plus')}${t('dash.enable_status')}</button>`;
+        box.querySelector('#statuson').addEventListener('click', async () => {
+            try { renderStatusCard(await api('/status/enable', { method: 'POST' })); toast(t('dash.status_enabled')); }
+            catch (err) { toast(err.message, 'err'); }
+        });
+    }
 }
 
 const statusBadge = (s) => {
@@ -2130,11 +2201,14 @@ async function pageMonitoring() {
         <div class="page-head" style="gap:12px;align-items:center">
             <div class="pillbar">${pills}</div>
             <span class="spacer"></span>
+            ${state.me.role === 'admin' ? `<button class="btn sm" id="alarmcfg">${icon('bell')}${t('alarm.config')}</button>` : ''}
             <span class="live-dot">${Number(state.monRefresh) > 0 ? dot('ok', true) + ' streaming · ' + state.monRefresh + 's' : 'pauzirano'}</span>
             <label class="inline mono" style="gap:6px">${t('mon.refresh')}
                 <select id="monref" class="mono">${MON_REFRESH.map(refOpt).join('')}</select></label>
         </div>
         <div id="mondata"><div class="empty">${t('common.loading')}</div></div>`;
+
+    document.getElementById('alarmcfg')?.addEventListener('click', openAlarmConfig);
 
     main().querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => {
         state.monRange = b.dataset.range;
@@ -2151,6 +2225,58 @@ async function pageMonitoring() {
 
     await refreshMonitoring();
     scheduleMonitoring();
+}
+
+// Alarm konfiguracija: kanali (e-mail/Telegram/webhook) + pragovi CPU/RAM/disk
+async function openAlarmConfig() {
+    const cfg = await api('/monitoring/alarms').catch(() => ({}));
+    const ch = cfg.channels || {};
+    const tg = ch.telegram || {};
+    const thr = cfg.thresholds || {};
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${icon('bell')}${t('alarm.title')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="alf">
+            <label class="inline" style="gap:8px;margin-bottom:12px"><input type="checkbox" name="enabled" ${cfg.enabled ? 'checked' : ''}> ${t('alarm.enabled')}</label>
+            <h2>${t('alarm.channels')}</h2>
+            <div class="field"><label>${t('alarm.email')}</label><input name="email" type="email" class="mono" value="${esc(ch.email || '')}" placeholder="ops@example.com"></div>
+            <div class="grid cols-2">
+                <div class="field"><label>${t('alarm.tg_token')}</label><input name="tg_token" class="mono" value="${esc(tg.bot_token || '')}" placeholder="123456:ABC-DEF"></div>
+                <div class="field"><label>${t('alarm.tg_chat')}</label><input name="tg_chat" class="mono" value="${esc(tg.chat_id || '')}"></div>
+            </div>
+            <div class="field"><label>${t('alarm.webhook')}</label><input name="webhook" class="mono" value="${esc(ch.webhook || '')}" placeholder="https://…"></div>
+            <h2>${t('alarm.thresholds')}</h2>
+            <div class="grid cols-3">
+                <div class="field"><label>CPU %</label><input name="cpu_pct" type="number" min="0" max="100" class="mono" value="${Number(thr.cpu_pct ?? 90)}"></div>
+                <div class="field"><label>RAM %</label><input name="mem_pct" type="number" min="0" max="100" class="mono" value="${Number(thr.mem_pct ?? 90)}"></div>
+                <div class="field"><label>Disk %</label><input name="disk_pct" type="number" min="0" max="100" class="mono" value="${Number(thr.disk_pct ?? 90)}"></div>
+            </div>
+            <div class="dialog-foot">
+                <button type="button" class="btn" id="alarmtest">${t('alarm.test')}</button>
+                <span class="spacer"></span>
+                <button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('common.save')}</button>
+            </div>
+        </form>`, { wide: true });
+
+    modal.querySelector('#alarmtest').addEventListener('click', async () => {
+        try { const r = await api('/monitoring/alarms/test', { method: 'POST' });
+            toast(r.enabled && r.channels.length ? `${t('alarm.test_sent')}: ${r.channels.join(', ')}` : t('alarm.test_none'), r.channels.length ? 'ok' : 'warn');
+        } catch (err) { toast(err.message, 'err'); }
+    });
+    modal.querySelector('#alf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = new FormData(e.target);
+        const body = {
+            enabled: f.get('enabled') === 'on',
+            channels: {
+                email: f.get('email'), webhook: f.get('webhook'),
+                telegram: { bot_token: f.get('tg_token'), chat_id: f.get('tg_chat') },
+            },
+            thresholds: { cpu_pct: f.get('cpu_pct'), mem_pct: f.get('mem_pct'), disk_pct: f.get('disk_pct') },
+        };
+        try { await api('/monitoring/alarms', { method: 'PUT', body }); modal.close(); toast(t('alarm.saved')); }
+        catch (err) { toast(err.message, 'err'); }
+    });
 }
 
 // ---------------------------------------------------------------- Cloudflare

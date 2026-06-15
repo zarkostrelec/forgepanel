@@ -44,6 +44,74 @@ final class Scheduler
         $this->every('license_check', 6 * 3600, $this->checkLicense(...));
         $this->every('rbl_monitor', 24 * 3600, $this->checkRbls(...));
         $this->every('dmarc_ingest', 3600, $this->ingestDmarc(...));
+        $this->every('alarms', 60, $this->checkAlarms(...));
+    }
+
+    /** @var array<string, int> alarm key => unix ts zadnjeg slanja (re-alarm dedup) */
+    private array $alarm_fired = [];
+
+    /**
+     * Pragovi resursa (CPU/RAM/disk) iz settings.monitoring_alarms. Breach →
+     * notifikacija adminima + vanjski kanali. Re-alarm najviše jednom na sat;
+     * oporavak (ispod praga) resetira stanje i šalje "vraćeno u normalu".
+     */
+    private function checkAlarms(): void
+    {
+        $cfg = System\Notifier::config($this->db);
+        if (($cfg['enabled'] ?? false) !== true) {
+            return;
+        }
+        $thr = is_array($cfg['thresholds'] ?? null) ? $cfg['thresholds'] : [];
+
+        $meminfo = [];
+        foreach (explode("\n", (string) @file_get_contents('/proc/meminfo')) as $line) {
+            if (preg_match('/^(\w+):\s+(\d+)\s*kB/', $line, $m)) {
+                $meminfo[$m[1]] = (int) $m[2] * 1024;
+            }
+        }
+        $mem_total = (float) ($meminfo['MemTotal'] ?? 0);
+        $mem_used = $mem_total - (float) ($meminfo['MemAvailable'] ?? 0);
+        $disk_total = (float) @disk_total_space('/');
+        $disk_used = $disk_total - (float) @disk_free_space('/');
+        $cpu = $this->db->one(
+            "SELECT value FROM monitoring_metrics WHERE scope='server' AND metric='cpu_pct' AND resolution='minute' ORDER BY ts DESC LIMIT 1"
+        );
+
+        $checks = [
+            'cpu' => ['pct' => $cpu === null ? null : (float) $cpu['value'], 'limit' => (float) ($thr['cpu_pct'] ?? 0), 'label' => 'CPU'],
+            'mem' => ['pct' => $mem_total > 0 ? $mem_used / $mem_total * 100 : null, 'limit' => (float) ($thr['mem_pct'] ?? 0), 'label' => 'RAM'],
+            'disk' => ['pct' => $disk_total > 0 ? $disk_used / $disk_total * 100 : null, 'limit' => (float) ($thr['disk_pct'] ?? 0), 'label' => 'Disk'],
+        ];
+        foreach ($checks as $key => $c) {
+            if ($c['pct'] === null || $c['limit'] <= 0) {
+                continue;
+            }
+            if ($c['pct'] >= $c['limit']) {
+                if (($this->alarm_fired[$key] ?? 0) + 3600 > time()) {
+                    continue; // već alarmirano u zadnjih sat
+                }
+                $this->alarm_fired[$key] = time();
+                $pct = round($c['pct']);
+                $this->notifyAdmins('error', "{$c['label']} alarm: {$pct}%", "Prag {$c['limit']}% premašen ({$pct}%).", true);
+            } elseif (isset($this->alarm_fired[$key])) {
+                unset($this->alarm_fired[$key]);
+                $this->notifyAdmins('info', "{$c['label']} vraćen u normalu", round($c['pct']) . '%', true);
+            }
+        }
+    }
+
+    /** Notifikacija svim adminima (DB) + opcionalno vanjski kanali. */
+    private function notifyAdmins(string $severity, string $title, string $body, bool $dispatch = false): void
+    {
+        foreach ($this->db->all("SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name = 'admin'") as $a) {
+            $this->db->run(
+                "INSERT INTO notifications (user_id, severity, title, body) VALUES (?, ?, ?, ?)",
+                [$a['id'], $severity, $title, $body]
+            );
+        }
+        if ($dispatch) {
+            System\Notifier::dispatch($this->db, $severity, $title, $body);
+        }
     }
 
     /**
@@ -74,12 +142,7 @@ final class Scheduler
         if ($new_listings === []) {
             return;
         }
-        foreach ($this->db->all("SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name = 'admin'") as $a) {
-            $this->db->run(
-                "INSERT INTO notifications (user_id, severity, title, body) VALUES (?, 'error', ?, ?)",
-                [$a['id'], "Server IP listan na RBL ($ip)", 'Nove liste: ' . implode(', ', $new_listings)]
-            );
-        }
+        $this->notifyAdmins('error', "Server IP listan na RBL ($ip)", 'Nove liste: ' . implode(', ', $new_listings), true);
     }
 
     /** Svaki sat: ingest DMARC rua izvještaja iz panel mailboxa (ako je mail instaliran). */
@@ -357,17 +420,15 @@ final class Scheduler
                     'SELECT s.user_id FROM vhosts v JOIN subscriptions s ON s.id = v.subscription_id WHERE v.id = ?',
                     [$probe['vhost_id']]
                 );
+                $title = ($status === 'down' ? 'Stranica nedostupna: ' : 'Stranica ponovno dostupna: ') . $probe['target'];
                 if ($owner !== null) {
                     $this->db->run(
                         'INSERT INTO notifications (user_id, severity, title, body) VALUES (?, ?, ?, ?)',
-                        [
-                            $owner['user_id'],
-                            $status === 'down' ? 'error' : 'info',
-                            ($status === 'down' ? 'Stranica nedostupna: ' : 'Stranica ponovno dostupna: ') . $probe['target'],
-                            $detail,
-                        ]
+                        [$owner['user_id'], $status === 'down' ? 'error' : 'info', $title, $detail]
                     );
                 }
+                // Vanjski kanali (e-mail/Telegram/webhook) — promjene dostupnosti su uvijek bitne
+                System\Notifier::dispatch($this->db, $status === 'down' ? 'error' : 'info', $title, (string) $detail);
             }
         }
     }

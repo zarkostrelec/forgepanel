@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ForgePanel\Web\Api\V1;
 
+use ForgePanel\Web\Core\HttpException;
 use ForgePanel\Web\Core\Request;
 use ForgePanel\Web\Core\Response;
 use ForgePanel\Web\Core\Router;
@@ -16,6 +17,69 @@ final class MonitoringController extends Controller
         $router->add('GET', '/api/v1/monitoring/services', $this->services(...));
         $router->add('GET', '/api/v1/monitoring/history', $this->history(...));
         $router->add('GET', '/api/v1/monitoring/top', $this->top(...));
+        $router->add('GET', '/api/v1/monitoring/alarms', $this->alarmsGet(...));
+        $router->add('PUT', '/api/v1/monitoring/alarms', $this->alarmsPut(...));
+        $router->add('POST', '/api/v1/monitoring/alarms/test', $this->alarmsTest(...));
+    }
+
+    /** Alarm konfiguracija (kanali + pragovi). Samo admin. */
+    private function alarmsGet(Request $request): never
+    {
+        $this->ctx($request, 'monitoring:read')->requireRole('admin');
+        $row = $this->app->db->one("SELECT value FROM settings WHERE `key` = 'monitoring_alarms'");
+        $cfg = $row === null ? null : json_decode((string) $row['value'], true);
+        Response::ok(is_array($cfg) ? $cfg : [
+            'enabled' => false,
+            'channels' => ['email' => '', 'telegram' => ['bot_token' => '', 'chat_id' => ''], 'webhook' => ''],
+            'thresholds' => ['cpu_pct' => 90, 'mem_pct' => 90, 'disk_pct' => 90],
+        ]);
+    }
+
+    private function alarmsPut(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'monitoring:write');
+        $ctx->requireRole('admin');
+        $b = $request->body;
+
+        $email = trim((string) ($b['channels']['email'] ?? ''));
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new HttpException(422, 'invalid_email');
+        }
+        $webhook = trim((string) ($b['channels']['webhook'] ?? ''));
+        if ($webhook !== '' && !preg_match('#^https://[\w.-]+(?::\d+)?(/[\w./%?=&-]*)?$#', $webhook)) {
+            throw new HttpException(422, 'invalid_webhook');
+        }
+        $bot = trim((string) ($b['channels']['telegram']['bot_token'] ?? ''));
+        if ($bot !== '' && !preg_match('/^\d+:[\w-]+$/', $bot)) {
+            throw new HttpException(422, 'invalid_telegram_token');
+        }
+        $clamp = static fn ($v) => max(0, min(100, (int) $v));
+        $cfg = [
+            'enabled' => (bool) ($b['enabled'] ?? false),
+            'channels' => [
+                'email' => $email,
+                'telegram' => ['bot_token' => $bot, 'chat_id' => trim((string) ($b['channels']['telegram']['chat_id'] ?? ''))],
+                'webhook' => $webhook,
+            ],
+            'thresholds' => [
+                'cpu_pct' => $clamp($b['thresholds']['cpu_pct'] ?? 90),
+                'mem_pct' => $clamp($b['thresholds']['mem_pct'] ?? 90),
+                'disk_pct' => $clamp($b['thresholds']['disk_pct'] ?? 90),
+            ],
+        ];
+        $this->app->db->run(
+            "INSERT INTO settings (`key`, value) VALUES ('monitoring_alarms', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
+            [json_encode($cfg, JSON_UNESCAPED_SLASHES)]
+        );
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'monitoring.alarms_update', ['enabled' => $cfg['enabled']], $request->ip);
+        Response::ok($cfg);
+    }
+
+    /** Pošalji testnu poruku na konfigurirane kanale. */
+    private function alarmsTest(Request $request): never
+    {
+        $this->ctx($request, 'monitoring:write')->requireRole('admin');
+        Response::ok($this->app->agent->call('alarm.test', timeout_s: 30));
     }
 
     /** Top procesi po CPU-u (ps preko agenta). */
