@@ -43,7 +43,7 @@ final class SslController extends Controller
 
         $task_id = $this->app->tasks->enqueue('ssl.issue', [
             'hostnames' => [$vhost['domain'], 'www.' . $vhost['domain']],
-            'contact_email' => $this->app->config->get('acme_email', $ctx->email),
+            'contact_email' => $this->setting('acme_email', $ctx->email),
             'vhost_id' => (int) $vhost['id'],
         ], $ctx->user_id);
 

@@ -90,6 +90,7 @@ final class App
             new Api\V1\DashboardController($this),
             new Api\V1\SslController($this),
             new Api\V1\TokensController($this),
+            new Api\V1\SettingsController($this),
         ];
         foreach ($controllers as $controller) {
             $controller->register($this->router);

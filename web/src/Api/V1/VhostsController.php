@@ -150,7 +150,7 @@ final class VhostsController extends Controller
         if (!preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $domain)) {
             throw new HttpException(422, 'invalid_domain');
         }
-        $php_version = $request->str('php_version', '8.4');
+        $php_version = $request->str('php_version') ?? $this->setting('default_php', '8.5');
         if (!in_array($php_version, self::PHP_VERSIONS, true)) {
             throw new HttpException(422, 'invalid_php_version');
         }
@@ -201,7 +201,7 @@ final class VhostsController extends Controller
         ], $ctx->user_id);
 
         // AutoSSL: svaki novi vhost automatski dobiva certifikat
-        $contact = $this->app->config->get('acme_email', $ctx->email);
+        $contact = $this->setting('acme_email', $ctx->email);
         $ssl_task_id = $this->app->tasks->enqueue('ssl.issue', [
             'hostnames' => [$domain, "www.$domain"],
             'contact_email' => $contact,

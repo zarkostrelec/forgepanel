@@ -72,7 +72,7 @@ final class BrandingController extends Controller
             // AutoSSL za reseller panel domenu
             $this->app->tasks->enqueue('ssl.issue', [
                 'hostnames' => [$panel_host],
-                'contact_email' => $this->app->config->get('acme_email', $ctx->email),
+                'contact_email' => $this->setting('acme_email', $ctx->email),
             ], $ctx->user_id);
         }
         // Veži i na host kojim admin TRENUTNO pristupa — inače current() (čita po

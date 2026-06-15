@@ -35,6 +35,7 @@ async function loadBranding() {
     } catch { state.branding = { panel_name: 'ForgePanel' }; }
 }
 const brandName = () => state.branding?.panel_name ?? 'ForgePanel';
+const PANEL_VERSION = '1.0.0';
 const t = (key) => state.lang[key] ?? key;
 
 const fmtDate = (s) => {
@@ -86,6 +87,7 @@ const ICONS = {
     spark: '<path d="M12 4l1.8 5.4L19 11l-5.2 1.6L12 18l-1.8-5.4L5 11l5.2-1.6z"/>',
     bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2.5h-15z"/><path d="M10 21h4"/>',
     gear: '<circle cx="12" cy="12" r="3.5"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>',
+    info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><circle cx="12" cy="7.7" r="0.7" fill="currentColor" stroke="none"/>',
     chevR: '<path d="M9 5l7 7-7 7"/>',
     chevD: '<path d="M5 9l7 7 7-7"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
@@ -422,7 +424,7 @@ const RAIL = [
     { id: 'backups', icon: 'download', label: 'nav.backups', key: 'a', pages: ['backups'] },
     { id: 'monitoring', icon: 'pulse', label: 'nav.monitoring', key: 'm', pages: ['monitoring', 'tasks'] },
     { id: 'protect', icon: 'shield', label: 'nav.protect', key: 'p', pages: ['ssl', 'dns', 'cloudflare', 'security', 'firewall'] },
-    { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config'] },
+    { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config', 'system'] },
     { id: 'users', icon: 'users', label: 'nav.users', key: 'o', roles: ['admin', 'reseller'], pages: ['users'] },
 ];
 const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
@@ -430,7 +432,7 @@ const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
 const TAB_GROUPS = {
     monitoring: [['monitoring', 'nav.monitoring', 'pulse'], ['tasks', 'nav.tasks', 'clock']],
     protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['cloudflare', 'nav.cloudflare', 'cloud', 'admin'], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
-    server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history']],
+    server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history'], ['system', 'nav.system', 'gear']],
 };
 
 // tab strip za grupirane stranice (Zaštita: SSL · DNS · Sigurnost · Firewall, itd.)
@@ -447,10 +449,7 @@ function renderShell() {
     $app.innerHTML = `
     <div class="shell">
         <nav class="rail${state.railExpanded ? ' expanded' : ''}" aria-label="Glavna navigacija">
-            <div class="rail-item">
-                <button class="rail-btn rail-toggle" id="railtoggle" aria-label="${t('nav.toggle')}">${icon('menu')}<span class="rail-label">${t('nav.collapse')}</span></button>
-                <span class="rail-tip">${t('nav.toggle')}</span>
-            </div>
+            <button class="rail-collapse" id="railtoggle" aria-label="${t('nav.toggle')}" title="${t('nav.toggle')}">${icon('chevR')}</button>
             <div class="rail-logo" title="${esc(brandName())}">${state.branding?.logo_url
                 ? `<img src="${esc(state.branding.logo_url)}" alt="${esc(brandName())}">`
                 : icon('zap')}<span class="rail-label">${esc(brandName())}</span></div>
@@ -461,6 +460,10 @@ function renderShell() {
             </div>`).join('')}
             <div class="rail-spacer"></div>
             <div class="rail-sep"></div>
+            <div class="rail-item">
+                <button class="rail-btn" data-go="#/about" data-rail="about" aria-label="${t('nav.about')}">${icon('info')}<span class="rail-label">${t('nav.about')}</span></button>
+                <span class="rail-tip">${t('nav.about')}</span>
+            </div>
             <div class="rail-item">
                 <button class="rail-btn" data-go="#/profile" data-rail="profile" aria-label="${t('profile.title')}">${icon('key')}<span class="rail-label">${t('profile.title')}</span></button>
                 <span class="rail-tip">${t('profile.title')}</span>
@@ -2870,6 +2873,94 @@ function pageAssistant() {
 }
 
 // ---------------------------------------------------------------- config time-machine (admin)
+async function pageSystem() {
+    setActive('system');
+    main().innerHTML = `${tabsHtml('server', 'system')}<div class="card">${t('common.loading')}</div>`;
+    let s = {};
+    try { s = await api('/settings'); } catch (err) { main().querySelector('.card').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; return; }
+    const phpOpts = ['8.5', '8.4', '8.3', '8.2', '8.1'];
+    main().innerHTML = `${tabsHtml('server', 'system')}
+    <div class="card" style="max-width:680px">
+        <div class="card-head"><h2>${t('system.title')}</h2></div>
+        <p class="hint" style="margin:0 0 var(--gap)">${t('system.intro')}</p>
+        <form id="sysform">
+            <div class="field"><label>${t('system.acme_email')}</label>
+                <input name="acme_email" type="email" class="mono" value="${esc(s.acme_email ?? '')}" placeholder="admin@example.com">
+                <span class="hint">${t('system.acme_email_hint')}</span></div>
+            <div class="grid cols-2">
+                <div class="field"><label>${t('system.server_ipv4')}</label>
+                    <input name="server_ipv4" class="mono" value="${esc(s.server_ipv4 ?? '')}" placeholder="1.2.3.4"></div>
+                <div class="field"><label>${t('system.default_php')}</label>
+                    <select name="default_php" class="mono">${phpOpts.map((v) => `<option ${v === s.default_php ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+            </div>
+            <div class="field"><label>${t('system.panel_fqdn')}</label>
+                <input name="panel_fqdn" class="mono" value="${esc(s.panel_fqdn ?? '')}" placeholder="panel.example.com">
+                <span class="hint">${t('system.panel_fqdn_hint')}</span></div>
+            <button class="btn primary" type="submit">${t('common.save')}</button>
+        </form>
+    </div>`;
+    main().querySelector('#sysform').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const settings = Object.fromEntries(new FormData(e.target));
+        const btn = e.target.querySelector('button.primary');
+        btn.disabled = true;
+        try { await api('/settings', { method: 'PUT', body: { settings } }); toast(t('system.saved'), 'ok'); }
+        catch (err) { toast(t('settings.' + err.message) !== 'settings.' + err.message ? t('settings.' + err.message) : err.message, 'err'); }
+        finally { btn.disabled = false; }
+    });
+}
+
+async function pageAbout() {
+    setActive('about', [t('nav.about')]);
+    const b = brandName();
+    main().innerHTML = `
+    <div class="about-hero card">
+        <div class="about-mark">${state.branding?.logo_url ? `<img src="${esc(state.branding.logo_url)}" alt="">` : icon('zap', 30)}</div>
+        <div>
+            <h1 style="font-size:20px">${esc(b)}</h1>
+            <div class="about-sub mono">v${PANEL_VERSION} · Ubuntu Server 26.04 LTS</div>
+            <p class="about-tag">${t('about.tagline')}</p>
+        </div>
+    </div>
+    <div class="grid cols-3 mt">
+        <div class="card"><div class="about-card-h">${icon('gear')}<h2>${t('about.tech')}</h2></div>
+            <ul class="about-list">
+                <li>PHP 8.4 — <span class="mono">declare(strict_types=1)</span>, bez frameworka</li>
+                <li>MariaDB / MySQL (<span class="mono">utf8mb4</span>, prepared statements)</li>
+                <li>Vanilla JS (ES2024) + Web Components, bez build alata</li>
+                <li>SSE realtime (log/task/monitoring stream)</li>
+                <li>Ubuntu 26.04 native: apt deb822, systemd, ufw, cgroup v2</li>
+            </ul></div>
+        <div class="card"><div class="about-card-h">${icon('shield')}<h2>${t('about.security')}</h2></div>
+            <ul class="about-list">
+                <li>Lozinke argon2id, TOTP 2FA, rate-limiting</li>
+                <li>CSRF tokeni, strogi CSP + puni security headeri</li>
+                <li>Agent op-whitelist — nikad raw shell komande</li>
+                <li>Izolacija vhosta: vlastiti user + FPM pool + open_basedir</li>
+                <li>fail2ban, AppArmor, malware/WAF ugrađeni</li>
+            </ul></div>
+        <div class="card"><div class="about-card-h">${icon('server')}<h2>${t('about.arch')}</h2></div>
+            <ul class="about-list">
+                <li>3 sloja: web (bez roota) → agent socket → sustav</li>
+                <li>Agent (forge-agentd) kao root, systemd hardening</li>
+                <li>Task queue za duge operacije + audit log</li>
+                <li>Izolirani panel stack (:8443, vlastiti nginx + FPM)</li>
+                <li>API-first: sve dostupno na <span class="mono">/api/v1</span></li>
+            </ul></div>
+    </div>
+    <div class="card mt about-rights">
+        <div class="about-card-h">${icon('lock')}<h2>${t('about.rights')}</h2></div>
+        <p>${t('about.rights_body')}</p>
+        <p class="mono about-copy">© ${new Date().getFullYear()} ${esc(b)} · HostForge.net — Žarko Strelec. ${t('about.rights_reserved')}</p>
+    </div>
+    <div class="grid cols-3 mt">
+        <a class="card about-link" href="https://hostforge.net" target="_blank" rel="noopener">${icon('globe')}<div><strong>HostForge.net</strong><span>${t('about.dev_site')}</span></div></a>
+        <a class="card about-link" href="https://github.com/zarkostrelec" target="_blank" rel="noopener">${icon('box')}<div><strong>github.com/zarkostrelec</strong><span>${t('about.source')}</span></div></a>
+        <a class="card about-link" href="mailto:office@hostforge.net">${icon('mail')}<div><strong>office@hostforge.net</strong><span>${t('about.support')}</span></div></a>
+    </div>
+    <div class="about-foot mono">${esc(b)} v${PANEL_VERSION} · © ${new Date().getFullYear()} HostForge.net</div>`;
+}
+
 async function pageConfig() {
     setActive('config');
     main().innerHTML = `${tabsHtml('server', 'config')}
@@ -3217,6 +3308,8 @@ const ROUTES = [
     [/^#\/security$/, pageSecurity],
     [/^#\/firewall$/, pageFirewall],
     [/^#\/config$/, pageConfig],
+    [/^#\/system$/, pageSystem],
+    [/^#\/about$/, pageAbout],
     [/^#\/assistant$/, pageAssistant],
     [/^#\/users$/, pageUsers],
 ];

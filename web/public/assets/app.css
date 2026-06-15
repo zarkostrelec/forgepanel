@@ -146,7 +146,7 @@ h2 {
 .shell { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 
 .rail {
-    width: 56px; flex-shrink: 0; z-index: 30;
+    width: 56px; flex-shrink: 0; z-index: 30; position: relative;
     background: var(--chrome);
     display: flex; flex-direction: column; align-items: center;
     padding: 12px 0; gap: 4px;
@@ -838,3 +838,37 @@ a.site-name:hover { color: var(--accent-deep); text-decoration: underline; }
 .spark i { flex: 1 1 0; min-width: 0; background: var(--accent); opacity: .55; border-radius: 1px 1px 0 0; min-height: 2px; }
 .spark-flat { height: 40px; border-radius: 4px; background: var(--surface-3);
     -webkit-mask: linear-gradient(90deg, #000 0 100%) center/100% 2px no-repeat; mask: linear-gradient(90deg, #000 0 100%) center/100% 2px no-repeat; }
+
+/* Rail collapse — chevron na rubu sidebara (Plesk-style) */
+.rail-collapse {
+    position: absolute; right: -10px; top: 60px; z-index: 40;
+    width: 20px; height: 20px; border-radius: 99px; padding: 0;
+    background: var(--chrome-3); color: var(--chrome-ink); border: 1px solid var(--chrome-line);
+    display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow-1);
+    transition: background .15s, color .15s, transform .2s;
+}
+.rail-collapse:hover { background: var(--accent); color: #fff; border-color: transparent; }
+.rail-collapse svg { width: 13px; height: 13px; }
+.rail.expanded .rail-collapse { transform: rotate(180deg); }
+
+/* O panelu */
+.about-hero { display: flex; align-items: center; gap: 18px; }
+.about-mark { width: 56px; height: 56px; border-radius: 14px; flex-shrink: 0; background: var(--accent); color: #fff;
+    display: grid; place-items: center; box-shadow: 0 0 28px var(--accent-glow); overflow: hidden; }
+.about-mark img { width: 100%; height: 100%; object-fit: cover; }
+.about-sub { color: var(--ink-3); font-size: var(--fs-sm); margin-top: 3px; }
+.about-tag { color: var(--ink-2); margin: 8px 0 0; max-width: 60ch; }
+.about-card-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--ink-2); }
+.about-card-h h2 { margin: 0; }
+.about-card-h svg { width: 16px; height: 16px; color: var(--accent-deep); }
+.about-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; color: var(--ink-2); font-size: var(--fs-sm); }
+.about-list li { line-height: 1.45; }
+.about-rights p { color: var(--ink-2); margin: 0 0 8px; max-width: 80ch; }
+.about-copy { color: var(--ink-3); font-size: var(--fs-sm); }
+.about-link { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--ink); transition: border-color .15s; }
+.about-link:hover { border-color: var(--accent); text-decoration: none; }
+.about-link svg { width: 22px; height: 22px; color: var(--accent-deep); flex-shrink: 0; }
+.about-link div { display: flex; flex-direction: column; min-width: 0; }
+.about-link strong { font-size: var(--fs-sm); }
+.about-link span { color: var(--ink-3); font-size: var(--fs-xs); }
+.about-foot { text-align: center; color: var(--ink-3); font-size: var(--fs-xs); padding: 20px 0 8px; }

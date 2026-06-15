@@ -25,6 +25,23 @@ abstract class Controller
         return $ctx;
     }
 
+    /** Sistemska postavka: settings tablica (živo, uređivo) → config (web.ini) → default. */
+    protected function setting(string $key, ?string $default = null): string
+    {
+        $row = $this->app->db->one('SELECT value FROM settings WHERE `key` = ?', [$key]);
+        if ($row !== null) {
+            $value = json_decode((string) $row['value'], true);
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+        try {
+            return $this->app->config->get($key, $default);
+        } catch (\Throwable) {
+            return (string) ($default ?? '');
+        }
+    }
+
     /**
      * Adminova default pretplata. Svježa instalacija nema nijedan plan ni
      * pretplatu, a resursi (vhost/mail/db/dns/docker) zahtijevaju subscription_id

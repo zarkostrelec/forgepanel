@@ -71,7 +71,7 @@ final class MailController extends Controller
         $task_id = $this->app->tasks->enqueue('mail.webmail_setup', ['hostname' => $hostname], $ctx->user_id);
         $ssl_task_id = $this->app->tasks->enqueue('ssl.issue', [
             'hostnames' => [$hostname],
-            'contact_email' => $this->app->config->get('acme_email', $ctx->email),
+            'contact_email' => $this->setting('acme_email', $ctx->email),
         ], $ctx->user_id);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.webmail_setup', ['hostname' => $hostname], $request->ip);
         Response::ok(['task_id' => $task_id, 'ssl_task_id' => $ssl_task_id, 'hostname' => $hostname], 202);

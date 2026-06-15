@@ -66,7 +66,7 @@ final class BulkController extends Controller
             'php_set' => $this->phpSet($vhost, $php_version, $ctx->user_id),
             'ssl_renew' => $this->app->tasks->enqueue('ssl.issue', [
                 'hostnames' => [$vhost['domain'], 'www.' . $vhost['domain']],
-                'contact_email' => $this->app->config->get('acme_email', $ctx->email),
+                'contact_email' => $this->setting('acme_email', $ctx->email),
                 'vhost_id' => $vhost_id,
             ], $ctx->user_id),
             'suspend', 'unsuspend' => $this->suspend($vhost, $action, $ctx->user_id),
