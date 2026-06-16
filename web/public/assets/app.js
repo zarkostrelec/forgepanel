@@ -1193,7 +1193,27 @@ const sparkBars = (arr) => {
     return `<div class="spark">${arr.map((v) => `<i style="height:${Math.max(6, Math.round((v / max) * 100))}%"></i>`).join('')}</div>`;
 };
 
-const sitesList = (vhosts, selectedId) => vhosts.length ? `
+const sitesList = (vhosts, selectedId) => {
+    if (!vhosts.length) return `<div class="empty">${t('nav.websites')}: 0</div>`;
+    const domains = new Set(vhosts.map((v) => v.domain));
+    // matični vhost (ako poddomena/staging: domena završava na ".<parent>" gdje parent postoji u listi)
+    const parentOf = (v) => {
+        const parts = v.domain.split('.');
+        for (let i = 1; i < parts.length - 1; i++) {
+            const cand = parts.slice(i).join('.');
+            if (domains.has(cand)) return cand;
+        }
+        return null;
+    };
+    // grupiraj djecu odmah ispod matičnog
+    const sorted = [...vhosts].sort((a, b) => {
+        const ra = parentOf(a) || a.domain, rb = parentOf(b) || b.domain;
+        if (ra !== rb) return ra < rb ? -1 : 1;
+        const ca = parentOf(a) ? 1 : 0, cb = parentOf(b) ? 1 : 0;
+        if (ca !== cb) return ca - cb;
+        return a.domain < b.domain ? -1 : 1;
+    });
+    return `
     <table class="data sites-table"><thead><tr>
         <th>${t('sites.col_site')}</th>
         <th class="hide-sm">${t('sites.col_stack')}</th>
@@ -1202,9 +1222,11 @@ const sitesList = (vhosts, selectedId) => vhosts.length ? `
         <th class="hide-md">${t('sites.col_deploy')}</th>
         <th class="num">${t('sites.col_disk')}</th>
     </tr></thead><tbody>
-    ${vhosts.map((v) => `
-        <tr class="row-link ${v.id === selectedId ? 'selected' : ''}" data-vhost="${v.id}">
-            <td><div class="site-cell"><span class="status-dot ${dotKind(v)}"></span>
+    ${sorted.map((v) => {
+        const child = parentOf(v) !== null;
+        return `
+        <tr class="row-link ${child ? 'child' : ''} ${v.id === selectedId ? 'selected' : ''}" data-vhost="${v.id}">
+            <td><div class="site-cell${child ? ' nested' : ''}"><span class="status-dot ${dotKind(v)}"></span>
                 <div><a href="#/websites/${v.id}" class="mono site-name" data-open>${esc(v.domain)}</a>
                 ${appLabel(v.app_type) ? `<div class="sub">${appLabel(v.app_type)}</div>` : ''}</div></div></td>
             <td class="mono hide-sm sub2">${stackText(v)}</td>
@@ -1212,8 +1234,10 @@ const sitesList = (vhosts, selectedId) => vhosts.length ? `
             <td>${sslBadge(v.ssl_days)}</td>
             <td class="mono hide-md sub2">${v.git_branch ? esc(v.git_branch) + ' · ' + timeAgo(v.git_last_deploy) : '—'}</td>
             <td class="num mono sub2">${v.disk_bytes != null ? fmtBytes(Number(v.disk_bytes)) : '—'}</td>
-        </tr>`).join('')}
-    </tbody></table>` : `<div class="empty">${t('nav.websites')}: 0</div>`;
+        </tr>`;
+    }).join('')}
+    </tbody></table>`;
+};
 
 const sitePanel = (v) => !v ? `<div class="empty">${t('sites.select')}</div>` : `
     <div class="sp-head">

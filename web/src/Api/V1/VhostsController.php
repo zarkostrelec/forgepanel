@@ -236,8 +236,35 @@ final class VhostsController extends Controller
         ], $ctx->user_id);
 
         $this->app->db->run('DELETE FROM vhosts WHERE id = ?', [$vhost['id']]);
+        // Auto-čišćenje DNS-a: ako je vhost poddomena (staging/subdomena) lokalne zone,
+        // ukloni njegov A/AAAA zapis iz matične zone.
+        $this->cleanupSubdomainDns((string) $vhost['domain']);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.delete', ['domain' => $vhost['domain']], $request->ip);
         Response::ok(['task_id' => $task_id], 202);
+    }
+
+    /** Ukloni A/AAAA zapis poddomene iz matične lokalne zone (best-effort). */
+    private function cleanupSubdomainDns(string $domain): void
+    {
+        foreach ($this->app->db->all('SELECT id, domain FROM dns_zones') as $z) {
+            $suffix = '.' . $z['domain'];
+            if ($domain === $z['domain'] || !str_ends_with($domain, $suffix)) {
+                continue;
+            }
+            $label = substr($domain, 0, -strlen($suffix));
+            $del = $this->app->db->run(
+                "DELETE FROM dns_records WHERE zone_id = ? AND name = ? AND type IN ('A','AAAA')",
+                [(int) $z['id'], $label]
+            );
+            if ($del->rowCount() > 0) {
+                try {
+                    \ForgePanel\Web\Core\DnsSync::sync($this->app, (int) $z['id']);
+                } catch (\Throwable $e) {
+                    error_log('forgepanel: subdomain DNS cleanup sync: ' . $e->getMessage());
+                }
+            }
+            return;
+        }
     }
 
     private function setPhp(Request $request): never

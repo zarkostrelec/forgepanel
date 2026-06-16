@@ -876,6 +876,14 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 
 /* Lista redci */
 .site-cell { display: flex; align-items: center; gap: 10px; }
+/* poddomene / staging — uvučeno + L-konektor da se vidi da spadaju pod matičnu */
+.site-cell.nested { padding-left: 24px; position: relative; }
+.site-cell.nested::before {
+    content: ""; position: absolute; left: 8px; top: -10px; height: 21px; width: 10px;
+    border-left: 1.5px solid var(--line-strong); border-bottom: 1.5px solid var(--line-strong);
+    border-bottom-left-radius: 6px; opacity: 0.8;
+}
+.sites-table tr.child .site-name { color: var(--ink-2); }
 .status-dot { width: 8px; height: 8px; border-radius: 99px; flex-shrink: 0; background: var(--ink-3); }
 .status-dot.ok { background: var(--ok); } .status-dot.warn { background: var(--warn); }
 .status-dot.info { background: var(--info); } .status-dot.err { background: var(--danger-deep, #e5484d); }
