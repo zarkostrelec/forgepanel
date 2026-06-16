@@ -833,17 +833,17 @@ function topologyViz(services, cfConnected) {
     const dbs = Object.entries(services).filter(([n]) => /maria|mysql|redis/i.test(n)).map(([n, p]) => ({ label: n, ok: p.ActiveState === 'active' }));
     if (!dbs.length) dbs.push({ label: 'db', ok: false });
 
-    const W = 880, H = 180, NW = 78, NH = 38;
-    const x0 = 60, x1 = 640, step = chain.length > 1 ? (x1 - x0) / (chain.length - 1) : 0;
+    const W = 880, H = 180, NW = 96, NH = 38;
+    const x0 = 62, x1 = 628, step = chain.length > 1 ? (x1 - x0) / (chain.length - 1) : 0;
     const pos = chain.map((nd, i) => ({ ...nd, x: x0 + step * i, y: 90 }));
-    const dbX = 800;
-    const dbPos = dbs.map((d, i) => ({ ...d, x: dbX, y: dbs.length === 1 ? 90 : 60 + i * 60 }));
+    const dbX = 798;
+    const dbPos = dbs.map((d, i) => ({ ...d, x: dbX, y: dbs.length === 1 ? 90 : 58 + i * 64 }));
     const last = pos[pos.length - 1];
 
     const node = (nd, i) => `<g transform="translate(${(nd.x - NW / 2).toFixed(0)} ${(nd.y - NH / 2).toFixed(0)})" class="topo-node-g" style="--i:${i}">
         <rect x="0" y="0" width="${NW}" height="${NH}" rx="9" fill="var(--surface)" stroke="var(--line-strong)"/>
-        <circle cx="13" cy="${NH / 2}" r="3" fill="${nd.ok ? 'var(--ok)' : 'var(--danger)'}"/>
-        <text x="24" y="${NH / 2 + 4}" fill="var(--ink-2)" font-size="10.5" font-family="var(--font-mono)">${esc(nd.label).slice(0, 9)}</text></g>`;
+        <circle cx="14" cy="${NH / 2}" r="3" fill="${nd.ok ? 'var(--ok)' : 'var(--danger)'}"/>
+        <text x="25" y="${NH / 2 + 3.5}" font-size="10.5">${esc(nd.label)}</text></g>`;
 
     const linkPaths = [];
     for (let i = 1; i < pos.length; i++) linkPaths.push([pos[i - 1], pos[i]]);
@@ -895,6 +895,7 @@ async function refreshDashboard(cfConnected) {
     // ── instrument strip (5 metrika, otvoreni hairline raspored) ──
     const uptimeTxt = metrics ? `${Math.floor(metrics.uptime_s / 86400)}d ${Math.floor((metrics.uptime_s % 86400) / 3600)}h` : '—';
     const problems = vhosts.filter((v) => v.status === 'error' || v.status === 'suspended').length;
+    const shortB = (n) => fmtBytes(n).replace(/ .*/, ''); // samo broj, bez jedinice
     let stripHtml = '';
     const gauges = [];
     if (metrics) {
@@ -912,100 +913,128 @@ async function refreshDashboard(cfConnected) {
             stripMetric({ label: 'Mreža', tag: '↓ in', val: netNow != null ? valUnit(netNow, '/s') : '—', sub: 'dolazni promet', spark: stripSpark(netRx.slice(-48).map((p) => Number(p.value)), 'var(--accent)') }) +
             stripMetric({ label: t('nav.websites'), val: String(vhosts.length), sub: `<span class="dot-good"></span>${upCount} aktivnih · ${problems} problema`, end: true });
         gauges.push(gaugeSvg({ value: Math.round(cpuPct), max: 100, color: 'var(--accent)', label: 'CPU', unit: '%', sub: `${metrics.cpu_count} vCPU` }));
-        gauges.push(gaugeSvg({ value: ramPct, max: 100, color: 'var(--info)', label: 'RAM', unit: '%', sub: `${fmtBytes(ramUsed)} / ${fmtBytes(metrics.mem_total_bytes)}` }));
-        gauges.push(gaugeSvg({ value: diskPct, max: 100, color: 'var(--ok)', label: 'DISK', unit: '%', sub: `${fmtBytes(diskUsed)} / ${fmtBytes(metrics.disk_total_bytes)}` }));
+        gauges.push(gaugeSvg({ value: ramPct, max: 100, color: 'var(--info)', label: 'RAM', unit: '%', sub: `${shortB(ramUsed)} / ${fmtBytes(metrics.mem_total_bytes)}` }));
+        gauges.push(gaugeSvg({ value: diskPct, max: 100, color: 'var(--ok)', label: 'DISK', unit: '%', sub: `${shortB(diskUsed)} / ${fmtBytes(metrics.disk_total_bytes)}` }));
         gauges.push(gaugeSvg({ value: metrics.load[0], max: Math.max(1, metrics.cpu_count), color: 'var(--warn)', label: 'LOAD', unit: '', sub: '1 min avg', dp: 2 }));
     } else {
         stripHtml = stripMetric({ label: t('nav.websites'), val: String(vhosts.length), sub: `${upCount} aktivnih`, end: true });
     }
 
-    body.innerHTML = `
-    <div class="strip">${stripHtml}</div>
-
-    ${insights.items.length ? `
-    <div class="ai-box dash-ai" style="margin-bottom:var(--gap)">
-        <span class="mark">${icon('sparkle')}</span>
-        <div style="min-width:0;flex:1">
-            <div style="font-weight:650;margin-bottom:5px">Forge AI · ${insights.items.length} ${insights.items.length === 1 ? 'preporuka' : 'preporuke'}</div>
-            ${insights.items.map((it) => `<div class="dash-ai-row">
-                ${dot(it.severity)}<span>${esc(it.text)}</span></div>`).join('')}
-            <div style="margin-top:10px;display:flex;gap:8px">
-                ${insights.items.find((i) => i.ai_prompt) ? `<button class="btn small primary" id="dashai">${icon('sparkle')}${t('dash.open_analysis')}</button>` : ''}
+    // ── dinamički fragmenti (osvježavaju se svakih 10 s) ──
+    const gaugesHtml = gauges.join('');
+    const insightsBlock = insights.items.length ? `
+        <div class="ai-box dash-ai">
+            <span class="mark">${icon('sparkle')}</span>
+            <div style="min-width:0;flex:1">
+                <div style="font-weight:650;margin-bottom:5px">Forge AI · ${insights.items.length} ${insights.items.length === 1 ? 'preporuka' : 'preporuke'}</div>
+                ${insights.items.map((it) => `<div class="dash-ai-row">${dot(it.severity)}<span>${esc(it.text)}</span></div>`).join('')}
+                ${insights.items.find((i) => i.ai_prompt) ? `<div style="margin-top:10px"><button class="btn small primary" id="dashai">${icon('sparkle')}${t('dash.open_analysis')}</button></div>` : ''}
             </div>
-        </div>
-    </div>` : ''}
+        </div>` : '';
+    const svcRows = sv.map(([name, p]) => `<tr>
+        <td><span style="display:flex;align-items:center;gap:8px;font-weight:550">${dot(p.ActiveState === 'active' ? 'ok' : p.ActiveState === 'failed' ? 'err' : 'warn')}<span class="mono">${esc(name)}</span></span></td>
+        <td><span class="badge ${p.ActiveState === 'active' ? 'ok' : p.ActiveState === 'failed' ? 'err' : ''}">${esc(p.SubState || p.ActiveState || '?')}</span></td>
+        <td class="mono num">${p.cpu_pct != null ? p.cpu_pct.toFixed(1) + '%' : '—'}</td>
+        <td class="mono num">${p.mem_bytes != null ? fmtBytes(p.mem_bytes) : '—'}</td>
+        <td class="mono num hide-sm">${svcUptime(p)}</td></tr>`).join('');
+    const eventsHtml = feed.events.length ? feed.events.map((e) => `
+        <div class="feed-row">
+            <span class="feed-time mono">${fmtTime(e.ts)}</span>
+            <span class="feed-ico" style="color:${SEV[e.severity] || 'var(--ink-3)'}">${icon(feedIcon(e.kind, e.severity))}</span>
+            <span class="feed-text">${esc(e.text)}</span>
+        </div>`).join('') : `<div class="empty">Nema događaja u zadnja 24 h</div>`;
+    const deploysHtml = feed.deploys.length ? feed.deploys.map((d) => `
+        <div class="feed-row">
+            <span class="feed-ico" style="color:var(--ok)">${icon('check')}</span>
+            <span class="mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(d.domain)}</span>
+            <span class="mono hide-sm" style="color:var(--ink-3);font-size:var(--fs-xs)">${esc(d.branch || '')} ${d.last_commit ? esc(String(d.last_commit).slice(0, 7)) : ''}</span>
+            <span style="margin-left:auto;color:var(--ink-3);font-size:var(--fs-xs);white-space:nowrap">${timeAgo(d.last_deploy_at)}</span>
+        </div>`).join('') : `<div class="empty">${t('dash.no_deploys') !== 'dash.no_deploys' ? t('dash.no_deploys') : 'Nema deploya'}</div>`;
+    const healthCls = healthy === sv.length ? 'ok' : 'warn';
+    const healthTxt = `${healthy}/${sv.length} ${t('dash.healthy')}`;
+    // potpis zdravlja servisa — topologija se NE pregraduje osim kad se ovo promijeni
+    const healthSig = sv.map(([n, p]) => `${n}:${p.ActiveState === 'active' ? 1 : 0}`).join('|') + `|cf${cfConnected ? 1 : 0}`;
+    body._aiPrompt = insights.items.find((i) => i.ai_prompt)?.ai_prompt || null;
 
-    <div class="dash-grid">
-        <div class="dash-left">
-            <section class="card flush hud">
-                <div class="card-head"><h2>${t('dash.topology')}</h2>
-                    <span class="badge ${healthy === sv.length ? 'ok' : 'warn'}">${healthy}/${sv.length} ${t('dash.healthy')}</span>
-                    <span class="spacer"></span>
-                    <span class="topo-meta mono hide-sm">uptime <b>${uptimeTxt}</b> · Ubuntu <b>26.04 LTS</b></span></div>
-                ${gauges.length ? `<div class="gauge-row">${gauges.join('')}</div>` : ''}
-                ${topologyViz(services, cfConnected)}
-            </section>
-            <section class="card flush">
-                <div class="card-head"><h2>${t('dash.services')}</h2><span class="count">${sv.length} procesa</span><span class="spacer"></span>
-                    <button class="btn small ghost" id="chkupd">${icon('refresh')}${t('dash.check_updates')}</button>
-                    <a class="btn small" href="#/monitoring">${t('dash.all')} ${icon('chevR')}</a></div>
-                <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th></tr></thead><tbody>
-                ${sv.map(([name, p]) => `<tr>
-                    <td><span style="display:flex;align-items:center;gap:8px;font-weight:550">${dot(p.ActiveState === 'active' ? 'ok' : p.ActiveState === 'failed' ? 'err' : 'warn')}<span class="mono">${esc(name)}</span></span></td>
-                    <td><span class="badge ${p.ActiveState === 'active' ? 'ok' : p.ActiveState === 'failed' ? 'err' : ''}">${esc(p.SubState || p.ActiveState || '?')}</span></td>
-                    <td class="mono num">${p.cpu_pct != null ? p.cpu_pct.toFixed(1) + '%' : '—'}</td>
-                    <td class="mono num">${p.mem_bytes != null ? fmtBytes(p.mem_bytes) : '—'}</td>
-                    <td class="mono num hide-sm">${svcUptime(p)}</td></tr>`).join('')}
-                </tbody></table>
-            </section>
-        </div>
-        <div class="dash-right">
-            <section class="card flush">
-                <div class="card-head"><h2>${t('dash.live_events')}</h2><span class="spacer"></span>
-                    <span class="live-dot">${dot('ok', true)} live</span></div>
-                <div class="feed">${feed.events.length ? feed.events.map((e) => `
-                    <div class="feed-row">
-                        <span class="feed-time mono">${fmtTime(e.ts)}</span>
-                        <span class="feed-ico" style="color:${SEV[e.severity] || 'var(--ink-3)'}">${icon(feedIcon(e.kind, e.severity))}</span>
-                        <span class="feed-text">${esc(e.text)}</span>
-                    </div>`).join('') : `<div class="empty">Nema događaja u zadnja 24 h</div>`}</div>
-            </section>
-            <section class="card flush">
-                <div class="card-head"><h2>${t('dash.recent_deploys')}</h2></div>
-                ${feed.deploys.length ? feed.deploys.map((d) => `
-                    <div class="feed-row">
-                        <span class="feed-ico" style="color:var(--ok)">${icon('check')}</span>
-                        <span class="mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(d.domain)}</span>
-                        <span class="mono hide-sm" style="color:var(--ink-3);font-size:var(--fs-xs)">${esc(d.branch || '')} ${d.last_commit ? esc(String(d.last_commit).slice(0, 7)) : ''}</span>
-                        <span style="margin-left:auto;color:var(--ink-3);font-size:var(--fs-xs);white-space:nowrap">${timeAgo(d.last_deploy_at)}</span>
-                    </div>`).join('') : `<div class="empty">${t('dash.no_deploys') !== 'dash.no_deploys' ? t('dash.no_deploys') : 'Nema deploya'}</div>`}
-            </section>
-        </div>
-    </div>`;
+    const setHtml = (id, html) => { const el = document.getElementById(id); if (el && el.innerHTML !== html) el.innerHTML = html; };
 
-    const aibtn = document.getElementById('dashai');
-    if (aibtn) aibtn.addEventListener('click', () => {
-        state.aiPending = insights.items.find((i) => i.ai_prompt)?.ai_prompt || null;
-        toggleAiDrawer(true); // renderAiDrawer pokupi state.aiPending kad se učita
-    });
+    if (body.dataset.built !== '1') {
+        // ── prvi render: cijela kostura (topologija se gradi samo ovdje + na promjeni zdravlja) ──
+        body.innerHTML = `
+        <div class="strip" id="dash-strip">${stripHtml}</div>
+        <div id="dash-insights"${insightsBlock ? ' style="margin-bottom:var(--gap)"' : ''}>${insightsBlock}</div>
+        <div class="dash-grid">
+            <div class="dash-left">
+                <section class="card flush hud">
+                    <div class="card-head"><h2>${t('dash.topology')}</h2>
+                        <span class="badge ${healthCls}" id="dash-health">${healthTxt}</span>
+                        <span class="spacer"></span>
+                        <span class="topo-meta mono hide-sm">uptime <b id="dash-uptime">${uptimeTxt}</b> · Ubuntu <b>26.04 LTS</b></span></div>
+                    <div class="gauge-row" id="dash-gauges">${gaugesHtml}</div>
+                    <div id="dash-topo">${topologyViz(services, cfConnected)}</div>
+                </section>
+                <section class="card flush">
+                    <div class="card-head"><h2>${t('dash.services')}</h2><span class="count" id="dash-svccount">${sv.length} procesa</span><span class="spacer"></span>
+                        <button class="btn small ghost" id="chkupd">${icon('refresh')}${t('dash.check_updates')}</button>
+                        <a class="btn small" href="#/monitoring">${t('dash.all')} ${icon('chevR')}</a></div>
+                    <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th></tr></thead>
+                    <tbody id="dash-svc">${svcRows}</tbody></table>
+                </section>
+            </div>
+            <div class="dash-right">
+                <section class="card flush">
+                    <div class="card-head"><h2>${t('dash.live_events')}</h2><span class="spacer"></span>
+                        <span class="live-dot">${dot('ok', true)} live</span></div>
+                    <div class="feed" id="dash-events">${eventsHtml}</div>
+                </section>
+                <section class="card flush">
+                    <div class="card-head"><h2>${t('dash.recent_deploys')}</h2></div>
+                    <div id="dash-deploys">${deploysHtml}</div>
+                </section>
+            </div>
+        </div>`;
+        body.dataset.built = '1';
+        body.dataset.health = healthSig;
 
-    const chk = document.getElementById('chkupd');
-    if (chk) chk.addEventListener('click', async () => {
-        chk.disabled = true;
-        const orig = chk.innerHTML;
-        chk.innerHTML = `${icon('refresh')}${t('dash.checking')}`;
-        try {
-            const r = await api('/updates/scan', { method: 'POST' });
-            watchTask(r.task_id, t('dash.check_updates'));
-            const res = await pollTask(r.task_id);
-            if (res.status !== 'done') throw new Error(res.error || 'scan_failed');
-            const comps = await api('/updates').catch(() => []);
-            const n = comps.filter((c) => c.available_version && c.available_version !== c.current_version).length;
-            toast(n ? `${t('dash.updates_available')}: ${n}` : t('dash.updates_none'), n ? 'warn' : 'ok');
-            if (n) location.hash = '#/updates';
-        } catch (err) { toast(err.message, 'err'); }
-        finally { chk.disabled = false; chk.innerHTML = orig; }
-    });
+        // delegirani klik (preživi osvježavanja insights/topologije)
+        body.addEventListener('click', (e) => {
+            if (e.target.closest('#dashai')) { state.aiPending = body._aiPrompt; toggleAiDrawer(true); }
+        });
+        const chk = document.getElementById('chkupd');
+        if (chk) chk.addEventListener('click', async () => {
+            chk.disabled = true;
+            const orig = chk.innerHTML;
+            chk.innerHTML = `${icon('refresh')}${t('dash.checking')}`;
+            try {
+                const r = await api('/updates/scan', { method: 'POST' });
+                watchTask(r.task_id, t('dash.check_updates'));
+                const res = await pollTask(r.task_id);
+                if (res.status !== 'done') throw new Error(res.error || 'scan_failed');
+                const comps = await api('/updates').catch(() => []);
+                const n = comps.filter((c) => c.available_version && c.available_version !== c.current_version).length;
+                toast(n ? `${t('dash.updates_available')}: ${n}` : t('dash.updates_none'), n ? 'warn' : 'ok');
+                if (n) location.hash = '#/updates';
+            } catch (err) { toast(err.message, 'err'); }
+            finally { chk.disabled = false; chk.innerHTML = orig; }
+        });
+    } else {
+        // ── osvježavanje: samo dinamični dijelovi; topologija ostaje netaknuta ──
+        setHtml('dash-strip', stripHtml);
+        setHtml('dash-gauges', gaugesHtml);
+        setHtml('dash-insights', insightsBlock);
+        document.getElementById('dash-insights')?.style.setProperty('margin-bottom', insightsBlock ? 'var(--gap)' : '0');
+        setHtml('dash-svc', svcRows);
+        setHtml('dash-svccount', `${sv.length} procesa`);
+        setHtml('dash-events', eventsHtml);
+        setHtml('dash-deploys', deploysHtml);
+        const up = document.getElementById('dash-uptime'); if (up) up.textContent = uptimeTxt;
+        const hb = document.getElementById('dash-health'); if (hb) { hb.className = `badge ${healthCls}`; hb.textContent = healthTxt; }
+        // topologiju pregradi SAMO ako se promijenio set/zdravlje servisa
+        if (body.dataset.health !== healthSig) {
+            setHtml('dash-topo', topologyViz(services, cfConnected));
+            body.dataset.health = healthSig;
+        }
+    }
 }
 
 const serviceUp = (services, name) => Object.entries(services).some(([n, p]) => n.startsWith(name) && p.ActiveState === 'active');

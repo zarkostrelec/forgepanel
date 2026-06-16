@@ -1106,10 +1106,10 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
     padding: 16px 8px; border-bottom: 1px solid var(--line-2); }
 .gauge { position: relative; display: grid; place-items: center; }
 .gauge-svg { display: block; width: 124px; height: 124px; }
-.gauge-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 1px; pointer-events: none; top: -8px; }
+.gauge-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 1px; pointer-events: none; top: -6px; width: 124px; }
 .gauge-val { font-family: var(--font-display); font-weight: 700; font-size: 24px; letter-spacing: -1px; color: var(--ink); }
 .gauge-val .u { font-size: 12px; font-weight: 500; color: var(--ink-3); margin-left: 1px; }
-.gauge-sub { font-size: 10px; letter-spacing: 0.03em; color: var(--ink-3); text-transform: uppercase; white-space: nowrap; }
+.gauge-sub { font-size: 9px; letter-spacing: 0.02em; color: var(--ink-3); text-transform: uppercase; white-space: nowrap; max-width: 116px; overflow: hidden; text-overflow: ellipsis; }
 .gauge-label { font-size: 11px; letter-spacing: 0.06em; font-weight: 700; text-transform: uppercase; color: var(--ink-3); margin-top: 4px; }
 
 /* animirana topologija */
