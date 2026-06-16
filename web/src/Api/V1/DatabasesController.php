@@ -152,6 +152,18 @@ final class DatabasesController extends Controller
         $ctx = $this->ctx($request, 'databases:write');
         $database = $this->databaseOr404($ctx, (int) $request->param('id'));
 
+        // Prvo počisti DB usere ove baze (MariaDB + panel redak). Bez ovoga bi (zbog
+        // ON DELETE SET NULL) ostao orphan u db_users — a username je globalno UNIQUE,
+        // pa bi blokirao buduće instalacije iste baze (duplicate key → user se ne upiše).
+        foreach ($this->app->db->all('SELECT id, username FROM db_users WHERE database_id = ?', [$database['id']]) as $u) {
+            try {
+                $this->app->agent->call('db.user_delete', ['username' => $u['username']]);
+            } catch (\Throwable $e) {
+                error_log('forgepanel: db.user_delete (cleanup) preskočen: ' . $e->getMessage());
+            }
+            $this->app->db->run('DELETE FROM db_users WHERE id = ?', [$u['id']]);
+        }
+
         $this->app->agent->call('db.delete', ['name' => $database['name']]);
         $this->app->db->run('DELETE FROM db_databases WHERE id = ?', [$database['id']]);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'db.delete', ['name' => $database['name']], $request->ip);

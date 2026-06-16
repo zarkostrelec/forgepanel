@@ -160,9 +160,15 @@ final class AppsController extends Controller
 
         // DB user (idempotentno i NEOVISNO o bazi — ako je baza već postojala od prekinute
         // instalacije, korisnik se svejedno kreira; inače WP ostane bez DB usera).
-        if ($this->app->db->one('SELECT 1 FROM db_users WHERE username = ?', [$db_user]) === null) {
+        $urow = $this->app->db->one('SELECT id, database_id FROM db_users WHERE username = ?', [$db_user]);
+        if ($urow === null) {
             $this->app->agent->call('db.user_create', ['username' => $db_user, 'database' => $db_name, 'password' => $db_password]);
             $this->app->db->run('INSERT INTO db_users (subscription_id, username, database_id) VALUES (?, ?, ?)', [$vhost['subscription_id'], $db_user, $db_row['id']]);
+        } elseif ((int) ($urow['database_id'] ?? 0) !== (int) $db_row['id']) {
+            // username postoji ali nije (više) vezan na ovu bazu (orphan nakon brisanja s
+            // database_id=NULL) — daj grant i re-linkaj umjesto da padne na UNIQUE(username).
+            $this->app->agent->call('db.user_create', ['username' => $db_user, 'database' => $db_name, 'password' => $db_password]);
+            $this->app->db->run('UPDATE db_users SET database_id = ? WHERE id = ?', [$db_row['id'], $urow['id']]);
         }
         return [$db_name, $db_user, $db_password];
     }
