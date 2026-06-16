@@ -19,6 +19,12 @@ FP_REPO_URL="${FP_REPO_URL:-https://github.com/zarkostrelec/forgepanel.git}"
 UBUNTU_SUITE="resolute"
 FALLBACK_SUITE="noble"
 
+# Mothership (master) za licence + ažuriranja. Public installeri pokazuju ovamo →
+# auto-trial (7 dana) + potpisana ažuriranja. Prazno = self-host (master, bez locka).
+# UPDATE_PUBKEY je javni ed25519 ključ mastera (iz: Server → Distribucija → Generiraj ključ).
+UPDATE_SERVER="${UPDATE_SERVER:-https://elite.hostforge.net}"
+UPDATE_PUBKEY="${UPDATE_PUBKEY:-}"
+
 # ---------------------------------------------------------------- flagovi
 UNATTENDED=0
 ADMIN_EMAIL=""
@@ -386,6 +392,15 @@ EOF
         sql forgepanel <<SQL
 INSERT INTO settings (\`key\`, value) VALUES ('server_ipv4', '"${server_ip}"')
 ON DUPLICATE KEY UPDATE value = '"${server_ip}"';
+SQL
+    fi
+    # Spoji na mothership (licence + ažuriranja) ako su zadani — public install dobiva auto-trial
+    if [[ -n "$UPDATE_SERVER" && -n "$UPDATE_PUBKEY" ]]; then
+        sql forgepanel <<SQL
+INSERT INTO settings (\`key\`, value) VALUES ('update_server', '"${UPDATE_SERVER}"')
+ON DUPLICATE KEY UPDATE value = '"${UPDATE_SERVER}"';
+INSERT INTO settings (\`key\`, value) VALUES ('update_pubkey', '"${UPDATE_PUBKEY}"')
+ON DUPLICATE KEY UPDATE value = '"${UPDATE_PUBKEY}"';
 SQL
     fi
 }
