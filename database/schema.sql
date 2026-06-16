@@ -566,6 +566,16 @@ CREATE TABLE license_activations (
     FOREIGN KEY (license_id) REFERENCES licenses(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 37. trials — master bilježi prvi kontakt svakog nodea (fingerprint) za 7-dnevni probni period
+CREATE TABLE trials (
+    id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    fingerprint     VARCHAR(64) NOT NULL UNIQUE,
+    version         VARCHAR(32) NULL,
+    ip              VARCHAR(45) NULL,
+    first_seen      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Početni podaci
 INSERT INTO roles (name, permissions) VALUES
     ('admin',    '{"*": true}'),

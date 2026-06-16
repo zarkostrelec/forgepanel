@@ -137,8 +137,46 @@ async function api(path, { method = 'GET', body } = {}) {
     });
     const json = await res.json().catch(() => ({ ok: false, error: 'bad_response' }));
     if (res.status === 401 && state.me) { logoutLocal(); return Promise.reject(new Error('unauthenticated')); }
+    if (res.status === 403 && json.error === 'license_required') { renderLicenseLock(); return Promise.reject(new Error('license_required')); }
     if (!json.ok) throw new Error(json.error ?? `http_${res.status}`);
     return json.data;
+}
+
+// Hard-lock zaslon: probni period istekao / nema licence → unos ključa (PUT /license je dopušten)
+function renderLicenseLock() {
+    if (document.getElementById('liclock')) return;
+    if (state.monTimer) { clearInterval(state.monTimer); state.monTimer = null; }
+    const b = brandName();
+    $app.innerHTML = `<div id="liclock" class="login-wrap"><div class="login-card card">
+        <div class="login-brand">
+            <span class="mark">${state.branding?.logo_url ? `<img src="${esc(state.branding.logo_url)}" alt="">` : icon('lock', 20)}</span>
+            <span class="name">${esc(b)}</span>
+        </div>
+        <h1 style="text-align:center;margin-bottom:6px">${t('lic.locked_title')}</h1>
+        <p class="hint" style="text-align:center;margin-bottom:16px">${t('lic.locked_body')}</p>
+        <form id="licform">
+            <div class="field"><label>${t('lic.key')}</label><input name="key" class="mono" placeholder="FP-XXXX-XXXX-XXXX-XXXX-XXXX" required></div>
+            <button class="btn primary" style="width:100%;justify-content:center">${icon('check')}${t('lic.activate')}</button>
+        </form>
+        <div id="licerr" class="alert err" style="margin-top:12px;display:none"></div>
+        <div style="text-align:center;margin-top:14px"><button class="linklike" id="liclogout">${t('auth.logout')}</button></div>
+    </div></div>`;
+    document.getElementById('liclogout').addEventListener('click', doLogout);
+    document.getElementById('licform').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const key = new FormData(e.target).get('key');
+        const btn = e.target.querySelector('button');
+        btn.disabled = true;
+        const err = document.getElementById('licerr'); err.style.display = 'none';
+        try {
+            const r = await api('/license', { method: 'PUT', body: { license_key: key } });
+            if (['active', 'trial'].includes(r.status)) { location.reload(); return; }
+            throw new Error(r.status || 'invalid');
+        } catch (ex) {
+            err.textContent = `${t('lic.activate_failed')}: ${ex.message}`; err.style.display = '';
+            btn.disabled = false;
+        }
+    });
 }
 
 function logoutLocal() {

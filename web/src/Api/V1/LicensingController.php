@@ -21,6 +21,7 @@ final class LicensingController extends Controller
     private const TIERS = ['standard', 'pro', 'enterprise'];
     private const STATUSES = ['active', 'suspended', 'revoked'];
     private const TOKEN_KEYS = ['key', 'tier', 'status', 'expires_at', 'fingerprint', 'issued_at'];
+    private const TRIAL_DAYS = 7;
 
     public function register(Router $router): void
     {
@@ -34,6 +35,7 @@ final class LicensingController extends Controller
         // PUBLIC — node ↔ master
         $router->add('POST', '/api/v1/license/activate', $this->activate(...));
         $router->add('POST', '/api/v1/license/check', $this->validateKey(...));
+        $router->add('POST', '/api/v1/license/trial', $this->trial(...));
         // NODE (admin) — vlastiti status / aktivacija
         $router->add('GET', '/api/v1/license', $this->nodeStatus(...));
         $router->add('PUT', '/api/v1/license', $this->nodeConfigure(...));
@@ -187,6 +189,36 @@ final class LicensingController extends Controller
         Response::ok($this->signedToken($lic, $fp));
     }
 
+    /**
+     * Probni period: master bilježi PRVI kontakt nodea po fingerprintu i vraća potpisani
+     * token (status 'trial' do isteka, pa 'expired'). Server-side → reinstal panela ne
+     * resetira trial (fingerprint je vezan na /etc/machine-id).
+     */
+    private function trial(Request $request): never
+    {
+        $fp = $this->fp($request);
+        if ($fp === '') {
+            throw new HttpException(422, 'fingerprint_required');
+        }
+        $version = mb_substr($request->str('version') ?? '', 0, 32);
+        $row = $this->app->db->one('SELECT first_seen FROM trials WHERE fingerprint = ?', [$fp]);
+        if ($row === null) {
+            $this->app->db->run('INSERT INTO trials (fingerprint, version, ip) VALUES (?, ?, ?)', [$fp, $version, $request->ip]);
+            $first = time();
+        } else {
+            $first = (int) strtotime((string) $row['first_seen']);
+            $this->app->db->run('UPDATE trials SET last_seen = NOW(), version = ?, ip = ? WHERE fingerprint = ?', [$version, $request->ip, $fp]);
+        }
+        $expires_ts = $first + self::TRIAL_DAYS * 86400;
+        $synthetic = [
+            'license_key' => 'TRIAL',
+            'tier' => 'trial',
+            'status' => time() < $expires_ts ? 'trial' : 'expired',
+            'expires_at' => date('Y-m-d H:i:s', $expires_ts),
+        ];
+        Response::ok($this->signedToken($synthetic, $fp));
+    }
+
     // ───────────── NODE (admin) ─────────────
 
     private function nodeStatus(Request $request): never
@@ -284,14 +316,24 @@ final class LicensingController extends Controller
         return (string) preg_replace('/[^a-f0-9]/', '', strtolower($request->str('fingerprint') ?? ''));
     }
 
-    /** Stabilan otisak ovog panela (generira se jednom). */
+    /** Stabilan otisak ovog panela — vezan na /etc/machine-id (preživi reinstal panela). */
     private function fingerprint(): string
     {
         $fp = $this->setting('license_fingerprint', '');
-        if ($fp === '') {
-            $fp = bin2hex(random_bytes(16));
-            $this->store('license_fingerprint', $fp);
+        if ($fp !== '') {
+            return $fp;
         }
+        $machine = '';
+        foreach (['/etc/machine-id', '/var/lib/dbus/machine-id'] as $f) {
+            if (is_readable($f)) {
+                $machine = trim((string) @file_get_contents($f));
+                if ($machine !== '') {
+                    break;
+                }
+            }
+        }
+        $fp = $machine !== '' ? hash('sha256', 'forgepanel:' . $machine) : bin2hex(random_bytes(16));
+        $this->store('license_fingerprint', $fp);
         return $fp;
     }
 

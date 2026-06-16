@@ -43,6 +43,10 @@ final class App
     {
         $request = Request::fromGlobals();
         try {
+            // Hard-lock kad istekne trial / nema licence (master i nespojeni nodovi su izuzeti)
+            if (License::shouldBlock($this, $request)) {
+                Response::error(403, 'license_required');
+            }
             $this->router->dispatch($request);
         } catch (HttpException $e) {
             Response::error($e->status, $e->getMessage());

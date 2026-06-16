@@ -41,7 +41,7 @@ final class Scheduler
         $this->every('suite_watch', 24 * 3600, $this->watchSuites(...));
         $this->every('vhost_stats', 1800, $this->refreshVhostStats(...));
         $this->every('panel_update', 4 * 3600, $this->checkPanelUpdate(...));
-        $this->every('license_check', 6 * 3600, $this->checkLicense(...));
+        $this->every('license_check', 1800, $this->checkLicense(...));
         $this->every('rbl_monitor', 24 * 3600, $this->checkRbls(...));
         $this->every('dmarc_ingest', 3600, $this->ingestDmarc(...));
         $this->every('alarms', 60, $this->checkAlarms(...));
@@ -253,17 +253,40 @@ final class Scheduler
      * Svakih 6 h: re-validacija licence na masteru (hvata suspend/revoke/istek).
      * Verificira potpis tokena; sprema status u settings. Offline = zadrži zadnji token.
      */
+    /** Stabilan otisak vezan na /etc/machine-id (preživi reinstal panela). */
+    private function licenseFingerprint(): string
+    {
+        $fp = $this->settingStr('license_fingerprint');
+        if ($fp !== '') {
+            return $fp;
+        }
+        $machine = '';
+        foreach (['/etc/machine-id', '/var/lib/dbus/machine-id'] as $f) {
+            if (is_readable($f)) {
+                $machine = trim((string) @file_get_contents($f));
+                if ($machine !== '') {
+                    break;
+                }
+            }
+        }
+        $fp = $machine !== '' ? hash('sha256', 'forgepanel:' . $machine) : bin2hex(random_bytes(16));
+        $this->db->run("INSERT INTO settings (`key`, value) VALUES ('license_fingerprint', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [json_encode($fp)]);
+        return $fp;
+    }
+
     private function checkLicense(): void
     {
         $server = rtrim($this->settingStr('update_server'), '/');
         $pub = $this->settingStr('update_pubkey');
-        $key = $this->settingStr('license_key');
-        if ($server === '' || $pub === '' || $key === '') {
-            return;
+        if ($server === '' || $pub === '') {
+            return; // nije spojen na distribuciju (master ili dev) — preskoči
         }
-        $d = $this->masterCall("$server/api/v1/license/check", [
-            'key' => $key, 'fingerprint' => $this->settingStr('license_fingerprint'),
-        ]);
+        $key = $this->settingStr('license_key');
+        $fp = $this->licenseFingerprint();
+        // s ključem → re-validacija licence; bez ključa → dohvat/obnova trial tokena
+        $d = $key !== ''
+            ? $this->masterCall("$server/api/v1/license/check", ['key' => $key, 'fingerprint' => $fp])
+            : $this->masterCall("$server/api/v1/license/trial", ['fingerprint' => $fp, 'version' => $this->settingStr('panel_version') ?: '1.0.0']);
         if ($d === null || !isset($d['license'], $d['signature'])) {
             return; // offline → zadrži postojeći status
         }
