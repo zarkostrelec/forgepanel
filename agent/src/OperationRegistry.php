@@ -60,6 +60,7 @@ final class OperationRegistry
         'apps.wp_checksums' => Operations\WpChecksums::class,
         'db.create'         => Operations\DbCreate::class,
         'db.delete'         => Operations\DbDelete::class,
+        'db.grantees'       => Operations\DbGrantees::class,
         'db.user_create'    => Operations\DbUserCreate::class,
         'db.user_update'    => Operations\DbUserUpdate::class,
         'db.user_delete'    => Operations\DbUserDelete::class,

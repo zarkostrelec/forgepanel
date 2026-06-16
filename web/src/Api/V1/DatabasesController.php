@@ -54,16 +54,59 @@ final class DatabasesController extends Controller
     {
         $ctx = $this->ctx($request, 'databases:read');
         if ($ctx->isAdmin()) {
-            Response::ok($this->withUsers($this->app->db->all('SELECT * FROM db_databases ORDER BY name')));
-        }
-        if ($ctx->subscription_ids === []) {
+            $dbs = $this->app->db->all('SELECT * FROM db_databases ORDER BY name');
+        } elseif ($ctx->subscription_ids === []) {
             Response::ok([]);
+        } else {
+            $placeholders = implode(',', array_fill(0, count($ctx->subscription_ids), '?'));
+            $dbs = $this->app->db->all(
+                "SELECT * FROM db_databases WHERE subscription_id IN ($placeholders) ORDER BY name",
+                $ctx->subscription_ids
+            );
         }
-        $placeholders = implode(',', array_fill(0, count($ctx->subscription_ids), '?'));
-        Response::ok($this->withUsers($this->app->db->all(
-            "SELECT * FROM db_databases WHERE subscription_id IN ($placeholders) ORDER BY name",
-            $ctx->subscription_ids
-        )));
+        $this->reconcileUsers($dbs);
+        Response::ok($this->withUsers($dbs));
+    }
+
+    /**
+     * Uvozi postojeće MySQL/MariaDB DB usere koji nisu zabilježeni u panelu
+     * (npr. nakon prekinute instalacije gdje je user kreiran u bazi ali redak u
+     * db_users nije upisan). Best-effort, read-only prema bazi — NE dira lozinke.
+     * @param list<array<string,mixed>> $dbs
+     */
+    private function reconcileUsers(array $dbs): void
+    {
+        if ($dbs === []) {
+            return;
+        }
+        $names = array_values(array_map(static fn ($d) => (string) $d['name'], $dbs));
+        try {
+            $grantees = $this->app->agent->call('db.grantees', ['databases' => $names]);
+        } catch (\Throwable $e) {
+            error_log('forgepanel: db.grantees preskočen: ' . $e->getMessage());
+            return;
+        }
+        $existing = [];
+        foreach ($this->app->db->all('SELECT username FROM db_users') as $u) {
+            $existing[$u['username']] = true;
+        }
+        foreach ($dbs as $d) {
+            foreach ($grantees[$d['name']] ?? [] as $g) {
+                $uname = (string) ($g['user'] ?? '');
+                if ($uname === '' || isset($existing[$uname])) {
+                    continue;
+                }
+                try {
+                    $this->app->db->run(
+                        'INSERT INTO db_users (subscription_id, username, database_id, remote_access) VALUES (?, ?, ?, ?)',
+                        [(int) $d['subscription_id'], $uname, (int) $d['id'], (($g['host'] ?? 'localhost') === '%') ? 1 : 0]
+                    );
+                    $existing[$uname] = true;
+                } catch (\Throwable $e) {
+                    // utrka / UNIQUE — tiho preskoči
+                }
+            }
+        }
     }
 
     private function create(Request $request): never
