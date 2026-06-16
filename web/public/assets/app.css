@@ -466,6 +466,25 @@ table.data tbody tr:hover { background: var(--surface-2); }
 table.data .row-link { cursor: pointer; }
 table.data .row-link.selected { background: var(--accent-soft); }
 td.num, th.num { text-align: right; }
+/* numerički header mora pratiti desno poravnanje vrijednosti (inače je labela lijevo,
+   a broj desno — vizualno nije poravnato). table.data th je inače left-align. */
+table.data th.num { text-align: right; }
+
+/* Start/Stop/Restart gumbi servisa */
+.svc-table .svc-actions-cell { width: 1%; white-space: nowrap; text-align: right; }
+.svc-actions { display: inline-flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+.svc-table tr:hover .svc-actions { opacity: 1; }
+.svc-act {
+    width: 26px; height: 26px; display: grid; place-items: center; cursor: pointer;
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: var(--surface); color: var(--ink-2); transition: all .14s;
+}
+.svc-act:hover { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
+.svc-act.start:hover { color: var(--ok-deep); border-color: color-mix(in oklab, var(--ok) 40%, var(--surface)); }
+.svc-act.stop:hover { color: var(--danger-deep); border-color: color-mix(in oklab, var(--danger) 40%, var(--surface)); }
+.svc-act:disabled { opacity: .45; cursor: default; }
+.svc-act svg { width: 13px; height: 13px; }
+@media (max-width: 720px) { .svc-actions { opacity: 1; } }
 .row-actions { opacity: 0; transition: opacity 0.12s; display: inline-flex; gap: 2px; }
 tr:hover .row-actions { opacity: 1; }
 .cell-icon { width: 28px; }

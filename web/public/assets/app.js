@@ -92,6 +92,7 @@ const ICONS = {
     chevD: '<path d="M5 9l7 7 7-7"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     play: '<path d="M7 5l12 7-12 7z"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
     refresh: '<path d="M19 12a7 7 0 1 1-2-5"/><path d="M17 3v4h4"/>',
     lock: '<rect x="5.5" y="10.5" width="13" height="9" rx="2"/><path d="M8.5 10.5v-3a3.5 3.5 0 0 1 7 0v3"/>',
     dots: '<circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
@@ -788,6 +789,30 @@ function svcUptime(props) {
 
 const SEV = { ok: 'var(--ok)', err: 'var(--danger)', warn: 'var(--warn)', info: 'var(--info)' };
 
+// Start/Stop/Restart gumbi za servis (samo admin). Klik se hvata delegirano (doc-level).
+const svcActionsHtml = (name) => state.me?.role !== 'admin' ? '' : `<span class="svc-actions">
+    <button class="svc-act start" data-svc-action="start" data-svc="${esc(name)}" title="${t('svc.start')}" aria-label="${t('svc.start')} ${esc(name)}">${icon('play', 13)}</button>
+    <button class="svc-act restart" data-svc-action="restart" data-svc="${esc(name)}" title="${t('svc.restart')}" aria-label="${t('svc.restart')} ${esc(name)}">${icon('refresh', 13)}</button>
+    <button class="svc-act stop" data-svc-action="stop" data-svc="${esc(name)}" title="${t('svc.stop')}" aria-label="${t('svc.stop')} ${esc(name)}">${icon('stop', 13)}</button></span>`;
+
+async function doServiceAction(service, action, btn) {
+    if (action === 'stop' && !confirm(`${t('svc.confirm_stop')} ${service}?`)) return;
+    const grp = btn.closest('.svc-actions');
+    grp?.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    try {
+        const r = await api('/monitoring/services/action', { method: 'POST', body: { service, action } });
+        toast(`${service} · ${action} → ${r.active ? t('svc.running') : t('svc.stopped')}`, r.active || action === 'stop' ? 'ok' : 'warn');
+        setTimeout(() => { if (/^#\/(monitoring|dashboard)?$/.test(location.hash || '#/dashboard')) route(); }, 900);
+    } catch (err) {
+        toast(`${service}: ${err.message}`, 'err');
+        grp?.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+    }
+}
+document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-svc-action]');
+    if (b) doServiceAction(b.dataset.svc, b.dataset.svcAction, b);
+});
+
 // ---- NOVA HUD viz primitivi (instrument strip, kružni gaugeovi, topologija) ----
 // Široka sparkline koja se rasteže na container (viewBox + non-scaling-stroke)
 function stripSpark(values, color = 'var(--accent)') {
@@ -954,7 +979,8 @@ async function refreshDashboard(cfConnected) {
         <td><span class="badge ${p.ActiveState === 'active' ? 'ok' : p.ActiveState === 'failed' ? 'err' : ''}">${esc(p.SubState || p.ActiveState || '?')}</span></td>
         <td class="mono num">${p.cpu_pct != null ? p.cpu_pct.toFixed(1) + '%' : '—'}</td>
         <td class="mono num">${p.mem_bytes != null ? fmtBytes(p.mem_bytes) : '—'}</td>
-        <td class="mono num hide-sm">${svcUptime(p)}</td></tr>`).join('');
+        <td class="mono num hide-sm">${svcUptime(p)}</td>
+        <td class="svc-actions-cell">${svcActionsHtml(name)}</td></tr>`).join('');
     const eventsHtml = feed.events.length ? feed.events.map((e) => `
         <div class="feed-row">
             <span class="feed-time mono">${fmtTime(e.ts)}</span>
@@ -995,7 +1021,7 @@ async function refreshDashboard(cfConnected) {
                     <div class="card-head"><h2>${t('dash.services')}</h2><span class="count" id="dash-svccount">${sv.length} procesa</span><span class="spacer"></span>
                         <button class="btn small ghost" id="chkupd">${icon('refresh')}${t('dash.check_updates')}</button>
                         <a class="btn small" href="#/monitoring">${t('dash.all')} ${icon('chevR')}</a></div>
-                    <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th></tr></thead>
+                    <table class="data svc-table"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th><th></th></tr></thead>
                     <tbody id="dash-svc">${svcRows}</tbody></table>
                 </section>
             </div>
@@ -2369,7 +2395,8 @@ async function refreshMonitoring() {
                 <td><span class="badge ${st === 'active' ? 'ok' : (st === 'failed' ? 'err' : '')}">${esc(s.SubState || st)}</span></td>
                 <td class="mono num">${s.cpu_pct != null ? s.cpu_pct.toFixed(1) + '%' : '—'}</td>
                 <td class="mono num">${s.mem_bytes != null ? fmtBytes(s.mem_bytes) : '—'}</td>
-                <td class="mono num hide-sm">${svcUptime(s)}</td></tr>`;
+                <td class="mono num hide-sm">${svcUptime(s)}</td>
+                <td class="svc-actions-cell">${svcActionsHtml(name)}</td></tr>`;
         }).join('');
 
         const procRows = (top.processes || []).map((p) => `<tr>
@@ -2405,7 +2432,7 @@ async function refreshMonitoring() {
                 <table class="data"><thead><tr><th>PID</th><th>${t('mon.service')}</th><th class="hide-sm">${t('mon.user')}</th><th class="num">CPU</th><th class="num">RAM</th></tr></thead>
                 <tbody>${procRows || `<tr><td colspan="5" class="empty">—</td></tr>`}</tbody></table></div>
             <div class="card flush"><div class="card-head"><h2>${t('mon.services')}</h2></div>
-                <table class="data"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th></tr></thead>
+                <table class="data svc-table"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th><th></th></tr></thead>
                 <tbody>${svcRows}</tbody></table></div>
         </div>`;
     } catch {

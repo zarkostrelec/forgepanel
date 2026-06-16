@@ -15,6 +15,7 @@ final class MonitoringController extends Controller
     {
         $router->add('GET', '/api/v1/monitoring/now', $this->now(...));
         $router->add('GET', '/api/v1/monitoring/services', $this->services(...));
+        $router->add('POST', '/api/v1/monitoring/services/action', $this->serviceAction(...));
         $router->add('GET', '/api/v1/monitoring/history', $this->history(...));
         $router->add('GET', '/api/v1/monitoring/top', $this->top(...));
         $router->add('GET', '/api/v1/monitoring/alarms', $this->alarmsGet(...));
@@ -132,6 +133,21 @@ final class MonitoringController extends Controller
             $services[$service] = $status;
         }
         Response::ok($services);
+    }
+
+    /** start/stop/restart/reload servisa (samo admin; whitelist + config test u agentu). */
+    private function serviceAction(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'monitoring:read');
+        $ctx->requireRole('admin');
+        $service = (string) ($request->str('service') ?? '');
+        $action = (string) ($request->str('action') ?? '');
+        if (!in_array($action, ['start', 'stop', 'restart', 'reload'], true)) {
+            throw new HttpException(422, 'invalid_action');
+        }
+        $status = $this->app->agent->call('service.action', ['service' => $service, 'action' => $action]);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'service.' . $action, ['service' => $service], $request->ip);
+        Response::ok($status);
     }
 
     private function history(Request $request): never

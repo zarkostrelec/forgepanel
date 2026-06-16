@@ -26,6 +26,18 @@ final class Systemd
         Proc::mustRun(['systemctl', 'restart', $unit]);
     }
 
+    public static function start(string $unit): void
+    {
+        self::assertUnit($unit);
+        Proc::mustRun(['systemctl', 'start', $unit]);
+    }
+
+    public static function stop(string $unit): void
+    {
+        self::assertUnit($unit);
+        Proc::mustRun(['systemctl', 'stop', $unit]);
+    }
+
     public static function enableNow(string $unit): void
     {
         self::assertUnit($unit);

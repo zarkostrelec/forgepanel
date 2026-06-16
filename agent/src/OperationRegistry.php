@@ -74,6 +74,7 @@ final class OperationRegistry
         'cron.sync'         => Operations\CronSync::class,
         'service.status'    => Operations\ServiceStatus::class,
         'service.reload'    => Operations\ServiceReload::class,
+        'service.action'    => Operations\ServiceReload::class,
         'ssl.issue'         => Operations\SslIssue::class,
         'ssl.panel_issue'   => Operations\PanelSslIssue::class,
         'ssl.install_custom' => Operations\SslInstallCustom::class,
