@@ -862,10 +862,10 @@ function topologyViz(services, cfConnected) {
     const links = linkPaths.map(([A, B], i) => {
         const ax = A.x + NW / 2, bx = B.x - NW / 2, mx = (ax + bx) / 2;
         const d = `M ${ax.toFixed(0)} ${A.y} C ${mx.toFixed(0)} ${A.y}, ${mx.toFixed(0)} ${B.y}, ${bx.toFixed(0)} ${B.y}`;
+        // Samo CSS animacija (stroke-dashoffset) — bez SMIL paketa koji bi se na refreshu
+        // nakratko iscrtali u ishodištu (0,0) i "razbacali" po boxu.
         return `<path d="${d}" fill="none" stroke="var(--line-strong)" stroke-width="2"/>
-            <path d="${d}" fill="none" stroke="url(#topoGrad)" stroke-width="2" stroke-dasharray="3 9" stroke-linecap="round" class="topo-flow"/>
-            <circle r="6.5" fill="var(--info)" opacity="0.18"><animateMotion dur="${(2.6 + (i % 3) * 0.5).toFixed(1)}s" repeatCount="indefinite" path="${d}"/></circle>
-            <circle r="2.8" fill="var(--info)"><animateMotion dur="${(2.6 + (i % 3) * 0.5).toFixed(1)}s" repeatCount="indefinite" path="${d}"/></circle>`;
+            <path d="${d}" fill="none" stroke="url(#topoGrad)" stroke-width="2" stroke-dasharray="3 9" stroke-linecap="round" class="topo-flow"/>`;
     }).join('');
 
     return `<div class="topo-viz"><svg viewBox="0 0 ${W} ${H}" class="topo-svg" preserveAspectRatio="xMidYMid meet">

@@ -31,9 +31,13 @@ final class DbUserCreate extends Operation
 
         $pdo = $this->db->pdo();
         $quoted_pass = $pdo->quote((string) $params['password']);
+        // Idempotentno: kreiraj usera ako ne postoji, pa svakako postavi lozinku
+        // (pokriva slučaj kad je user ostao od prekinute instalacije s drugom lozinkom).
         $pdo->exec("CREATE USER IF NOT EXISTS `$username`@`$host` IDENTIFIED BY $quoted_pass");
+        $pdo->exec("ALTER USER `$username`@`$host` IDENTIFIED BY $quoted_pass");
         $pdo->exec("GRANT ALL PRIVILEGES ON `$database`.* TO `$username`@`$host`");
-        $pdo->exec('FLUSH PRIVILEGES');
+        // FLUSH PRIVILEGES namjerno izostavljen — CREATE USER/GRANT se primjenjuju odmah,
+        // a FLUSH traži RELOAD privilegiju koja zna nedostajati u nekim setupovima.
 
         return ['username' => $username, 'host' => $host];
     }

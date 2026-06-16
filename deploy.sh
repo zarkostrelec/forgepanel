@@ -25,10 +25,22 @@ git -C "$SRC" reset --hard origin/main
 echo "→ sync $SRC -> $DEST (bez --delete; ne dira runtime podatke)"
 rsync -a --exclude='.git' --exclude='deploy.sh' "$SRC"/ "$DEST"/
 
-# Statički asseti (app.css/app.js/app.html) ne trebaju restart — samo hard refresh.
-# Reload weba je jeftin i siguran; agent/FPM dirati samo ako se mijenjao backend.
+# PHP-FPM: reload OBAVEZNO (inače opcache servira STARI web/src kod — čest uzrok
+# "deployao sam ali se ništa nije promijenilo"). Reloadamo sve prisutne php*-fpm poolove.
+echo "→ reload PHP-FPM (čisti opcache, učitava novi web/src)"
+fpm_found=0
+for svc in $(systemctl list-units --type=service --state=running --no-legend 'php*-fpm.service' 2>/dev/null | awk '{print $1}'); do
+    systemctl reload "$svc" 2>/dev/null || systemctl restart "$svc" 2>/dev/null || true
+    echo "   $svc"
+    fpm_found=1
+done
+[ "$fpm_found" = 0 ] && echo "   (nijedan php*-fpm servis nije pronađen — provjeri ručno)"
+
+# Agent (forge-agentd): restart da pokupi izmjene u agent/ (op klase, validatori…).
+echo "→ restart forge-agentd (pokupi agent/ izmjene)"
+systemctl restart forge-agentd 2>/dev/null || echo "   (forge-agentd nije pronađen)"
+
 systemctl reload nginx 2>/dev/null || true
 
 echo "✓ Deploy gotov: $(git -C "$SRC" rev-parse --short HEAD) -> $DEST"
 echo "  U browseru: hard refresh (Ctrl+Shift+R)."
-echo "  Ako se mijenjao agent/ ili web/src (PHP): systemctl restart forge-agentd php8.4-fpm"

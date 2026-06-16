@@ -19,7 +19,7 @@ Server `elite` ima **dvije odvojene putanje** (to je čest izvor zabune):
 ```bash
 cd /opt/forgepanel-src && ./deploy.sh
 ```
-Skripta: `git reset --hard origin/main` → `rsync -src → /opt/forgepanel` (bez `--delete`) → `systemctl reload nginx`. Statički asseti (`web/public/assets/app.*`) ne trebaju restart, samo **hard refresh (Ctrl+Shift+R)** u browseru. Ako se mijenjao `agent/` ili `web/src` (PHP): `systemctl restart forge-agentd php8.4-fpm`.
+Skripta: `git reset --hard origin/main` → `rsync -src → /opt/forgepanel` (bez `--delete`) → **reload svih `php*-fpm` poolova** (čisti opcache — inače se servira STARI `web/src`!) → **restart `forge-agentd`** (pokupi `agent/` izmjene) → `systemctl reload nginx`. Statički asseti (`web/public/assets/app.*`) trebaju samo **hard refresh (Ctrl+Shift+R)** u browseru.
 
 Push uvijek na **main** (vidi pravila niže); `origin/main` je istina, lokalni `main` u nekim okruženjima može biti nepovezana grana — tada `git checkout -B main origin/main` prije rada.
 
