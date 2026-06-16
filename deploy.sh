@@ -17,10 +17,17 @@ set -euo pipefail
 SRC="${FP_SRC:-/opt/forgepanel-src}"
 DEST="${FP_DEST:-/opt/forgepanel}"
 
-echo "→ pull origin/main u $SRC"
-git -C "$SRC" fetch origin main
-git -C "$SRC" checkout main
-git -C "$SRC" reset --hard origin/main
+# ── Self-update guard ──
+# Povuci NAJPRIJE, pa re-exec SVJEŽU verziju ove skripte. Bez ovoga, kad se promijeni
+# sam deploy.sh, stara verzija u memoriji nastavi izvršavati zastarjele korake (npr.
+# ne restarta agenta/FPM) → "deployao sam ali stari kod i dalje radi".
+if [ "${FP_DEPLOY_REEXEC:-0}" != "1" ]; then
+    echo "→ pull origin/main u $SRC"
+    git -C "$SRC" fetch origin main
+    git -C "$SRC" checkout main 2>/dev/null || git -C "$SRC" checkout -B main origin/main
+    git -C "$SRC" reset --hard origin/main
+    exec env FP_DEPLOY_REEXEC=1 bash "$SRC/deploy.sh"
+fi
 
 echo "→ sync $SRC -> $DEST (bez --delete; ne dira runtime podatke)"
 rsync -a --exclude='.git' --exclude='deploy.sh' "$SRC"/ "$DEST"/
