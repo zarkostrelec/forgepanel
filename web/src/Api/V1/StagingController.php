@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ForgePanel\Web\Api\V1;
 
+use ForgePanel\Web\Core\DnsSync;
 use ForgePanel\Web\Core\HttpException;
 use ForgePanel\Web\Core\Request;
 use ForgePanel\Web\Core\Response;
@@ -74,6 +75,49 @@ final class StagingController extends Controller
         ], $ctx->user_id);
 
         $this->app->audit->log($ctx->user_id, $ctx->email, 'staging.create', ['source' => $source['domain'], 'staging' => $staging_domain], $request->ip);
+
+        // Auto-DNS: poddomena na lokalnoj zoni odmah dobiva A (i AAAA) zapis prema rootu
+        $this->ensureSubdomainDns($source['domain'], $prefix);
+
         Response::ok(['staging_domain' => $staging_domain, 'task_id' => $task_id], 202);
+    }
+
+    /**
+     * Ako matični domena ima lokalnu DNS zonu (BIND), automatski dodaj A/AAAA zapis za
+     * poddomenu koji pokazuje na isti IP kao root (@). Best-effort — ako DNS nije lokalan
+     * (npr. na Cloudflareu) ili zona ne postoji, tiho preskoči.
+     */
+    private function ensureSubdomainDns(string $parent_domain, string $label): void
+    {
+        $zone = $this->app->db->one('SELECT id FROM dns_zones WHERE domain = ?', [$parent_domain]);
+        if ($zone === null) {
+            return;
+        }
+        $zone_id = (int) $zone['id'];
+        $added = false;
+        foreach (['A', 'AAAA'] as $type) {
+            $root = $this->app->db->one(
+                'SELECT content FROM dns_records WHERE zone_id = ? AND name = ? AND type = ? LIMIT 1',
+                [$zone_id, '@', $type]
+            );
+            if ($root === null) {
+                continue;
+            }
+            if ($this->app->db->one('SELECT 1 FROM dns_records WHERE zone_id = ? AND name = ? AND type = ?', [$zone_id, $label, $type]) !== null) {
+                continue;
+            }
+            $this->app->db->run(
+                'INSERT INTO dns_records (zone_id, name, type, content, ttl) VALUES (?, ?, ?, ?, 3600)',
+                [$zone_id, $label, $type, $root['content']]
+            );
+            $added = true;
+        }
+        if ($added) {
+            try {
+                DnsSync::sync($this->app, $zone_id);
+            } catch (\Throwable $e) {
+                error_log('forgepanel: staging auto-DNS sync: ' . $e->getMessage());
+            }
+        }
     }
 }
