@@ -708,15 +708,30 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 .fm .fm-ic { width: 1%; }
 .fm .fm-check input { cursor: pointer; vertical-align: middle; }
 
-/* editor (modal) — dark */
-.code-edit {
-    width: 100%; min-height: 320px; max-height: 56vh; resize: vertical;
-    background: var(--chrome-2); color: var(--chrome-ink);
-    border: 1px solid var(--chrome-line); border-radius: var(--radius-sm);
-    padding: 12px 14px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65;
-    outline: none; tab-size: 4; white-space: pre;
+/* editor (modal) — dark, s gutterom za brojeve linija */
+.dialog.editor { width: min(1100px, calc(100vw - 32px)); }
+.code-editor {
+    display: flex; align-items: stretch;
+    height: min(70vh, 680px);
+    border: 1px solid var(--chrome-line); border-radius: var(--radius-sm); overflow: hidden;
+    background: var(--chrome-2);
 }
-.code-edit:focus { border-color: var(--accent); }
+.code-editor:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.code-gutter {
+    flex: 0 0 auto; min-width: 44px; box-sizing: content-box;
+    padding: 12px 10px 12px 14px; text-align: right;
+    font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65;
+    color: var(--chrome-ink-3); background: #0a0c14;
+    border-right: 1px solid var(--chrome-line);
+    white-space: pre; overflow: hidden; user-select: none; pointer-events: none;
+}
+.code-editor .code-edit {
+    flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; max-height: none; resize: none;
+    background: transparent; color: var(--chrome-ink);
+    border: 0; border-radius: 0;
+    padding: 12px 14px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65;
+    outline: none; tab-size: 4; white-space: pre; overflow: auto;
+}
 
 /* ---------------------------------------------------------------- toasts */
 .toasts { position: fixed; bottom: 16px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }

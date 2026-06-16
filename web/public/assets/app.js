@@ -163,7 +163,10 @@ function toast(msg, kind = 'ok') {
 class FpModal extends HTMLElement {
     connectedCallback() {
         this.classList.add('overlay');
-        this.addEventListener('click', (e) => { if (e.target === this) this.close(); });
+        // Zatvori SAMO ako su i pritisak i otpuštanje na pozadini (ne kad se selekcija
+        // teksta povuče iz editora pa otpusti izvan okvira).
+        this.addEventListener('mousedown', (e) => { this._downOnBackdrop = e.target === this; });
+        this.addEventListener('click', (e) => { if (e.target === this && this._downOnBackdrop) this.close(); });
         this._esc = (e) => { if (e.key === 'Escape') this.close(); };
         document.addEventListener('keydown', this._esc);
         this.querySelector('input, select, textarea, button')?.focus();
@@ -173,9 +176,9 @@ class FpModal extends HTMLElement {
 }
 customElements.define('fp-modal', FpModal);
 
-function openModal(html, { wide = false } = {}) {
+function openModal(html, { wide = false, editor = false } = {}) {
     const modal = document.createElement('fp-modal');
-    modal.innerHTML = `<div class="dialog${wide ? ' wide' : ''}">${html}</div>`;
+    modal.innerHTML = `<div class="dialog${wide ? ' wide' : ''}${editor ? ' editor' : ''}">${html}</div>`;
     document.body.append(modal);
     modal.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => modal.close()));
     return modal;
@@ -2008,14 +2011,32 @@ async function openFileEditor(vhost, container, relPath, entry) {
 
     const modal = openModal(`
         <div class="dialog-head"><h1 class="mono">${esc(entry.name)}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
-        <textarea class="code-edit" spellcheck="false">${esc(content)}</textarea>
+        <div class="code-editor">
+            <div class="code-gutter" aria-hidden="true"></div>
+            <textarea class="code-edit" spellcheck="false" wrap="off">${esc(content)}</textarea>
+        </div>
         <div class="dialog-foot">
             <button class="btn danger" id="fdel">${t('common.delete')}</button>
             <button class="btn" id="fdl">${icon('download')}${t('files.download')}</button>
             <span class="spacer" style="flex:1"></span>
             <button class="btn" data-close>${t('common.cancel')}</button>
             <button class="btn primary" id="fsave">${t('common.save')}</button>
-        </div>`, { wide: true });
+        </div>`, { editor: true });
+
+    // Brojevi linija — sinkronizirani sa sadržajem i skrolom
+    const ta = modal.querySelector('.code-edit');
+    const gutter = modal.querySelector('.code-gutter');
+    const renderGutter = () => {
+        const n = ta.value.split('\n').length;
+        if (gutter._n === n) return;
+        gutter._n = n;
+        let s = '';
+        for (let i = 1; i <= n; i++) s += i + '\n';
+        gutter.textContent = s;
+    };
+    ta.addEventListener('input', renderGutter);
+    ta.addEventListener('scroll', () => { gutter.scrollTop = ta.scrollTop; });
+    renderGutter();
 
     modal.querySelector('#fdl').addEventListener('click', async () => {
         try {
