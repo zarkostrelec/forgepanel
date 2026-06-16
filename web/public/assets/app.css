@@ -1103,7 +1103,7 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 
 /* kružni gaugeovi */
 .gauge-row { display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 12px;
-    padding: 16px 8px; border-bottom: 1px solid var(--line-2); }
+    padding: 18px 8px 14px; }
 .gauge { position: relative; display: grid; place-items: center; }
 .gauge-svg { display: block; width: 124px; height: 124px; }
 .gauge-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 1px; pointer-events: none; top: -6px; width: 124px; }
@@ -1113,12 +1113,15 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 .gauge-label { font-size: 11px; letter-spacing: 0.06em; font-weight: 700; text-transform: uppercase; color: var(--ink-3); margin-top: 4px; }
 
 /* animirana topologija */
-.topo-viz { padding: 12px 10px 8px; }
+.topo-viz { padding: 4px 12px 14px; border-top: 1px solid var(--line-2); }
 .topo-svg { width: 100%; height: auto; display: block; }
-.topo-svg text { font-family: var(--font-mono); fill: var(--ink-2); }
-.topo-flow { animation: topo-dash 1.1s linear infinite; }
-@keyframes topo-dash { to { stroke-dashoffset: -28; } }
-.topo-node-g { animation: fp-fadeup 0.5s backwards cubic-bezier(.16,1,.3,1); animation-delay: calc(var(--i) * 70ms); }
+.topo-svg text { font-family: var(--font-mono); }
+.topo-svg .topo-name { fill: var(--ink); font-weight: 600; letter-spacing: -0.01em; }
+.topo-svg .topo-role { fill: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase; }
+.topo-flow { animation: topo-dash 1s linear infinite; }
+@keyframes topo-dash { to { stroke-dashoffset: -24; } }
+.topo-node-g { animation: fp-fadeup 0.5s backwards cubic-bezier(.16,1,.3,1); animation-delay: calc(var(--i) * 60ms); }
+.topo-node-g rect:first-child { transition: stroke 0.2s; }
 
 @media (max-width: 1180px) {
     .dash-grid { grid-template-columns: 1fr; }

@@ -822,28 +822,38 @@ function gaugeSvg({ value = 0, max = 100, color = 'var(--accent)', label = '', u
         <div class="gauge-label">${label}</div></div>`;
 }
 
-// Animirana topologija servera (čvorovi + tekući paketi po vezama)
+// Animirana topologija servera (čvorovi s ikonom/ulogom + tekući paketi po vezama)
 function topologyViz(services, cfConnected) {
     const up = (re) => Object.entries(services).some(([n, p]) => re.test(n) && p.ActiveState === 'active');
     const phpKey = Object.keys(services).find((n) => /php.*fpm/i.test(n));
-    const chain = [{ label: 'Internet', ok: true }];
-    if (cfConnected) chain.push({ label: 'Cloudflare', ok: true });
-    chain.push({ label: 'nginx', ok: up(/^nginx/) });
-    chain.push({ label: phpKey ? phpKey.replace('-fpm', '') : 'php-fpm', ok: phpKey ? services[phpKey].ActiveState === 'active' : false });
-    const dbs = Object.entries(services).filter(([n]) => /maria|mysql|redis/i.test(n)).map(([n, p]) => ({ label: n, ok: p.ActiveState === 'active' }));
-    if (!dbs.length) dbs.push({ label: 'db', ok: false });
+    const chain = [{ label: 'Internet', role: 'mreža', ic: 'globe', ok: true }];
+    if (cfConnected) chain.push({ label: 'Cloudflare', role: 'proxy · CDN', ic: 'cloud', ok: true });
+    chain.push({ label: 'nginx', role: 'reverse proxy', ic: 'server', ok: up(/^nginx/) });
+    chain.push({ label: phpKey ? phpKey.replace('-fpm', '') : 'php-fpm', role: 'runtime', ic: 'terminal', ok: phpKey ? services[phpKey].ActiveState === 'active' : false });
+    const dbs = Object.entries(services).filter(([n]) => /maria|mysql|redis/i.test(n))
+        .map(([n, p]) => ({ label: n, role: /redis/i.test(n) ? 'cache' : 'baza', ic: 'db', ok: p.ActiveState === 'active' }));
+    if (!dbs.length) dbs.push({ label: 'db', role: 'baza', ic: 'db', ok: false });
 
-    const W = 880, H = 180, NW = 96, NH = 38;
-    const x0 = 62, x1 = 628, step = chain.length > 1 ? (x1 - x0) / (chain.length - 1) : 0;
-    const pos = chain.map((nd, i) => ({ ...nd, x: x0 + step * i, y: 90 }));
-    const dbX = 798;
-    const dbPos = dbs.map((d, i) => ({ ...d, x: dbX, y: dbs.length === 1 ? 90 : 58 + i * 64 }));
+    const W = 1000, H = 152, NW = 144, NH = 54;
+    const x0 = 78, x1 = 640, step = chain.length > 1 ? (x1 - x0) / (chain.length - 1) : 0;
+    const cy = 82;
+    const pos = chain.map((nd, i) => ({ ...nd, x: x0 + step * i, y: cy }));
+    const dbX = 866;
+    const dbPos = dbs.map((d, i) => ({ ...d, x: dbX, y: dbs.length === 1 ? cy : 48 + i * 68 }));
     const last = pos[pos.length - 1];
 
-    const node = (nd, i) => `<g transform="translate(${(nd.x - NW / 2).toFixed(0)} ${(nd.y - NH / 2).toFixed(0)})" class="topo-node-g" style="--i:${i}">
-        <rect x="0" y="0" width="${NW}" height="${NH}" rx="9" fill="var(--surface)" stroke="var(--line-strong)"/>
-        <circle cx="14" cy="${NH / 2}" r="3" fill="${nd.ok ? 'var(--ok)' : 'var(--danger)'}"/>
-        <text x="25" y="${NH / 2 + 3.5}" font-size="10.5">${esc(nd.label)}</text></g>`;
+    const node = (nd, i) => {
+        const col = nd.ok ? 'var(--ok)' : 'var(--danger)';
+        const iconCol = nd.ok ? 'var(--ink-2)' : 'var(--danger)';
+        return `<g transform="translate(${(nd.x - NW / 2).toFixed(0)} ${(nd.y - NH / 2).toFixed(0)})" class="topo-node-g" style="--i:${i}">
+        <rect x="0.5" y="0.5" width="${NW - 1}" height="${NH - 1}" rx="13" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <rect x="0.5" y="0.5" width="3.5" height="${NH - 1}" rx="2" fill="${col}" opacity="0.85"/>
+        <g transform="translate(16 ${(NH / 2 - 9).toFixed(0)}) scale(0.72)" fill="none" stroke="${iconCol}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[nd.ic] || ICONS.server}</g>
+        <text x="44" y="${NH / 2 - 3}" class="topo-name" font-size="12">${esc(nd.label)}</text>
+        <text x="44" y="${NH / 2 + 12}" class="topo-role" font-size="8.5">${esc(nd.role)}</text>
+        <circle cx="${NW - 16}" cy="16" r="7" fill="${col}" opacity="0.16"/>
+        <circle cx="${NW - 16}" cy="16" r="3.2" fill="${col}"/></g>`;
+    };
 
     const linkPaths = [];
     for (let i = 1; i < pos.length; i++) linkPaths.push([pos[i - 1], pos[i]]);
@@ -852,12 +862,20 @@ function topologyViz(services, cfConnected) {
     const links = linkPaths.map(([A, B], i) => {
         const ax = A.x + NW / 2, bx = B.x - NW / 2, mx = (ax + bx) / 2;
         const d = `M ${ax.toFixed(0)} ${A.y} C ${mx.toFixed(0)} ${A.y}, ${mx.toFixed(0)} ${B.y}, ${bx.toFixed(0)} ${B.y}`;
-        return `<path d="${d}" fill="none" stroke="var(--line-strong)" stroke-width="1.5"/>
-            <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 10" class="topo-flow"/>
-            <circle r="2.6" fill="var(--info)"><animateMotion dur="${(2.4 + (i % 3) * 0.5).toFixed(1)}s" repeatCount="indefinite" path="${d}"/></circle>`;
+        return `<path d="${d}" fill="none" stroke="var(--line-strong)" stroke-width="2"/>
+            <path d="${d}" fill="none" stroke="url(#topoGrad)" stroke-width="2" stroke-dasharray="3 9" stroke-linecap="round" class="topo-flow"/>
+            <circle r="6.5" fill="var(--info)" opacity="0.18"><animateMotion dur="${(2.6 + (i % 3) * 0.5).toFixed(1)}s" repeatCount="indefinite" path="${d}"/></circle>
+            <circle r="2.8" fill="var(--info)"><animateMotion dur="${(2.6 + (i % 3) * 0.5).toFixed(1)}s" repeatCount="indefinite" path="${d}"/></circle>`;
     }).join('');
 
     return `<div class="topo-viz"><svg viewBox="0 0 ${W} ${H}" class="topo-svg" preserveAspectRatio="xMidYMid meet">
+        <defs>
+            <linearGradient id="topoGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--info)"/></linearGradient>
+            <pattern id="topoDots" width="24" height="24" patternUnits="userSpaceOnUse">
+                <circle cx="2" cy="2" r="1" fill="var(--line-strong)"/></pattern>
+        </defs>
+        <rect x="0" y="${cy - 60}" width="${W}" height="120" fill="url(#topoDots)" opacity="0.4"/>
         ${links}
         ${pos.map(node).join('')}
         ${dbPos.map((d, i) => node(d, pos.length + i)).join('')}
