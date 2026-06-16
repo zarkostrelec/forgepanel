@@ -30,6 +30,7 @@ final class AppsController extends Controller
     {
         $router->add('GET', '/api/v1/apps/catalog', $this->catalog(...));
         $router->add('GET', '/api/v1/vhosts/{id}/apps', $this->installed(...));
+        $router->add('DELETE', '/api/v1/vhosts/{id}/apps/{type}', $this->uninstall(...));
         $router->add('POST', '/api/v1/vhosts/{id}/apps/wordpress', $this->installWp(...));
         $router->add('POST', '/api/v1/vhosts/{id}/apps/wordpress/checksums', $this->checksums(...));
         $router->add('POST', '/api/v1/vhosts/{id}/apps/nextcloud', $this->installNextcloud(...));
@@ -75,6 +76,23 @@ final class AppsController extends Controller
             ];
         }
         Response::ok($out);
+    }
+
+    /** Deinstalacija = uklanjanje zapisa app instance (datoteke/baza se NE diraju automatski). */
+    private function uninstall(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'vhosts:write');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $type = (string) $request->param('type');
+        if (!in_array($type, ['wordpress', 'nextcloud', 'ghost'], true)) {
+            throw new HttpException(422, 'invalid_app');
+        }
+        $key = $type === 'wordpress'
+            ? 'wp_instance_' . (int) $vhost['id']
+            : 'app_instance_' . $type . '_' . (int) $vhost['id'];
+        $this->app->db->run('DELETE FROM settings WHERE `key` = ?', [$key]);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'apps.uninstall', ['type' => $type, 'domain' => $vhost['domain']], $request->ip);
+        Response::ok(['removed' => $type]);
     }
 
     private function installWp(Request $request): never

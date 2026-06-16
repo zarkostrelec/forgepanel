@@ -1665,9 +1665,19 @@ async function loadInstalledApps(vhost, box) {
                 <div class="ia-meta"><div class="ia-name">${esc(a.name)}</div>
                     <div class="ia-sub mono">${esc(a.domain)}${a.installed_at ? ' · ' + fmtDate(a.installed_at) : ''}</div></div>
                 <a class="btn sm" href="${esc(a.admin_url)}" target="_blank" rel="noopener">${icon('arrowUR')}${a.type === 'wordpress' ? 'wp-admin' : t('apps.open')}</a>
+                <button class="btn ghost sm danger" data-uninstall="${esc(a.type)}" title="${t('apps.uninstall')}">${icon('x', 13)}${t('apps.uninstall')}</button>
             </div>`).join('')}
         </div>
         <div class="hr" style="margin:16px 0 14px"></div>`;
+
+    box.querySelectorAll('[data-uninstall]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(t('apps.uninstall_confirm'))) return;
+        try {
+            await api(`/vhosts/${vhost.id}/apps/${b.dataset.uninstall}`, { method: 'DELETE' });
+            toast(t('apps.uninstalled'));
+            loadInstalledApps(vhost, box);
+        } catch (err) { toast(err.message, 'err'); }
+    }));
 }
 
 async function installApp(vhost, appId, result) {
