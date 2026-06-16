@@ -154,8 +154,7 @@ final class NginxConf
     }
 
     public static function vhostTemplate(string $domain, string $docroot, string $php_version, string $sys_user): string
-    {
-        $v6_80 = self::listenV6(80);
+    {        $v6_80 = self::listenV6(80);
         $v6_443 = self::listenV6(443, ' ssl');
         return <<<NGINX
         # ForgePanel vhost — generirano, ručne izmjene idu kroz panel (custom direktive)
@@ -198,6 +197,62 @@ final class NginxConf
                 include fastcgi_params;
                 fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
                 fastcgi_pass unix:/run/php/fpm-{$sys_user}.sock;
+            }
+
+            location ~ /\.(?!well-known) {
+                deny all;
+            }
+        }
+        NGINX;
+    }
+
+    /** Legacy PHP (Docker FPM) — nginx servira statiku, PHP ide na 127.0.0.1:{port} containera. */
+    public static function vhostLegacyTemplate(string $domain, string $docroot, int $port): string
+    {
+        $v6_80 = self::listenV6(80);
+        $v6_443 = self::listenV6(443, ' ssl');
+        return <<<NGINX
+        # ForgePanel vhost — {$domain} (Legacy PHP preko Dockera → 127.0.0.1:{$port})
+        server {
+            listen 80;
+            {$v6_80}
+            server_name {$domain} www.{$domain};
+
+            location /.well-known/acme-challenge/ {
+                root /var/www/forgepanel-acme;
+            }
+            location / {
+                return 301 https://\$host\$request_uri;
+            }
+        }
+
+        server {
+            listen 443 ssl;
+            {$v6_443}
+            http2 on;
+            server_name {$domain} www.{$domain};
+
+            root {$docroot};
+            index index.php index.html;
+
+            ssl_certificate     /etc/forgepanel/ssl/{$domain}/fullchain.pem;
+            ssl_certificate_key /etc/forgepanel/ssl/{$domain}/privkey.pem;
+
+            access_log /var/www/vhosts/{$domain}/logs/access.log;
+            error_log  /var/www/vhosts/{$domain}/logs/error.log;
+
+            include /etc/nginx/forgepanel/snippets/security.conf;
+
+            location / {
+                try_files \$uri \$uri/ /index.php?\$query_string;
+            }
+
+            location ~ \.php$ {
+                try_files \$uri =404;
+                include fastcgi_params;
+                fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+                fastcgi_pass 127.0.0.1:{$port};
+                fastcgi_read_timeout 300;
             }
 
             location ~ /\.(?!well-known) {

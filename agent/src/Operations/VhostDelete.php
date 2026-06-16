@@ -33,6 +33,7 @@ final class VhostDelete extends Operation
         $context->output('Uklanjam nginx config');
         NginxConf::remove(NginxConf::VHOST_CONF_DIR . "/$domain.conf");
         \ForgePanel\Agent\System\ApacheConf::removeVhost($domain);
+        \ForgePanel\Agent\System\LegacyPhp::down((int) $params['vhost_id'], $context->output(...));
         @unlink("/etc/cron.d/forgepanel-{$sys_user}");
         $context->progress(25);
 

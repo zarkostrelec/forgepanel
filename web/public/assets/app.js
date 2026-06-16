@@ -1494,12 +1494,15 @@ async function pageWebsiteDetail(id) {
             <h2>Postavke</h2>
             <table class="data"><tbody>
                 <tr><td>${t('vhost.php_version')}</td><td>
-                    <select id="php" class="mono">${['8.1', '8.2', '8.3', '8.4', '8.5'].map((v) =>
-                        `<option ${v === vhost.php_version ? 'selected' : ''}>${v}</option>`).join('')}</select></td></tr>
+                    ${vhost.web_backend === 'php_legacy'
+                        ? `<span class="badge warn">PHP 7.2.34 · Docker (legacy)</span>`
+                        : `<select id="php" class="mono">${['8.1', '8.2', '8.3', '8.4', '8.5'].map((v) =>
+                            `<option ${v === vhost.php_version ? 'selected' : ''}>${v}</option>`).join('')}</select>`}</td></tr>
                 <tr><td>Backend</td><td>
                     <select id="backend" class="mono">
                         <option value="nginx" ${vhost.web_backend === 'nginx' ? 'selected' : ''}>nginx + FPM (brže)</option>
                         <option value="nginx_apache" ${vhost.web_backend === 'nginx_apache' ? 'selected' : ''}>nginx → Apache (.htaccess)</option>
+                        <option value="php_legacy" ${vhost.web_backend === 'php_legacy' ? 'selected' : ''}>Legacy PHP 7.2 (Docker)</option>
                     </select></td></tr>
                 <tr><td>Sistemski user</td><td class="mono">${esc(vhost.sys_user)}</td></tr>
                 <tr><td>Docroot</td><td class="mono">${esc(vhost.docroot)}</td></tr>
@@ -1541,7 +1544,7 @@ async function pageWebsiteDetail(id) {
     <div class="card mt"><div class="page-head"><h2>${t('apps.title')}</h2></div><div id="apps"></div></div>
     ${state.me.role === 'admin' ? `<div class="card mt"><div class="page-head"><h2>${t('term.title')}</h2></div><div id="term"></div></div>` : ''}`;
 
-    main().querySelector('#php').addEventListener('change', async (e) => {
+    main().querySelector('#php')?.addEventListener('change', async (e) => {
         try {
             await api(`/vhosts/${id}/php`, { method: 'PUT', body: { php_version: e.target.value } });
             toast(`PHP → ${e.target.value}`);

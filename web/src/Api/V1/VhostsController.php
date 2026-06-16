@@ -79,7 +79,7 @@ final class VhostsController extends Controller
         $vhost = $ctx->vhostOr404((int) $request->param('id'));
 
         $backend = $request->str('web_backend') ?? '';
-        if (!in_array($backend, ['nginx', 'nginx_apache'], true)) {
+        if (!in_array($backend, ['nginx', 'nginx_apache', 'php_legacy'], true)) {
             throw new HttpException(422, 'invalid_backend');
         }
 

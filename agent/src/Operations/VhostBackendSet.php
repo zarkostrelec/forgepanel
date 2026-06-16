@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ForgePanel\Agent\Operations;
 
 use ForgePanel\Agent\System\ApacheConf;
+use ForgePanel\Agent\System\LegacyPhp;
 use ForgePanel\Agent\System\NginxConf;
 use ForgePanel\Agent\TaskContext;
 use ForgePanel\Agent\Validator;
@@ -26,7 +27,7 @@ final class VhostBackendSet extends Operation
         Validator::positiveInt($params['vhost_id'] ?? null, 'vhost_id');
         Validator::fqdn($params['domain'] ?? null);
         Validator::phpVersion($params['php_version'] ?? null);
-        Validator::oneOf($params['backend'] ?? null, ['nginx', 'nginx_apache'], 'backend');
+        Validator::oneOf($params['backend'] ?? null, ['nginx', 'nginx_apache', 'php_legacy'], 'backend');
     }
 
     public function execute(array $params, TaskContext $context): array
@@ -38,6 +39,29 @@ final class VhostBackendSet extends Operation
         $sys_user = 'vh_' . $vhost_id;
         $vhost_root = Validator::VHOST_ROOT . '/' . $domain;
         $docroot = $vhost_root . '/httpdocs';
+
+        // Legacy PHP (Docker) — vlastita grana: izgradi image, digni FPM container,
+        // nginx fastcgi na container port. DB radi preko mountanog MariaDB socketa.
+        if ($backend === 'php_legacy') {
+            ApacheConf::removeVhost($domain);
+            $context->output('Legacy PHP ' . LegacyPhp::PHP_VERSION . ' (Docker) za ' . $domain);
+            LegacyPhp::ensureImage($context->output(...));
+            $context->progress(50);
+            $port = LegacyPhp::up($vhost_id, $domain, $vhost_root, $context->output(...));
+            $context->progress(80);
+            $context->output("nginx config (legacy) + test + reload");
+            NginxConf::writeAndReload(
+                NginxConf::VHOST_CONF_DIR . "/$domain.conf",
+                NginxConf::vhostLegacyTemplate($domain, $docroot, $port)
+            );
+            $this->db->run('UPDATE vhosts SET web_backend = ? WHERE id = ?', ['php_legacy', $vhost_id]);
+            $context->progress(100);
+            $context->output("Backend za $domain: legacy PHP " . LegacyPhp::PHP_VERSION);
+            return ['domain' => $domain, 'web_backend' => 'php_legacy', 'php' => LegacyPhp::PHP_VERSION];
+        }
+
+        // Prelazak s legacy na nginx/apache → ukloni container
+        LegacyPhp::down($vhost_id, $context->output(...));
 
         if ($backend === 'nginx_apache') {
             ApacheConf::ensureInstalled($context->output(...));
