@@ -35,7 +35,7 @@ async function loadBranding() {
     } catch { state.branding = { panel_name: 'ForgePanel' }; }
 }
 const brandName = () => state.branding?.panel_name ?? 'ForgePanel';
-const PANEL_VERSION = '1.0.0';
+const PANEL_VERSION = '1.2.0';
 const t = (key) => state.lang[key] ?? key;
 
 const fmtDate = (s) => {
@@ -806,8 +806,9 @@ async function doServiceAction(service, action, btn) {
         const r = await api('/monitoring/services/action', { method: 'POST', body: { service, action } });
         if (r.task_id) watchTask(r.task_id, `${service} · ${action}`);
         toast(`${service}: ${action}…`, 'ok');
-        // osvježi nakon što servis sjedne (restart nginxa/FPM-a može nakratko prekinuti vezu)
-        setTimeout(() => { if (/^#\/(monitoring|dashboard)?$/.test(location.hash || '#/dashboard')) route(); }, 3500);
+        // partial osvježi (ne reload cijele stranice) nakon što servis sjedne;
+        // refreshDashboard je otporan na prolazni pad pa neće bljesnuti "sve mrtvo"
+        setTimeout(() => state.pageRefresh?.(), 4000);
     } catch (err) {
         toast(`${service}: ${err.message}`, 'err');
         grp?.querySelectorAll('button').forEach((b) => { b.disabled = false; });
@@ -1034,19 +1035,29 @@ async function refreshDashboard(cfConnected) {
         });
     } else {
         // ── osvježavanje: samo dinamični dijelovi; topologija ostaje netaknuta ──
-        setHtml('dash-strip', stripHtml);
+        // Prolazni pad API-ja (npr. restart MariaDB = panelova baza nakratko dolje) NE smije
+        // iscrtati "sve je mrtvo" — zadrži zadnje dobro stanje za sekciju kojoj nedostaju podaci.
+        const apiDown = !metrics && sv.length === 0;
+        if (apiDown) return;
+
+        if (metrics) {
+            setHtml('dash-strip', stripHtml);
+            const up = document.getElementById('dash-uptime'); if (up) up.textContent = uptimeTxt;
+        }
         setHtml('dash-insights', insightsBlock);
         document.getElementById('dash-insights')?.style.setProperty('margin-bottom', insightsBlock ? 'var(--gap)' : '0');
-        setHtml('dash-svc', svcRows);
-        setHtml('dash-svccount', `${sv.length} procesa`);
         setHtml('dash-events', eventsHtml);
         setHtml('dash-deploys', deploysHtml);
-        const up = document.getElementById('dash-uptime'); if (up) up.textContent = uptimeTxt;
-        const hb = document.getElementById('dash-health'); if (hb) { hb.className = `badge ${healthCls}`; hb.textContent = healthTxt; }
-        // topologiju pregradi SAMO ako se promijenio set/zdravlje servisa
-        if (body.dataset.health !== healthSig) {
-            setHtml('dash-topo', topologyViz(services, cfConnected));
-            body.dataset.health = healthSig;
+
+        if (sv.length > 0) {
+            setHtml('dash-svc', svcRows);
+            setHtml('dash-svccount', `${sv.length} procesa`);
+            const hb = document.getElementById('dash-health'); if (hb) { hb.className = `badge ${healthCls}`; hb.textContent = healthTxt; }
+            // topologiju pregradi SAMO ako se promijenio set/zdravlje servisa
+            if (body.dataset.health !== healthSig) {
+                setHtml('dash-topo', topologyViz(services, cfConnected));
+                body.dataset.health = healthSig;
+            }
         }
     }
 }
@@ -1061,6 +1072,8 @@ async function pageDashboard() {
     main().innerHTML = `<div id="dashbody"><div class="empty">${t('common.loading')}</div></div>`;
     const cf = await api('/cloudflare/account').catch(() => ({ connected: false }));
     await refreshDashboard(cf.connected);
+    // partial refresh fn za vanjske okidače (npr. nakon akcije nad servisom)
+    state.pageRefresh = () => refreshDashboard(cf.connected);
     // live auto-refresh feeda + KPI svakih 10 s (čisti se u route() pri navigaciji)
     state.monTimer = setInterval(() => refreshDashboard(cf.connected), 10000);
     bindVhostRows();
@@ -2488,6 +2501,7 @@ async function pageMonitoring() {
         </div>
         <div id="mondata"><div class="empty">${t('common.loading')}</div></div>`;
 
+    state.pageRefresh = refreshMonitoring;
     document.getElementById('alarmcfg')?.addEventListener('click', openAlarmConfig);
 
     main().querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => {
@@ -3889,14 +3903,22 @@ async function pageAbout() {
             <p class="about-tag">${t('about.tagline')}</p>
         </div>
     </div>
-    <div class="grid cols-3 mt">
+    <div class="grid cols-2 mt">
         <div class="card"><div class="about-card-h">${icon('gear')}<h2>${t('about.tech')}</h2></div>
             <ul class="about-list">
-                <li>PHP 8.4 — <span class="mono">declare(strict_types=1)</span>, bez frameworka</li>
+                <li>PHP 8.1–8.5 paralelno (+ <b>Legacy PHP 7.x preko Dockera</b>), <span class="mono">strict_types</span>, bez frameworka</li>
                 <li>MariaDB / MySQL (<span class="mono">utf8mb4</span>, prepared statements)</li>
                 <li>Vanilla JS (ES2024) + Web Components, bez build alata</li>
-                <li>SSE realtime (log/task/monitoring stream)</li>
+                <li>SSE realtime (log / task / monitoring stream)</li>
                 <li>Ubuntu 26.04 native: apt deb822, systemd, ufw, cgroup v2</li>
+            </ul></div>
+        <div class="card"><div class="about-card-h">${icon('grid')}<h2>${t('about.modules')}</h2></div>
+            <ul class="about-list">
+                <li>Web stranice: nginx / nginx→Apache / Legacy PHP, AutoSSL, HTTP/3</li>
+                <li>Git deploy + universal staging, file manager s editorom</li>
+                <li>Baze + phpMyAdmin, Mail (Postfix/Dovecot/Rspamd) + deliverability</li>
+                <li>DNS (BIND) + Cloudflare, Docker + app marketplace (WP, Nextcloud, Ghost, Node, Python)</li>
+                <li>Backup, monitoring, malware/WAF, firewall, reseller + delegirani pristup</li>
             </ul></div>
         <div class="card"><div class="about-card-h">${icon('shield')}<h2>${t('about.security')}</h2></div>
             <ul class="about-list">
@@ -3904,14 +3926,14 @@ async function pageAbout() {
                 <li>CSRF tokeni, strogi CSP + puni security headeri</li>
                 <li>Agent op-whitelist — nikad raw shell komande</li>
                 <li>Izolacija vhosta: vlastiti user + FPM pool + open_basedir</li>
-                <li>fail2ban, AppArmor, malware/WAF ugrađeni</li>
+                <li>fail2ban, AppArmor, malware skener i WAF ugrađeni (bez doplate)</li>
             </ul></div>
         <div class="card"><div class="about-card-h">${icon('server')}<h2>${t('about.arch')}</h2></div>
             <ul class="about-list">
                 <li>3 sloja: web (bez roota) → agent socket → sustav</li>
                 <li>Agent (forge-agentd) kao root, systemd hardening</li>
-                <li>Task queue za duge operacije + audit log</li>
-                <li>Izolirani panel stack (:8443, vlastiti nginx + FPM)</li>
+                <li>Task queue za duge operacije + append-only audit log</li>
+                <li>Izolirani panel stack (vlastiti nginx + PHP-FPM pool)</li>
                 <li>API-first: sve dostupno na <span class="mono">/api/v1</span></li>
             </ul></div>
     </div>
@@ -4354,6 +4376,7 @@ async function route() {
     if (!state.me) return;
     // počisti monitoring auto-refresh pri svakoj navigaciji (izbjegni curenje)
     if (state.monTimer) { clearInterval(state.monTimer); state.monTimer = null; }
+    state.pageRefresh = null;
     const hash = location.hash || '#/dashboard';
     for (const [re, page] of ROUTES) {
         const m = hash.match(re);
