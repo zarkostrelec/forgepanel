@@ -1171,20 +1171,16 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 .topo-meta { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .topo-meta b { color: var(--ink-2); font-weight: 600; }
 
-/* kružni gaugeovi */
-.gauge-row { display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 12px;
-    padding: 18px 8px 14px; }
-.gauge { position: relative; display: grid; place-items: center; }
-.gauge-svg { display: block; width: 124px; height: 124px; }
-.gauge-center { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 1px; pointer-events: none; top: -6px; width: 124px; }
-.gauge-val { font-family: var(--font-display); font-weight: 700; font-size: 24px; letter-spacing: -1px; color: var(--ink); }
-.gauge-val .u { font-size: 12px; font-weight: 500; color: var(--ink-3); margin-left: 1px; }
-.gauge-sub { font-size: 9px; letter-spacing: 0.02em; color: var(--ink-3); text-transform: uppercase; white-space: nowrap; max-width: 116px; overflow: hidden; text-overflow: ellipsis; }
-.gauge-label { font-size: 11px; letter-spacing: 0.06em; font-weight: 700; text-transform: uppercase; color: var(--ink-3); margin-top: 4px; }
-
-/* animirana topologija */
-.topo-viz { padding: 4px 12px 14px; border-top: 1px solid var(--line-2); }
-.topo-svg { width: 100%; height: auto; display: block; }
+/* animirana topologija (samostalna — bez gaugeova) */
+.topo-card { display: flex; flex-direction: column; }
+.topo-card .topo-viz {
+    flex: 1; display: grid; place-items: center;
+    padding: 30px 22px 34px;
+    background:
+        radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 60%);
+}
+.topo-viz { width: 100%; }
+.topo-svg { width: 100%; max-width: 940px; height: auto; display: block; margin: 0 auto; }
 .topo-svg text { font-family: var(--font-mono); }
 .topo-svg .topo-name { fill: var(--ink); font-weight: 600; letter-spacing: -0.01em; }
 .topo-svg .topo-role { fill: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase; }

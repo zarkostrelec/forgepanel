@@ -15,7 +15,14 @@ final class DockerCli
             return;
         }
         $log?->__invoke("Instaliram Docker Engine\n");
-        Apt::install(['docker-ce', 'docker-ce-cli', 'containerd.io', 'docker-compose-plugin'], $log);
+        // Preferiraj docker-ce (download.docker.com repo). Ako taj repo nije konfiguriran
+        // (Docker komponenta nije birana pri instalaciji), fallback na distro docker.io (universe).
+        try {
+            Apt::install(['docker-ce', 'docker-ce-cli', 'containerd.io', 'docker-compose-plugin'], $log);
+        } catch (\Throwable $e) {
+            $log?->__invoke("docker-ce repo nedostupan — koristim docker.io (universe)\n");
+            Apt::install(['docker.io'], $log);
+        }
         Systemd::enableNow('docker');
     }
 

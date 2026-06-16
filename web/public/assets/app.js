@@ -828,28 +828,6 @@ function stripSpark(values, color = 'var(--accent)') {
         <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
 }
 
-// Kružni gauge (donji raspor "gap", obojeni luk + tickovi)
-function gaugeSvg({ value = 0, max = 100, color = 'var(--accent)', label = '', unit = '%', sub = '', dp = 0 }) {
-    const r = 46, c = 2 * Math.PI * r, gap = 0.26, arc = c * (1 - gap);
-    const frac = Math.max(0, Math.min(1, value / max));
-    const rot = 90 + gap * 180, cx = 66, cy = 66;
-    let ticks = '';
-    for (let i = 0; i <= 10; i++) {
-        const ang = (rot + (arc / c) * 360 * (i / 10)) * Math.PI / 180;
-        const x1 = cx + (r + 7) * Math.cos(ang), y1 = cy + (r + 7) * Math.sin(ang);
-        const x2 = cx + (r + 11) * Math.cos(ang), y2 = cy + (r + 11) * Math.sin(ang);
-        ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--line-strong)" stroke-width="1"/>`;
-    }
-    return `<div class="gauge">
-        <svg viewBox="0 0 132 132" class="gauge-svg">
-            <g opacity="0.5">${ticks}</g>
-            <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line-strong)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${arc.toFixed(1)} ${c.toFixed(1)}" transform="rotate(${rot} ${cx} ${cy})"/>
-            <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(arc * frac).toFixed(1)} ${c.toFixed(1)}" transform="rotate(${rot} ${cx} ${cy})" style="transition:stroke-dasharray .6s cubic-bezier(.16,1,.3,1)"/>
-        </svg>
-        <div class="gauge-center"><div class="gauge-val tnum">${value.toFixed(dp)}<span class="u">${unit}</span></div><div class="gauge-sub">${sub}</div></div>
-        <div class="gauge-label">${label}</div></div>`;
-}
-
 // Animirana topologija servera (čvorovi s ikonom/ulogom + tekući paketi po vezama)
 function topologyViz(services, cfConnected) {
     const up = (re) => Object.entries(services).some(([n, p]) => re.test(n) && p.ActiveState === 'active');
@@ -900,10 +878,7 @@ function topologyViz(services, cfConnected) {
         <defs>
             <linearGradient id="topoGrad" x1="0" y1="0" x2="1" y2="0">
                 <stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--info)"/></linearGradient>
-            <pattern id="topoDots" width="24" height="24" patternUnits="userSpaceOnUse">
-                <circle cx="2" cy="2" r="1" fill="var(--line-strong)"/></pattern>
         </defs>
-        <rect x="0" y="${cy - 60}" width="${W}" height="120" fill="url(#topoDots)" opacity="0.4"/>
         ${links}
         ${pos.map(node).join('')}
         ${dbPos.map((d, i) => node(d, pos.length + i)).join('')}
@@ -941,15 +916,12 @@ async function refreshDashboard(cfConnected) {
     // ── instrument strip (5 metrika, otvoreni hairline raspored) ──
     const uptimeTxt = metrics ? `${Math.floor(metrics.uptime_s / 86400)}d ${Math.floor((metrics.uptime_s % 86400) / 3600)}h` : '—';
     const problems = vhosts.filter((v) => v.status === 'error' || v.status === 'suspended').length;
-    const shortB = (n) => fmtBytes(n).replace(/ .*/, ''); // samo broj, bez jedinice
     let stripHtml = '';
-    const gauges = [];
     if (metrics) {
         const cpuPct = metrics.cpu_pct ?? Math.min(100, metrics.load[0] / metrics.cpu_count * 100);
         const ramUsed = metrics.mem_total_bytes - metrics.mem_available_bytes;
         const ramPct = Math.round((1 - metrics.mem_available_bytes / metrics.mem_total_bytes) * 100);
         const diskUsed = metrics.disk_total_bytes - metrics.disk_free_bytes;
-        const diskPct = Math.round((1 - metrics.disk_free_bytes / metrics.disk_total_bytes) * 100);
         const netNow = lastVal(netRx);
         const valUnit = (bytes, suffix = '') => `${fmtBytes(bytes).replace(/ .*/, '')}<span class="u">${fmtBytes(bytes).replace(/^[\d.,]+ /, '')}${suffix}</span>`;
         stripHtml =
@@ -958,16 +930,11 @@ async function refreshDashboard(cfConnected) {
             stripMetric({ label: 'Disk', tag: fmtBytes(metrics.disk_total_bytes), val: valUnit(diskUsed), sub: `${fmtBytes(metrics.disk_free_bytes)} slobodno` }) +
             stripMetric({ label: 'Mreža', tag: '↓ in', val: netNow != null ? valUnit(netNow, '/s') : '—', sub: 'dolazni promet', spark: stripSpark(netRx.slice(-48).map((p) => Number(p.value)), 'var(--accent)') }) +
             stripMetric({ label: t('nav.websites'), val: String(vhosts.length), sub: `<span class="dot-good"></span>${upCount} aktivnih · ${problems} problema`, end: true });
-        gauges.push(gaugeSvg({ value: Math.round(cpuPct), max: 100, color: 'var(--accent)', label: 'CPU', unit: '%', sub: `${metrics.cpu_count} vCPU` }));
-        gauges.push(gaugeSvg({ value: ramPct, max: 100, color: 'var(--info)', label: 'RAM', unit: '%', sub: `${shortB(ramUsed)} / ${fmtBytes(metrics.mem_total_bytes)}` }));
-        gauges.push(gaugeSvg({ value: diskPct, max: 100, color: 'var(--ok)', label: 'DISK', unit: '%', sub: `${shortB(diskUsed)} / ${fmtBytes(metrics.disk_total_bytes)}` }));
-        gauges.push(gaugeSvg({ value: metrics.load[0], max: Math.max(1, metrics.cpu_count), color: 'var(--warn)', label: 'LOAD', unit: '', sub: '1 min avg', dp: 2 }));
     } else {
         stripHtml = stripMetric({ label: t('nav.websites'), val: String(vhosts.length), sub: `${upCount} aktivnih`, end: true });
     }
 
     // ── dinamički fragmenti (osvježavaju se svakih 10 s) ──
-    const gaugesHtml = gauges.join('');
     const insightsBlock = insights.items.length ? `
         <div class="ai-box dash-ai">
             <span class="mark">${icon('sparkle')}</span>
@@ -1012,12 +979,11 @@ async function refreshDashboard(cfConnected) {
         <div id="dash-insights"${insightsBlock ? ' style="margin-bottom:var(--gap)"' : ''}>${insightsBlock}</div>
         <div class="dash-grid">
             <div class="dash-left">
-                <section class="card flush hud">
+                <section class="card flush hud topo-card">
                     <div class="card-head"><h2>${t('dash.topology')}</h2>
                         <span class="badge ${healthCls}" id="dash-health">${healthTxt}</span>
                         <span class="spacer"></span>
                         <span class="topo-meta mono hide-sm">uptime <b id="dash-uptime">${uptimeTxt}</b> · Ubuntu <b>26.04 LTS</b></span></div>
-                    <div class="gauge-row" id="dash-gauges">${gaugesHtml}</div>
                     <div id="dash-topo">${topologyViz(services, cfConnected)}</div>
                 </section>
                 <section class="card flush">
@@ -1067,7 +1033,6 @@ async function refreshDashboard(cfConnected) {
     } else {
         // ── osvježavanje: samo dinamični dijelovi; topologija ostaje netaknuta ──
         setHtml('dash-strip', stripHtml);
-        setHtml('dash-gauges', gaugesHtml);
         setHtml('dash-insights', insightsBlock);
         document.getElementById('dash-insights')?.style.setProperty('margin-bottom', insightsBlock ? 'var(--gap)' : '0');
         setHtml('dash-svc', svcRows);
