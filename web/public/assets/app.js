@@ -804,8 +804,10 @@ async function doServiceAction(service, action, btn) {
     grp?.querySelectorAll('button').forEach((b) => { b.disabled = true; });
     try {
         const r = await api('/monitoring/services/action', { method: 'POST', body: { service, action } });
-        toast(`${service} · ${action} → ${r.active ? t('svc.running') : t('svc.stopped')}`, r.active || action === 'stop' ? 'ok' : 'warn');
-        setTimeout(() => { if (/^#\/(monitoring|dashboard)?$/.test(location.hash || '#/dashboard')) route(); }, 900);
+        if (r.task_id) watchTask(r.task_id, `${service} · ${action}`);
+        toast(`${service}: ${action}…`, 'ok');
+        // osvježi nakon što servis sjedne (restart nginxa/FPM-a može nakratko prekinuti vezu)
+        setTimeout(() => { if (/^#\/(monitoring|dashboard)?$/.test(location.hash || '#/dashboard')) route(); }, 3500);
     } catch (err) {
         toast(`${service}: ${err.message}`, 'err');
         grp?.querySelectorAll('button').forEach((b) => { b.disabled = false; });

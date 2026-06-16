@@ -113,6 +113,9 @@ final class LegacyPhp
         php_admin_value[post_max_size] = 64M
         php_admin_value[mysqli.default_socket] = /run/mysqld/mysqld.sock
         php_admin_value[pdo_mysql.default_socket] = /run/mysqld/mysqld.sock
+        php_admin_value[opcache.enable] = 1
+        php_admin_value[opcache.memory_consumption] = 128
+        php_admin_value[opcache.max_accelerated_files] = 10000
         CONF;
     }
 

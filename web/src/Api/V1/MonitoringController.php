@@ -145,9 +145,11 @@ final class MonitoringController extends Controller
         if (!in_array($action, ['start', 'stop', 'restart', 'reload'], true)) {
             throw new HttpException(422, 'invalid_action');
         }
-        $status = $this->app->agent->call('service.action', ['service' => $service, 'action' => $action]);
+        // Kroz task queue (async) — inače bi restart nginxa prekinuo VEZU koja nosi
+        // ovaj odgovor (panel se servira kroz taj isti nginx) → "Failed to fetch".
+        $task_id = $this->app->tasks->enqueue('service.action', ['service' => $service, 'action' => $action], $ctx->user_id);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'service.' . $action, ['service' => $service], $request->ip);
-        Response::ok($status);
+        Response::ok(['task_id' => $task_id], 202);
     }
 
     private function history(Request $request): never
