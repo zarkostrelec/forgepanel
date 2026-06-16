@@ -129,22 +129,38 @@ final class DatabasesController extends Controller
             throw new HttpException(422, 'password_too_short');
         }
 
+        $remote = (int) (bool) ($request->body['remote_access'] ?? false);
+
         $this->app->agent->call('db.user_create', [
             'username' => $username,
             'database' => $database['name'],
             'password' => $password,
-            'remote_access' => $request->body['remote_access'] ?? false,
+            'remote_access' => (bool) $remote,
         ]);
-        $this->app->db->run(
-            'INSERT INTO db_users (subscription_id, username, database_id, remote_access, password_enc) VALUES (?, ?, ?, ?, ?)',
-            [
-                $database['subscription_id'],
-                $username,
-                $database['id'],
-                (int) (bool) ($request->body['remote_access'] ?? false),
-                (new Crypto($this->app->config))->encrypt($password), // phpMyAdmin auto-login
-            ]
-        );
+
+        // password_enc je SAMO pogodnost za phpMyAdmin auto-login — ako enkripcija
+        // padne (npr. app_secret nije konfiguriran), ne ruši kreiranje usera.
+        $password_enc = null;
+        try {
+            $password_enc = (new Crypto($this->app->config))->encrypt($password);
+        } catch (\Throwable $e) {
+            error_log('forgepanel: db user password_enc preskočen: ' . $e->getMessage());
+        }
+
+        // Idempotentno: username je globalno UNIQUE — ponovno kreiranje (npr. nakon
+        // prekinute WP instalacije) ažurira postojeći redak umjesto duplicate-key greške.
+        $existing = $this->app->db->one('SELECT id FROM db_users WHERE username = ?', [$username]);
+        if ($existing !== null) {
+            $this->app->db->run(
+                'UPDATE db_users SET database_id = ?, remote_access = ?, password_enc = ? WHERE id = ?',
+                [$database['id'], $remote, $password_enc, $existing['id']]
+            );
+        } else {
+            $this->app->db->run(
+                'INSERT INTO db_users (subscription_id, username, database_id, remote_access, password_enc) VALUES (?, ?, ?, ?, ?)',
+                [$database['subscription_id'], $username, $database['id'], $remote, $password_enc]
+            );
+        }
         $this->app->audit->log($ctx->user_id, $ctx->email, 'db.user_create', ['username' => $username], $request->ip);
         Response::ok(['username' => $username], 201);
     }

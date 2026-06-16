@@ -29,6 +29,7 @@ final class AppsController extends Controller
     public function register(Router $router): void
     {
         $router->add('GET', '/api/v1/apps/catalog', $this->catalog(...));
+        $router->add('GET', '/api/v1/vhosts/{id}/apps', $this->installed(...));
         $router->add('POST', '/api/v1/vhosts/{id}/apps/wordpress', $this->installWp(...));
         $router->add('POST', '/api/v1/vhosts/{id}/apps/wordpress/checksums', $this->checksums(...));
         $router->add('POST', '/api/v1/vhosts/{id}/apps/nextcloud', $this->installNextcloud(...));
@@ -39,6 +40,39 @@ final class AppsController extends Controller
     {
         $this->ctx($request, 'vhosts:read');
         Response::ok(self::CATALOG);
+    }
+
+    /** Popis instaliranih app instanci za vhost (iz settings: wp_instance_*, app_instance_*). */
+    private function installed(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'vhosts:read');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $id = (int) $vhost['id'];
+
+        // underscore je LIKE wildcard → escapamo, pa filtriramo po točnom sufiksu "_<id>" u PHP-u
+        $rows = $this->app->db->all(
+            "SELECT `key`, value FROM settings WHERE `key` LIKE 'wp\\_instance\\_%' ESCAPE '\\' OR `key` LIKE 'app\\_instance\\_%' ESCAPE '\\'"
+        );
+        $names = ['wordpress' => 'WordPress', 'nextcloud' => 'Nextcloud', 'ghost' => 'Ghost'];
+        $suffix = '_' . $id;
+        $out = [];
+        foreach ($rows as $r) {
+            if (!str_ends_with((string) $r['key'], $suffix)) {
+                continue;
+            }
+            $meta = json_decode((string) $r['value'], true) ?: [];
+            $type = str_starts_with((string) $r['key'], 'wp_instance_') ? 'wordpress' : ($meta['type'] ?? 'app');
+            $domain = $meta['domain'] ?? $vhost['domain'];
+            $out[] = [
+                'type' => $type,
+                'name' => $names[$type] ?? ucfirst((string) $type),
+                'domain' => $domain,
+                'installed_at' => $meta['installed_at'] ?? null,
+                'url' => 'https://' . $domain . '/',
+                'admin_url' => $type === 'wordpress' ? 'https://' . $domain . '/wp-admin/' : 'https://' . $domain . '/',
+            ];
+        }
+        Response::ok($out);
     }
 
     private function installWp(Request $request): never
@@ -117,11 +151,18 @@ final class AppsController extends Controller
         }
         $db_password = $request->str('db_password') ?? bin2hex(random_bytes(12));
 
+        // Baza (idempotentno)
         if ($this->app->db->one('SELECT 1 FROM db_databases WHERE name = ?', [$db_name]) === null) {
             $this->app->agent->call('db.create', ['name' => $db_name]);
             $this->app->db->run('INSERT INTO db_databases (subscription_id, name) VALUES (?, ?)', [$vhost['subscription_id'], $db_name]);
+        }
+        $db_row = $this->app->db->one('SELECT id FROM db_databases WHERE name = ?', [$db_name]);
+
+        // DB user (idempotentno i NEOVISNO o bazi — ako je baza već postojala od prekinute
+        // instalacije, korisnik se svejedno kreira; inače WP ostane bez DB usera).
+        if ($this->app->db->one('SELECT 1 FROM db_users WHERE username = ?', [$db_user]) === null) {
             $this->app->agent->call('db.user_create', ['username' => $db_user, 'database' => $db_name, 'password' => $db_password]);
-            $this->app->db->run('INSERT INTO db_users (subscription_id, username, database_id) VALUES (?, ?, ?)', [$vhost['subscription_id'], $db_user, $this->app->db->lastId()]);
+            $this->app->db->run('INSERT INTO db_users (subscription_id, username, database_id) VALUES (?, ?, ?)', [$vhost['subscription_id'], $db_user, $db_row['id']]);
         }
         return [$db_name, $db_user, $db_password];
     }

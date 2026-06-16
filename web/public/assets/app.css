@@ -1050,6 +1050,33 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 .tier-row input { flex: 1; }
 .tier-row .btn.icon { flex: 0 0 auto; }
 
+/* instalirane aplikacije (popis iznad kataloga) */
+.installed-apps { display: flex; flex-direction: column; gap: 8px; }
+.installed-app {
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.installed-app .ia-ic {
+    width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent-deep);
+}
+.installed-app .ia-ic svg { width: 17px; height: 17px; }
+.installed-app .ia-meta { min-width: 0; flex: 1; }
+.installed-app .ia-name { font-weight: 650; font-size: var(--fs-base); }
+.installed-app .ia-sub { color: var(--ink-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.installed-app .btn { flex-shrink: 0; }
+
+/* file-manager launcher (detalj stranice — umjesto skučenog inline prikaza) */
+.fm-launch { display: flex; align-items: center; gap: 14px; padding: 4px 2px; }
+.fm-launch-ic {
+    width: 44px; height: 44px; border-radius: 11px; flex-shrink: 0; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent-deep);
+}
+.fm-launch-info { flex: 1; min-width: 0; }
+.fm-launch-path { font-size: var(--fs-sm); color: var(--ink-2); word-break: break-all; margin-bottom: 3px; }
+.fm-launch .btn { flex-shrink: 0; }
+@media (max-width: 560px) { .fm-launch { flex-wrap: wrap; } .fm-launch .btn { width: 100%; justify-content: center; } }
+
 /* ============================================================
    NOVA HUD — Nadzorna ploča (instrument strip, gaugeovi, topologija)
    ============================================================ */

@@ -1479,7 +1479,14 @@ async function pageWebsiteDetail(id) {
         </div>
         <div class="card">
             <div class="page-head"><h2>${t('nav.files')}</h2></div>
-            <div id="fm"></div>
+            <div class="fm-launch">
+                <span class="fm-launch-ic">${icon('folder', 22)}</span>
+                <div class="fm-launch-info">
+                    <div class="mono fm-launch-path">${esc(vhost.docroot)}</div>
+                    <div class="hint">${t('files.open_hint')}</div>
+                </div>
+                <button class="btn primary" id="openfm">${icon('folder')}${t('files.open')}</button>
+            </div>
         </div>
     </div>
     ${phpSettingsCard(vhost)}
@@ -1576,7 +1583,10 @@ async function pageWebsiteDetail(id) {
         finally { if (btn) btn.disabled = false; }
     });
 
-    fileManager(vhost, main().querySelector('#fm'), '/httpdocs');
+    main().querySelector('#openfm').addEventListener('click', () => {
+        sessionStorage.setItem('fp_files_vhost', String(vhost.id));
+        location.hash = '#/files';
+    });
     cronSection(vhost, main().querySelector('#cron'));
     ftpSection(vhost, main().querySelector('#ftp'));
     gitSection(vhost, main().querySelector('#git'));
@@ -1621,6 +1631,8 @@ async function appsSection(vhost, container) {
     container.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
     const catalog = await api('/apps/catalog').catch(() => []);
     container.innerHTML = `
+        <div id="installedapps"></div>
+        <div class="addform-h" style="margin-bottom:10px">${t('apps.available')}</div>
         <div class="app-grid">
             ${catalog.map((a) => `<div class="app-card">
                 <div class="app-h">${icon(APP_ICONS[a.id] || 'box')}<b>${esc(a.name)}</b></div>
@@ -1631,6 +1643,7 @@ async function appsSection(vhost, container) {
         <div class="row mt" style="gap:8px"><button class="btn sm" id="wpcheck">${icon('shield')}${t('apps.wp_integrity')}</button></div>
         <div id="appsresult" class="mt"></div>`;
 
+    loadInstalledApps(vhost, container.querySelector('#installedapps'));
     const result = container.querySelector('#appsresult');
     container.querySelectorAll('[data-app]').forEach((b) => b.addEventListener('click', () => installApp(vhost, b.dataset.app, result)));
     container.querySelector('#wpcheck').addEventListener('click', async () => {
@@ -1641,7 +1654,32 @@ async function appsSection(vhost, container) {
     });
 }
 
+// Popis instaliranih aplikacija (WordPress/Nextcloud/Ghost) — vlastiti sub-container da
+// se može osvježiti nakon instalacije bez gubitka prikaza kredencijala.
+async function loadInstalledApps(vhost, box) {
+    if (!box) return;
+    const installed = await api(`/vhosts/${vhost.id}/apps`).catch(() => []);
+    if (!installed.length) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+        <div class="addform-h" style="margin-bottom:10px">${t('apps.installed')}</div>
+        <div class="installed-apps">
+            ${installed.map((a) => `<div class="installed-app">
+                <span class="ia-ic">${icon(APP_ICONS[a.type] || 'box')}</span>
+                <div class="ia-meta"><div class="ia-name">${esc(a.name)}</div>
+                    <div class="ia-sub mono">${esc(a.domain)}${a.installed_at ? ' · ' + fmtDate(a.installed_at) : ''}</div></div>
+                <a class="btn sm" href="${esc(a.admin_url)}" target="_blank" rel="noopener">${icon('arrowUR')}${a.type === 'wordpress' ? 'wp-admin' : t('apps.open')}</a>
+            </div>`).join('')}
+        </div>
+        <div class="hr" style="margin:16px 0 14px"></div>`;
+}
+
 async function installApp(vhost, appId, result) {
+    const refresh = (taskId) => {
+        if (!taskId) return;
+        pollTask(taskId).then((res) => {
+            if (res.status === 'done') loadInstalledApps(vhost, main().querySelector('#installedapps'));
+        }).catch(() => {});
+    };
     try {
         if (appId === 'node' || appId === 'python') {
             const entry = prompt(t(appId === 'node' ? 'apps.node_entry' : 'apps.python_entry'), appId === 'node' ? 'index.js' : 'app:app');
@@ -1650,7 +1688,7 @@ async function installApp(vhost, appId, result) {
             watchTask(r.task_id, `${appId} ${vhost.domain}`);
             return;
         }
-        // PHP/Node CMS — kreira bazu automatski
+        // PHP/Node CMS — kreira bazu + DB usera automatski
         const r = await api(`/vhosts/${vhost.id}/apps/${appId}`, { method: 'POST', body: {} });
         watchTask(r.task_id, `${appId} ${vhost.domain}`);
         if (appId === 'wordpress') {
@@ -1660,6 +1698,7 @@ async function installApp(vhost, appId, result) {
         } else if (appId === 'ghost') {
             result.innerHTML = `<div class="alert ok">${t('apps.ghost_started')}</div>`;
         }
+        refresh(r.task_id);
     } catch (err) { toast(err.message, 'err'); }
 }
 
