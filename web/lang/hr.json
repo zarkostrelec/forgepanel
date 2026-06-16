@@ -367,6 +367,8 @@
     "users.plans": "Planovi",
     "users.new_plan": "Novi plan",
     "users.plan": "Plan",
+    "users.site_access": "Pristup web stranicama",
+    "users.site_access_hint": "Odabrane stranice dodjeljuju se ovom korisniku (Plesk-style). Korisnik vidi i upravlja samo njima.",
     "users.no_plan": "(bez plana)",
     "users.reseller_pkg": "Reseller paket (kvota)",
     "users.reseller_pkg_hint": "Ukupni resursi koje reseller smije podijeliti svojim klijentima.",

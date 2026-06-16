@@ -49,19 +49,21 @@ final class AppsController extends Controller
         $vhost = $ctx->vhostOr404((int) $request->param('id'));
         $id = (int) $vhost['id'];
 
-        // underscore je LIKE wildcard → escapamo, pa filtriramo po točnom sufiksu "_<id>" u PHP-u
-        $rows = $this->app->db->all(
-            "SELECT `key`, value FROM settings WHERE `key` LIKE 'wp\\_instance\\_%' ESCAPE '\\' OR `key` LIKE 'app\\_instance\\_%' ESCAPE '\\'"
-        );
+        // Sva app-instance bilježenja iz settings, filtrirana po točnom sufiksu "_<id>"
+        // (PHP filter — bez LIKE/ESCAPE zamki s underscoreima).
+        $rows = $this->app->db->all('SELECT `key`, value FROM settings');
         $names = ['wordpress' => 'WordPress', 'nextcloud' => 'Nextcloud', 'ghost' => 'Ghost'];
         $suffix = '_' . $id;
         $out = [];
         foreach ($rows as $r) {
-            if (!str_ends_with((string) $r['key'], $suffix)) {
+            $key = (string) $r['key'];
+            $isWp = str_starts_with($key, 'wp_instance_');
+            $isApp = str_starts_with($key, 'app_instance_');
+            if ((!$isWp && !$isApp) || !str_ends_with($key, $suffix)) {
                 continue;
             }
             $meta = json_decode((string) $r['value'], true) ?: [];
-            $type = str_starts_with((string) $r['key'], 'wp_instance_') ? 'wordpress' : ($meta['type'] ?? 'app');
+            $type = $isWp ? 'wordpress' : ($meta['type'] ?? 'app');
             $domain = $meta['domain'] ?? $vhost['domain'];
             $out[] = [
                 'type' => $type,

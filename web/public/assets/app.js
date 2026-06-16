@@ -3283,7 +3283,8 @@ async function pageUsers() {
     document.getElementById('brand').addEventListener('click', brandingModal);
 
     const [users, plans] = await Promise.all([api('/users'), api('/plans')]);
-    document.getElementById('newu').addEventListener('click', () => userModal(null, plans));
+    const vhosts = state.me.role === 'admin' ? await api('/vhosts').catch(() => []) : [];
+    document.getElementById('newu').addEventListener('click', () => userModal(null, plans, vhosts));
 
     // Reseller: prikaz vlastite kvote (paket vs. raspodijeljeno klijentima)
     if (state.me.role === 'reseller') {
@@ -3336,7 +3337,7 @@ async function pageUsers() {
         try { await api(`/users/${b.dataset.toggle}/status`, { method: 'PUT', body: { status: b.dataset.status === 'active' ? 'suspended' : 'active' } }); pageUsers(); }
         catch (err) { userErr(err); }
     }));
-    main().querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => userModal(users.find((u) => String(u.id) === b.dataset.edit), plans)));
+    main().querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => userModal(users.find((u) => String(u.id) === b.dataset.edit), plans, vhosts)));
     main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(t('common.confirm_delete'))) return;
         try { await api(`/users/${b.dataset.del}`, { method: 'DELETE' }); pageUsers(); }
@@ -3367,7 +3368,7 @@ function resellerQuotaCard(q) {
     </div>`;
 }
 
-function userModal(user = null, plans = []) {
+function userModal(user = null, plans = [], vhosts = []) {
     const isAdmin = state.me.role === 'admin';
     const edit = user != null;
     const clientPlans = plans.filter((p) => !isResellerPlan(p));
@@ -3375,6 +3376,14 @@ function userModal(user = null, plans = []) {
     const curPlan = edit && user.plan_id != null ? String(user.plan_id) : '';
     const planOpts = (arr) => `<option value="">${t('users.no_plan')}</option>` +
         arr.map((p) => `<option value="${p.id}" ${String(p.id) === curPlan ? 'selected' : ''}>${esc(p.name)} — ${p.max_domains}d/${p.max_databases}b/${p.max_mailboxes}m</option>`).join('');
+    // Plesk-style "Access to subscription": admin bira koje postojeće stranice korisnik ima
+    const assigned = new Set((edit && Array.isArray(user.vhost_ids) ? user.vhost_ids : []).map(Number));
+    const siteAccess = (isAdmin && vhosts.length) ? `
+            <div class="field" id="vhwrap">
+                <label>${t('users.site_access')}</label>
+                <div class="checkrow vh-access">${vhosts.map((v) =>
+                    `<label class="chk"><input type="checkbox" name="vhost_ids" value="${v.id}" ${assigned.has(Number(v.id)) ? 'checked' : ''}> ${esc(v.domain)}</label>`).join('')}</div>
+                <span class="hint">${t('users.site_access_hint')}</span></div>` : '';
     const modal = openModal(`
         <div class="dialog-head"><h1>${edit ? t('users.edit') : t('users.new')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="uf">
@@ -3388,6 +3397,7 @@ function userModal(user = null, plans = []) {
                 <label id="planlabel">${t('users.plan')}</label>
                 <select name="plan_id" id="uplan" class="mono">${planOpts(clientPlans)}</select>
                 <span class="hint" id="planhint"></span></div>
+            ${siteAccess}
             <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
                 <button class="btn primary">${edit ? t('common.save') : t('common.create')}</button></div>
         </form>`);
@@ -3395,12 +3405,14 @@ function userModal(user = null, plans = []) {
     // Plan select ovisi o roli: client → klijentski planovi; reseller → reseller paketi
     const roleSel = modal.querySelector('#urole');
     const planWrap = modal.querySelector('#planwrap');
+    const vhWrap = modal.querySelector('#vhwrap');
     if (roleSel && planWrap) {
         const syncPlan = () => {
             const r = roleSel.value;
             const uplan = modal.querySelector('#uplan');
             const label = modal.querySelector('#planlabel');
             const hint = modal.querySelector('#planhint');
+            if (vhWrap) vhWrap.style.display = r === 'admin' ? 'none' : '';
             if (r === 'admin') { planWrap.style.display = 'none'; return; }
             planWrap.style.display = '';
             if (r === 'reseller') { uplan.innerHTML = planOpts(resellerPlans); label.textContent = t('users.reseller_pkg'); hint.textContent = t('users.reseller_pkg_hint'); }
@@ -3416,6 +3428,12 @@ function userModal(user = null, plans = []) {
         const body = Object.fromEntries(new FormData(e.target));
         if (edit && !body.password) delete body.password; // ne mijenjaj lozinku ako je prazna
         if (body.plan_id === '' || body.plan_id == null) delete body.plan_id;
+        // Pristup stranicama: pošalji PUNU listu označenih (samo kad polje postoji i rola nije admin)
+        if (vhWrap && body.role !== 'admin') {
+            body.vhost_ids = [...e.target.querySelectorAll('input[name="vhost_ids"]:checked')].map((c) => Number(c.value));
+        } else {
+            delete body.vhost_ids;
+        }
         try {
             if (edit) await api(`/users/${user.id}`, { method: 'PUT', body });
             else await api('/users', { method: 'POST', body });

@@ -834,6 +834,10 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 
 /* Checkbox redak (npr. PHP verzije u planu) */
 .checkrow { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+/* Pristup stranicama — skrolabilna lista kad ih je puno */
+.checkrow.vh-access { flex-direction: column; flex-wrap: nowrap; gap: 4px; max-height: 168px; overflow-y: auto;
+    border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; background: var(--surface-2); }
+.checkrow.vh-access .chk { font-family: var(--font-ui); }
 .chk { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-sm); cursor: pointer; }
 
 /* ───────────────────────── Siteovi: master-detail ───────────────────────── */

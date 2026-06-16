@@ -367,6 +367,8 @@
     "users.plans": "Plans",
     "users.new_plan": "New plan",
     "users.plan": "Plan",
+    "users.site_access": "Website access",
+    "users.site_access_hint": "Selected websites are assigned to this user (Plesk-style). The user sees and manages only those.",
     "users.no_plan": "(no plan)",
     "users.reseller_pkg": "Reseller package (quota)",
     "users.reseller_pkg_hint": "Total resources the reseller may allocate to their clients.",

@@ -115,6 +115,15 @@ final class UsersController extends Controller
         $rows = $ctx->isAdmin()
             ? $this->app->db->all("SELECT u.id, u.email, u.status, u.last_login_at, r.name AS role, u.reseller_id, $plan_sub FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.id")
             : $this->app->db->all("SELECT u.id, u.email, u.status, u.last_login_at, r.name AS role, $plan_sub FROM users u JOIN roles r ON r.id = u.role_id WHERE u.reseller_id = ? ORDER BY u.id", [$ctx->user_id]);
+        // Web stranice dodijeljene svakom korisniku (preko njegovih pretplata) — za "Pristup stranicama"
+        $vmap = [];
+        foreach ($this->app->db->all('SELECT s.user_id, v.id AS vhost_id FROM vhosts v JOIN subscriptions s ON s.id = v.subscription_id') as $r) {
+            $vmap[(int) $r['user_id']][] = (int) $r['vhost_id'];
+        }
+        foreach ($rows as &$row) {
+            $row['vhost_ids'] = $vmap[(int) $row['id']] ?? [];
+        }
+        unset($row);
         Response::ok($rows);
     }
 
@@ -152,6 +161,7 @@ final class UsersController extends Controller
 
         // Opcionalno: odmah subscription na plan (klijent → plan; reseller → paket/kvota)
         $plan_id = $request->int('plan_id');
+        $subscription_id = null;
         if ($plan_id !== null && in_array($role, ['client', 'reseller'], true)) {
             $this->assertPlanOwnership($ctx, $plan_id);
             // Reseller koji kreira klijenta: ne smije premašiti svoj paket
@@ -159,6 +169,12 @@ final class UsersController extends Controller
                 $this->assertResellerCapacity($ctx->user_id, $plan_id);
             }
             $this->app->db->run('INSERT INTO subscriptions (user_id, plan_id) VALUES (?, ?)', [$user_id, $plan_id]);
+            $subscription_id = $this->app->db->lastId();
+        }
+
+        // Plesk-style "Access to subscription": admin dodjeljuje postojeće web stranice ovom korisniku
+        if ($ctx->isAdmin() && $subscription_id !== null) {
+            $this->assignVhosts($subscription_id, $request->body['vhost_ids'] ?? null);
         }
 
         $this->app->audit->log($ctx->user_id, $ctx->email, 'user.create', ['email' => $email, 'role' => $role], $request->ip);
@@ -269,11 +285,50 @@ final class UsersController extends Controller
             $plan_changed = true;
         }
 
-        if ($fields === [] && !$plan_changed) {
+        // Pristup web stranicama (Plesk-style) — admin uređuje koje stranice korisnik ima.
+        // Šalje se PUNA lista željenih vhost_ids; neoznačene koje su trenutno korisnikove
+        // vraćaju se na adminovu pretplatu (fallback).
+        $vhosts_changed = false;
+        if ($ctx->isAdmin() && is_array($request->body['vhost_ids'] ?? null)) {
+            $sub = $this->app->db->one("SELECT id FROM subscriptions WHERE user_id = ? AND status = 'active' ORDER BY id LIMIT 1", [$user['id']]);
+            if ($sub !== null) {
+                $admin_sub = $this->app->db->one('SELECT id FROM subscriptions WHERE user_id = ? ORDER BY id LIMIT 1', [$ctx->user_id]);
+                $this->assignVhosts((int) $sub['id'], $request->body['vhost_ids'], $admin_sub !== null ? (int) $admin_sub['id'] : null);
+                $vhosts_changed = true;
+            }
+        }
+
+        if ($fields === [] && !$plan_changed && !$vhosts_changed) {
             throw new HttpException(422, 'nothing_to_update');
         }
         $this->app->audit->log($ctx->user_id, $ctx->email, 'user.update', ['user_id' => (int) $user['id']], $request->ip);
         Response::ok();
+    }
+
+    /**
+     * Dodijeli web stranice (vhostove) jednoj pretplati = "Access to subscription" (Plesk).
+     * Premješta odabrane vhostove na $subscription_id; ako je zadan $fallback_sub, vhostove
+     * koji su trenutno na toj pretplati a NISU u $desired vraća na $fallback_sub (un-assign).
+     */
+    private function assignVhosts(int $subscription_id, mixed $desired, ?int $fallback_sub = null): void
+    {
+        if (!is_array($desired)) {
+            return;
+        }
+        $want = array_values(array_unique(array_map(intval(...), $desired)));
+        foreach ($want as $vid) {
+            if ($vid <= 0 || $this->app->db->one('SELECT 1 FROM vhosts WHERE id = ?', [$vid]) === null) {
+                continue;
+            }
+            $this->app->db->run('UPDATE vhosts SET subscription_id = ? WHERE id = ?', [$subscription_id, $vid]);
+        }
+        if ($fallback_sub !== null && $fallback_sub !== $subscription_id) {
+            foreach ($this->app->db->all('SELECT id FROM vhosts WHERE subscription_id = ?', [$subscription_id]) as $v) {
+                if (!in_array((int) $v['id'], $want, true)) {
+                    $this->app->db->run('UPDATE vhosts SET subscription_id = ? WHERE id = ?', [$fallback_sub, (int) $v['id']]);
+                }
+            }
+        }
     }
 
     private function delete(Request $request): never
