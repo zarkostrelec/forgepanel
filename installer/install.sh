@@ -22,7 +22,7 @@ FALLBACK_SUITE="noble"
 # Mothership (master) za licence + ažuriranja. Public installeri pokazuju ovamo →
 # auto-trial (7 dana) + potpisana ažuriranja. Prazno = self-host (master, bez locka).
 # UPDATE_PUBKEY je javni ed25519 ključ mastera (iz: Server → Distribucija → Generiraj ključ).
-UPDATE_SERVER="${UPDATE_SERVER:-https://elite.hostforge.net}"
+UPDATE_SERVER="${UPDATE_SERVER:-https://elite.hostforge.net:8443}"
 UPDATE_PUBKEY="${UPDATE_PUBKEY:-5h0s/3BlW7NLCLlBxluhWQM6vUP0FtsV6EQ4ThbowgY=}"
 
 # ---------------------------------------------------------------- flagovi
