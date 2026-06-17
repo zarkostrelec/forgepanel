@@ -673,9 +673,31 @@ hardening() {
     ufw allow 8443/tcp
     ufw --force enable || log "UPOZORENJE: ufw enable nije uspio (container?) — provjeri ručno."
 
+    # fail2ban filter: nginx "access forbidden by rule" (skeneri/botovi na blokirane putanje)
+    cat > /etc/fail2ban/filter.d/forgepanel-nginx-forbidden.conf <<'EOF'
+[Definition]
+failregex = \[error\] \d+#\d+: \*\d+ access forbidden by rule, client: <HOST>,
+ignoreregex =
+EOF
+
     cat > /etc/fail2ban/jail.d/forgepanel.conf <<'EOF'
+[DEFAULT]
+banaction = ufw
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+
 [sshd]
 enabled = true
+
+# Bot/skener koji gađa blokirane putanje → ban na ufw razini (paketi padaju prije nginxa)
+[forgepanel-nginx-forbidden]
+enabled  = true
+filter   = forgepanel-nginx-forbidden
+logpath  = /var/www/vhosts/*/logs/error.log
+maxretry = 6
+findtime = 5m
+bantime  = 6h
 EOF
     systemctl enable --now fail2ban 2>/dev/null || true
 
