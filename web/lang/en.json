@@ -290,6 +290,7 @@
     "lic.node_remove": "Remove from list",
     "lic.node_remove_confirm": "Remove this node from the list? (deletes the trial/activation record; a trial node may then get a new trial period)",
     "lic.node_removed": "Node removed",
+    "lic.multi_ip": "Same license active on multiple IPs/installs (policy: 1 license = 1 IP)",
     "lic.master": "Issued licenses (master)",
     "lic.new": "New license",
     "lic.none": "No licenses issued.",

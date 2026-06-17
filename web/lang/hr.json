@@ -290,6 +290,7 @@
     "lic.node_remove": "Ukloni s liste",
     "lic.node_remove_confirm": "Ukloniti ovaj node s liste? (briše trial/aktivacijski zapis; trial node može potom dobiti novi probni period)",
     "lic.node_removed": "Node uklonjen",
+    "lic.multi_ip": "Ista licenca aktivna na više IP-ova/instalacija (politika: 1 licenca = 1 IP)",
     "lic.master": "Izdane licence (master)",
     "lic.new": "Nova licenca",
     "lic.none": "Nema izdanih licenci.",

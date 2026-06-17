@@ -3698,6 +3698,11 @@ async function pageLicensing() {
         : nodeFilter === 'trial' ? n.type === 'trial'
         : nodeFilter === 'active' ? (n.status === 'active' || n.status === 'trial')
         : (n.status === 'expired' || n.status === 'suspended' || n.status === 'revoked');
+    // koliko različitih IP-ova/instalacija po istoj licenci (1 licenca = 1 IP)
+    const licIps = {};
+    nodes.forEach((n) => {
+        if (n.type === 'license' && n.license_key) (licIps[n.license_key] ??= new Set()).add(n.ip || '?');
+    });
     const renderNodes = () => {
         const wrap = main().querySelector('#nodewrap');
         if (!wrap) return;
@@ -3706,17 +3711,21 @@ async function pageLicensing() {
         const list = nodes.filter(matchNode);
         wrap.innerHTML = list.length ? `<table class="data"><thead><tr>
             <th>${t('lic.node_fp')}</th><th>${t('lic.node_type')}</th><th>${t('lic.status')}</th>
-            <th class="hide-sm">${t('dist.version')}</th><th class="hide-sm">${t('lic.expires')}</th>
+            <th>IP</th><th class="hide-sm">${t('dist.version')}</th><th class="hide-sm">${t('lic.expires')}</th>
             <th class="num">${t('lic.last_seen')}</th><th></th></tr></thead><tbody>
-            ${list.map((n) => `<tr>
+            ${list.map((n) => {
+                const ips = n.type === 'license' && n.license_key ? (licIps[n.license_key]?.size || 1) : 1;
+                return `<tr>
                 <td class="mono" title="${esc(n.fingerprint)}">${esc(String(n.fingerprint).slice(0, 12))}…</td>
-                <td><span class="badge ${n.type === 'license' ? 'ok' : ''}">${n.type === 'license' ? t('lic.type_license') + (n.tier ? ' · ' + esc(n.tier) : '') : t('lic.type_trial')}</span></td>
+                <td><span class="badge ${n.type === 'license' ? 'ok' : ''}" ${n.license_key ? `title="${esc(n.license_key)}"` : ''}>${n.type === 'license' ? t('lic.type_license') + (n.tier ? ' · ' + esc(n.tier) : '') : t('lic.type_trial')}</span></td>
                 <td>${licBadge(n.status)}</td>
+                <td class="mono">${esc(n.ip || '—')}${ips > 1 ? ` <span class="badge err" title="${t('lic.multi_ip')}">⚠ ${ips} IP</span>` : ''}</td>
                 <td class="mono hide-sm">${esc(n.version || '—')}</td>
                 <td class="hide-sm">${n.expires_at ? fmtDate(n.expires_at) : '∞'}</td>
                 <td class="num">${timeAgo(n.last_seen)}</td>
                 <td class="num"><button class="btn danger sm" data-noderm="${esc(n.fingerprint)}" title="${t('lic.node_remove')}">${icon('x', 13)}</button></td>
-            </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('lic.no_nodes')}</div>`;
+            </tr>`;
+            }).join('')}</tbody></table>` : `<div class="empty">${t('lic.no_nodes')}</div>`;
         wrap.querySelectorAll('[data-noderm]').forEach((b) => b.addEventListener('click', async () => {
             if (!confirm(t('lic.node_remove_confirm'))) return;
             try {
