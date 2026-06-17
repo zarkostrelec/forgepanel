@@ -3629,16 +3629,17 @@ function pageAssistant() {
 }
 
 // ---------------------------------------------------------------- config time-machine (admin)
-const licBadge = (s) => `<span class="badge ${({ active: 'ok', suspended: 'warn', expired: 'warn', revoked: 'err' }[s]) || ''}">${esc(s || '—')}</span>`;
+const licBadge = (s) => `<span class="badge ${({ active: 'ok', trial: 'ok', suspended: 'warn', expired: 'warn', revoked: 'err' }[s]) || ''}">${esc(s || '—')}</span>`;
 
 async function pageLicensing() {
     setActive('licensing');
     main().innerHTML = `${tabsHtml('server', 'licensing')}<div class="empty">${t('common.loading')}</div>`;
-    const [licenses, node, keys, tiersResp] = await Promise.all([
+    const [licenses, node, keys, tiersResp, nodes] = await Promise.all([
         api('/licenses').catch(() => []),
         api('/license').catch(() => ({})),
         api('/distribution/keys').catch(() => ({})),
         api('/license/tiers').catch(() => ({ tiers: ['standard', 'pro', 'enterprise'] })),
+        api('/licenses/nodes').catch(() => []),
     ]);
     const tiers = tiersResp.tiers || ['standard', 'pro', 'enterprise'];
     main().innerHTML = `${tabsHtml('server', 'licensing')}
@@ -3653,6 +3654,20 @@ async function pageLicensing() {
             <div class="hint mt mono">fingerprint: ${esc(node.fingerprint || '')}</div>` : ''}
     </div>
     ${keys.has_key ? `
+    <div class="card mt"><div class="card-head"><h2>${icon('server')}${t('lic.nodes')}</h2><span class="count">${nodes.length} ${t('lic.nodes_count')}</span></div>
+        ${nodes.length ? `<table class="data"><thead><tr>
+            <th>${t('lic.node_fp')}</th><th>${t('lic.node_type')}</th><th>${t('lic.status')}</th>
+            <th class="hide-sm">${t('dist.version')}</th><th class="hide-sm">${t('lic.expires')}</th><th class="num">${t('lic.last_seen')}</th>
+        </tr></thead><tbody>
+        ${nodes.map((n) => `<tr>
+            <td class="mono" title="${esc(n.fingerprint)}">${esc(String(n.fingerprint).slice(0, 12))}…</td>
+            <td><span class="badge ${n.type === 'license' ? 'ok' : ''}">${n.type === 'license' ? t('lic.type_license') + (n.tier ? ' · ' + esc(n.tier) : '') : t('lic.type_trial')}</span></td>
+            <td>${licBadge(n.status)}</td>
+            <td class="mono hide-sm">${esc(n.version || '—')}</td>
+            <td class="hide-sm">${n.expires_at ? fmtDate(n.expires_at) : '∞'}</td>
+            <td class="num">${timeAgo(n.last_seen)}</td>
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('lic.no_nodes')}</div>`}
+    </div>
     <div class="card mt"><div class="card-head"><h2>${icon('key')}${t('lic.tiers')}</h2></div>
         <p class="hint">${t('lic.tiers_hint')}</p>
         <div id="tierlist">${tiers.map((tr) => tierRowHtml(tr)).join('')}</div>

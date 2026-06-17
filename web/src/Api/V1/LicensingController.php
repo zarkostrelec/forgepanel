@@ -27,6 +27,7 @@ final class LicensingController extends Controller
     {
         // MASTER (admin) — upravljanje licencama
         $router->add('GET', '/api/v1/licenses', $this->index(...));
+        $router->add('GET', '/api/v1/licenses/nodes', $this->nodes(...));
         $router->add('POST', '/api/v1/licenses', $this->create(...));
         $router->add('PUT', '/api/v1/licenses/{id}', $this->update(...));
         $router->add('DELETE', '/api/v1/licenses/{id}', $this->remove(...));
@@ -100,6 +101,38 @@ final class LicensingController extends Controller
             "SELECT l.*, (SELECT COUNT(*) FROM license_activations a WHERE a.license_id = l.id) AS activations
              FROM licenses l ORDER BY l.created_at DESC LIMIT 500"
         ));
+    }
+
+    /** Svi povezani paneli (nodovi): aktivirane licence + trialovi, sortirano po zadnjem kontaktu. */
+    private function nodes(Request $request): never
+    {
+        $this->adminCtx($request);
+        $out = [];
+        foreach ($this->app->db->all(
+            "SELECT a.fingerprint, a.version, a.ip, a.last_seen, l.license_key, l.tier, l.status, l.expires_at
+             FROM license_activations a JOIN licenses l ON l.id = a.license_id
+             ORDER BY a.last_seen DESC LIMIT 1000"
+        ) as $r) {
+            $status = (string) $r['status'];
+            if ($status === 'active' && $r['expires_at'] !== null && strtotime((string) $r['expires_at']) < time()) {
+                $status = 'expired';
+            }
+            $out[] = [
+                'type' => 'license', 'fingerprint' => $r['fingerprint'], 'version' => $r['version'],
+                'ip' => $r['ip'], 'last_seen' => $r['last_seen'], 'tier' => $r['tier'],
+                'status' => $status, 'expires_at' => $r['expires_at'], 'license_key' => $r['license_key'],
+            ];
+        }
+        foreach ($this->app->db->all('SELECT fingerprint, version, ip, first_seen, last_seen FROM trials ORDER BY last_seen DESC LIMIT 1000') as $r) {
+            $exp = (int) strtotime((string) $r['first_seen']) + self::TRIAL_DAYS * 86400;
+            $out[] = [
+                'type' => 'trial', 'fingerprint' => $r['fingerprint'], 'version' => $r['version'],
+                'ip' => $r['ip'], 'last_seen' => $r['last_seen'], 'tier' => 'trial',
+                'status' => time() < $exp ? 'trial' : 'expired', 'expires_at' => date('Y-m-d H:i:s', $exp),
+            ];
+        }
+        usort($out, static fn ($a, $b) => strcmp((string) $b['last_seen'], (string) $a['last_seen']));
+        Response::ok($out);
     }
 
     private function create(Request $request): never
