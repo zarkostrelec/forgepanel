@@ -28,6 +28,7 @@ final class LicensingController extends Controller
         // MASTER (admin) — upravljanje licencama
         $router->add('GET', '/api/v1/licenses', $this->index(...));
         $router->add('GET', '/api/v1/licenses/nodes', $this->nodes(...));
+        $router->add('DELETE', '/api/v1/licenses/nodes/{fp}', $this->removeNode(...));
         $router->add('POST', '/api/v1/licenses', $this->create(...));
         $router->add('PUT', '/api/v1/licenses/{id}', $this->update(...));
         $router->add('DELETE', '/api/v1/licenses/{id}', $this->remove(...));
@@ -133,6 +134,20 @@ final class LicensingController extends Controller
         }
         usort($out, static fn ($a, $b) => strcmp((string) $b['last_seen'], (string) $a['last_seen']));
         Response::ok($out);
+    }
+
+    /** Ukloni node s liste (trial zapis + sve njegove aktivacije). Trial → node može dobiti novi 7-dnevni trial. */
+    private function removeNode(Request $request): never
+    {
+        $ctx = $this->adminCtx($request);
+        $fp = (string) preg_replace('/[^a-f0-9]/', '', strtolower((string) $request->param('fp')));
+        if ($fp === '') {
+            throw new HttpException(422, 'invalid_fingerprint');
+        }
+        $this->app->db->run('DELETE FROM trials WHERE fingerprint = ?', [$fp]);
+        $this->app->db->run('DELETE FROM license_activations WHERE fingerprint = ?', [$fp]);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'license.node_remove', ['fingerprint' => substr($fp, 0, 12)], $request->ip);
+        Response::ok();
     }
 
     private function create(Request $request): never

@@ -3654,19 +3654,15 @@ async function pageLicensing() {
             <div class="hint mt mono">fingerprint: ${esc(node.fingerprint || '')}</div>` : ''}
     </div>
     ${keys.has_key ? `
-    <div class="card mt"><div class="card-head"><h2>${icon('server')}${t('lic.nodes')}</h2><span class="count">${nodes.length} ${t('lic.nodes_count')}</span></div>
-        ${nodes.length ? `<table class="data"><thead><tr>
-            <th>${t('lic.node_fp')}</th><th>${t('lic.node_type')}</th><th>${t('lic.status')}</th>
-            <th class="hide-sm">${t('dist.version')}</th><th class="hide-sm">${t('lic.expires')}</th><th class="num">${t('lic.last_seen')}</th>
-        </tr></thead><tbody>
-        ${nodes.map((n) => `<tr>
-            <td class="mono" title="${esc(n.fingerprint)}">${esc(String(n.fingerprint).slice(0, 12))}…</td>
-            <td><span class="badge ${n.type === 'license' ? 'ok' : ''}">${n.type === 'license' ? t('lic.type_license') + (n.tier ? ' · ' + esc(n.tier) : '') : t('lic.type_trial')}</span></td>
-            <td>${licBadge(n.status)}</td>
-            <td class="mono hide-sm">${esc(n.version || '—')}</td>
-            <td class="hide-sm">${n.expires_at ? fmtDate(n.expires_at) : '∞'}</td>
-            <td class="num">${timeAgo(n.last_seen)}</td>
-        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('lic.no_nodes')}</div>`}
+    <div class="card mt"><div class="card-head"><h2>${icon('server')}${t('lic.nodes')}</h2><span class="count" id="nodecount">${nodes.length} ${t('lic.nodes_count')}</span>
+        <span class="spacer"></span>
+        <div class="tabs" id="nodefilter">
+            <button class="tab active" data-nf="all">${t('lic.f_all')}</button>
+            <button class="tab" data-nf="trial">trial</button>
+            <button class="tab" data-nf="active">${t('lic.f_active')}</button>
+            <button class="tab" data-nf="expired">${t('lic.f_expired')}</button>
+        </div></div>
+        <div id="nodewrap"></div>
     </div>
     <div class="card mt"><div class="card-head"><h2>${icon('key')}${t('lic.tiers')}</h2></div>
         <p class="hint">${t('lic.tiers_hint')}</p>
@@ -3695,6 +3691,50 @@ async function pageLicensing() {
         catch (err) { toast(t('lic.' + err.message) !== 'lic.' + err.message ? t('lic.' + err.message) : err.message, 'err'); }
     });
     document.getElementById('newlic')?.addEventListener('click', () => newLicenseModal(tiers));
+
+    // Povezani paneli — filter (svi / trial / aktivni / istekli) + brisanje noda
+    let nodeFilter = 'all';
+    const matchNode = (n) => nodeFilter === 'all' ? true
+        : nodeFilter === 'trial' ? n.type === 'trial'
+        : nodeFilter === 'active' ? (n.status === 'active' || n.status === 'trial')
+        : (n.status === 'expired' || n.status === 'suspended' || n.status === 'revoked');
+    const renderNodes = () => {
+        const wrap = main().querySelector('#nodewrap');
+        if (!wrap) return;
+        const cnt = main().querySelector('#nodecount');
+        if (cnt) cnt.textContent = `${nodes.length} ${t('lic.nodes_count')}`;
+        const list = nodes.filter(matchNode);
+        wrap.innerHTML = list.length ? `<table class="data"><thead><tr>
+            <th>${t('lic.node_fp')}</th><th>${t('lic.node_type')}</th><th>${t('lic.status')}</th>
+            <th class="hide-sm">${t('dist.version')}</th><th class="hide-sm">${t('lic.expires')}</th>
+            <th class="num">${t('lic.last_seen')}</th><th></th></tr></thead><tbody>
+            ${list.map((n) => `<tr>
+                <td class="mono" title="${esc(n.fingerprint)}">${esc(String(n.fingerprint).slice(0, 12))}…</td>
+                <td><span class="badge ${n.type === 'license' ? 'ok' : ''}">${n.type === 'license' ? t('lic.type_license') + (n.tier ? ' · ' + esc(n.tier) : '') : t('lic.type_trial')}</span></td>
+                <td>${licBadge(n.status)}</td>
+                <td class="mono hide-sm">${esc(n.version || '—')}</td>
+                <td class="hide-sm">${n.expires_at ? fmtDate(n.expires_at) : '∞'}</td>
+                <td class="num">${timeAgo(n.last_seen)}</td>
+                <td class="num"><button class="btn danger sm" data-noderm="${esc(n.fingerprint)}" title="${t('lic.node_remove')}">${icon('x', 13)}</button></td>
+            </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('lic.no_nodes')}</div>`;
+        wrap.querySelectorAll('[data-noderm]').forEach((b) => b.addEventListener('click', async () => {
+            if (!confirm(t('lic.node_remove_confirm'))) return;
+            try {
+                await api(`/licenses/nodes/${encodeURIComponent(b.dataset.noderm)}`, { method: 'DELETE' });
+                for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i].fingerprint === b.dataset.noderm) nodes.splice(i, 1);
+                renderNodes();
+                toast(t('lic.node_removed'), 'ok');
+            } catch (err) { toast(err.message, 'err'); }
+        }));
+    };
+    main().querySelector('#nodefilter')?.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-nf]');
+        if (!b) return;
+        nodeFilter = b.dataset.nf;
+        main().querySelectorAll('#nodefilter .tab').forEach((x) => x.classList.toggle('active', x === b));
+        renderNodes();
+    });
+    renderNodes();
 
     // Editor tier opcija (master)
     const tierList = document.getElementById('tierlist');
