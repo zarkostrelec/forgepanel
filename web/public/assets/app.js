@@ -4340,7 +4340,7 @@ async function pageUpdates() {
     main().querySelectorAll('[data-apply]').forEach((b) => b.addEventListener('click', async () => {
         try {
             const r = await api(`/updates/${b.dataset.apply}/apply`, { method: 'POST' });
-            watchTask(r.task_id, `update ${b.dataset.apply}`);
+            watchTask(r.task_id, `ažuriranje ${b.dataset.apply}`);
         } catch (err) { toast(err.message, 'err'); }
     }));
     main().querySelectorAll('[data-policy]').forEach((s) => s.addEventListener('change', async () => {

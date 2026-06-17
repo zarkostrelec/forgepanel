@@ -10,7 +10,7 @@ use ForgePanel\Web\Core\Router;
 
 /**
  * Dashboard agregati: live feed događaja, zadnji deployi i Forge AI preporuke.
- * Preporuke su RULE-BASED provjere stvarnog stanja (SSL istek, disk, updatei,
+ * Preporuke su RULE-BASED provjere stvarnog stanja (SSL istek, disk, ažuriranja,
  * pali taskovi…) — bez izmišljenih brojki; "Otvori analizu" šalje kontekst
  * lokalnom Claude asistentu za dublju dijagnozu.
  */
@@ -181,7 +181,7 @@ final class DashboardController extends Controller
             ];
         }
 
-        // Dostupni updatei komponenti
+        // Dostupna ažuriranja komponenti
         $updates = $this->app->db->one(
             "SELECT COUNT(*) AS n FROM components
              WHERE available_version IS NOT NULL AND available_version <> ''

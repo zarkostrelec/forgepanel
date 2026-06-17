@@ -243,7 +243,7 @@ final class Scheduler
         foreach ($this->db->all("SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name = 'admin'") as $a) {
             $this->db->run(
                 "INSERT INTO notifications (user_id, severity, title, body) VALUES (?, 'info', ?, ?)",
-                [$a['id'], "Panel update v{$manifest['version']} dostupan", 'Server → Distribucija → Primijeni update.']
+                [$a['id'], "Ažuriranje panela v{$manifest['version']} dostupno", 'Server → Distribucija → Primijeni ažuriranje.']
             );
         }
         $this->db->run("INSERT INTO settings (`key`, value) VALUES (?, '\"1\"') ON DUPLICATE KEY UPDATE value = value", [$notif_key]);
