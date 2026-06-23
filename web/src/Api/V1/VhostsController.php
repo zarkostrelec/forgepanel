@@ -238,37 +238,47 @@ final class VhostsController extends Controller
      */
     private function provisionDns(\ForgePanel\Web\Core\AuthContext $ctx, Request $request, int $vhost_id, string $domain, int $subscription_id): ?array
     {
-        $cf_account_id = $request->int('cf_account_id');
-        if ($cf_account_id !== null && $cf_account_id > 0) {
-            // Vlasništvo nad CF računom — klijent ne smije slati na tuđi račun
-            $account = $this->app->db->one(
-                'SELECT id, api_token FROM cloudflare_accounts WHERE id = ? AND user_id = ?',
-                [$cf_account_id, $ctx->user_id]
-            );
-            if ($account === null) {
-                throw new HttpException(422, 'cloudflare_account_not_found');
-            }
-            $proxy = (bool) ($request->body['cf_proxy'] ?? true);
-            try {
-                $res = \ForgePanel\Web\Core\DomainProvision::cloudflare(
-                    $this->app, $vhost_id, $domain,
-                    ['id' => (int) $account['id'], 'api_token' => (string) $account['api_token']],
-                    $proxy
-                );
-                $res['mode'] = 'cloudflare';
-                return $res;
-            } catch (\Throwable $e) {
-                error_log('forgepanel: vhost.create CF provision: ' . $e->getMessage());
-                return ['mode' => 'cloudflare', 'ok' => false, 'error' => $e->getMessage()];
-            }
-        }
-
+        // 1) UVIJEK lokalna zona — domena mora biti vidljiva i upravljiva pod DNS u panelu
+        //    (ako je BIND instaliran). Vrijedi i kad je odabran CF: zadržavamo lokalnu kopiju
+        //    (anti vendor-lock) + zapise dodatno guramo na CF.
+        $local_zone_id = null;
         try {
-            $zone_id = \ForgePanel\Web\Core\DomainProvision::localZone($this->app, $domain, $subscription_id);
-            return $zone_id !== null ? ['mode' => 'local', 'ok' => true, 'zone_id' => $zone_id] : null;
+            $local_zone_id = \ForgePanel\Web\Core\DomainProvision::localZone($this->app, $domain, $subscription_id);
         } catch (\Throwable $e) {
             error_log('forgepanel: vhost.create local DNS: ' . $e->getMessage());
-            return ['mode' => 'local', 'ok' => false, 'error' => $e->getMessage()];
+        }
+
+        $cf_account_id = $request->int('cf_account_id');
+        if ($cf_account_id === null || $cf_account_id <= 0) {
+            return $local_zone_id !== null ? ['mode' => 'local', 'ok' => true, 'zone_id' => $local_zone_id] : null;
+        }
+
+        // 2) Cloudflare: vlasništvo nad računom (klijent ne smije na tuđi), gurni zapise u CF
+        //    zonu + poveži vhost (cloudflare_zones → DNS-01/proxy/sync) + badge na DNS ekranu.
+        $account = $this->app->db->one(
+            'SELECT id, api_token FROM cloudflare_accounts WHERE id = ? AND user_id = ?',
+            [$cf_account_id, $ctx->user_id]
+        );
+        if ($account === null) {
+            throw new HttpException(422, 'cloudflare_account_not_found');
+        }
+        $proxy = (bool) ($request->body['cf_proxy'] ?? true);
+        try {
+            $res = \ForgePanel\Web\Core\DomainProvision::cloudflare(
+                $this->app, $vhost_id, $domain,
+                ['id' => (int) $account['id'], 'api_token' => (string) $account['api_token']],
+                $proxy
+            );
+            // Poveži lokalnu zonu s CF računom → badge "Cloudflare" na DNS ekranu
+            if ($local_zone_id !== null && ($res['ok'] ?? false)) {
+                $this->app->db->run('UPDATE dns_zones SET cf_account_id = ? WHERE id = ?', [(int) $account['id'], $local_zone_id]);
+            }
+            $res['mode'] = 'cloudflare';
+            $res['local_zone_id'] = $local_zone_id;
+            return $res;
+        } catch (\Throwable $e) {
+            error_log('forgepanel: vhost.create CF provision: ' . $e->getMessage());
+            return ['mode' => 'cloudflare', 'ok' => false, 'error' => $e->getMessage(), 'local_zone_id' => $local_zone_id];
         }
     }
 
