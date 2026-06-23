@@ -202,7 +202,7 @@
     "dash.disable": "Isključi",
     "dash.enable_status": "Uključi status stranicu",
     "dash.status_enabled": "Status stranica uključena",
-    "dash.ssl_expiring": "SSL certifikati pri isteku",
+    "dash.ssl_expiring": "certifikata istječe unutar 30 dana",
     "dash.days": "dana",
     "waf.title": "ModSecurity WAF",
     "waf.hint": "OWASP CRS per domena. Blokirani zahtjevi i whitelist (false positive) jednim klikom.",
@@ -546,7 +546,6 @@
     "dash.updates_available": "Dostupno ažuriranja",
     "dash.updates_none": "Sve komponente su ažurne",
     "dash.recent_tasks": "Zadnji zadaci",
-    "dash.ssl_expiring": "certifikata istječe unutar 30 dana",
     "files.no_vhosts": "Nema web stranica — prvo kreiraj domenu.",
     "mon.services": "Servisi",
     "mon.service": "Servis",
@@ -574,7 +573,6 @@
     "cf.proxy": "Proxy",
     "cf.records": "Zapisi",
     "ai.run": "Izvrši",
-    "nav.toggle": "Skupi/raširi izbornik",
     "nav.collapse": "Izbornik",
     "mon.refresh": "Auto-osvježi",
     "mon.range": "Period",
@@ -591,5 +589,6 @@
     "mon.user": "Korisnik",
     "mon.apps": "aplikacije",
     "mon.cache": "cache/buffer",
-    "mon.free": "slobodno"
+    "mon.free": "slobodno",
+    "cf.linked": "povezan"
 }

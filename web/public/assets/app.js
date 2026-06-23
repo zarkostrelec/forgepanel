@@ -2706,8 +2706,8 @@ async function pageCloudflare() {
         <div class="card-head"><h2>${t('cf.accounts')}</h2></div>
         ${accounts.length ? `<table class="data"><tbody>${accounts.map((a) => `<tr>
             <td class="mono" style="font-weight:600">${esc(a.name)}</td>
-            <td><span class="badge ${a.status === 'active' ? 'ok' : 'warn'}">${esc(a.status)}</span></td>
-            <td class="num"><button class="btn danger sm" data-cfdel="${a.id}">${t('common.delete')}</button></td>
+            <td><span class="badge ${a.status === 'active' ? 'ok' : 'warn'}">${esc(a.status)}</span>${Number(a.owned) ? '' : ` <span class="badge">${t('cf.linked')}</span>`}</td>
+            <td class="num">${Number(a.owned) ? `<button class="btn danger sm" data-cfdel="${a.id}">${t('common.delete')}</button>` : ''}</td>
         </tr>`).join('')}</tbody></table>` : `<p class="hint" style="margin:0 0 var(--gap)">${t('cf.intro')}</p>`}
         <form id="cff" class="addform">
             <div class="addform-h">${t('cf.add_account')}</div>

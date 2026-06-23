@@ -28,7 +28,19 @@ final class CloudflareController extends Controller
     private function account(Request $request): never
     {
         $ctx = $this->ctx($request, 'cloudflare:read');
-        $accounts = $this->app->db->all('SELECT id, name, status FROM cloudflare_accounts WHERE user_id = ? ORDER BY id', [$ctx->user_id]);
+        $own = $this->app->db->all('SELECT id, name, status, 1 AS owned FROM cloudflare_accounts WHERE user_id = ? ORDER BY id', [$ctx->user_id]);
+        if ($ctx->isAdmin()) {
+            Response::ok(['connected' => $own !== [], 'accounts' => $own]);
+        }
+        // Reseller/klijent dodatno vidi račune VEZANE na domene kojima ima pristup
+        // (smije ih koristiti, ali ne brisati — owned=0).
+        $linkedIds = $this->linkedAccountIds($ctx);
+        $linked = [];
+        if ($linkedIds !== []) {
+            $ph = implode(',', array_fill(0, count($linkedIds), '?'));
+            $linked = $this->app->db->all("SELECT id, name, status, 0 AS owned FROM cloudflare_accounts WHERE id IN ($ph) ORDER BY id", $linkedIds);
+        }
+        $accounts = array_merge($own, $linked);
         Response::ok(['connected' => $accounts !== [], 'accounts' => $accounts]);
     }
 
@@ -76,7 +88,15 @@ final class CloudflareController extends Controller
         // uvijek vraćao zone prvog računa (izbor računa u UI-ju ne bi mijenjao popis).
         $aq = $request->query('account_id');
         $account_id = ($aq !== null && $aq !== '') ? (int) $aq : null;
-        Response::ok($this->client($ctx, $account_id)->zones());
+        $account = $this->accountRow($ctx, $account_id);
+        $zones = (new CloudflareClient((new Crypto($this->app->config))->decrypt((string) $account['api_token'])))->zones();
+        // Povezani (ne-vlastiti) račun → vrati SAMO zone domena kojima korisnik ima pristup,
+        // da reseller ne vidi ostale zone tog CF računa.
+        if (!$ctx->isAdmin() && (int) ($account['user_id'] ?? 0) !== $ctx->user_id) {
+            $allowed = array_map('strtolower', $ctx->accessibleVhostDomains());
+            $zones = array_values(array_filter($zones, static fn ($z) => in_array(strtolower((string) $z['name']), $allowed, true)));
+        }
+        Response::ok($zones);
     }
 
     /** Piše vhost A/MX/SPF/DKIM/DMARC zapise u CF zonu. */
@@ -91,6 +111,21 @@ final class CloudflareController extends Controller
 
         $account = $this->accountRow($ctx, $request->int('account_id'));
         $cf = new CloudflareClient((new Crypto($this->app->config))->decrypt((string) $account['api_token']));
+        // Povezani račun (reseller) → zona MORA biti zona domene kojoj ima pristup (ne tuđa
+        // zona istog CF računa). Sprječava upis u zone drugih korisnika preko zajedničkog tokena.
+        if (!$ctx->isAdmin() && (int) ($account['user_id'] ?? 0) !== $ctx->user_id) {
+            $allowed = array_map('strtolower', $ctx->accessibleVhostDomains());
+            $match = false;
+            foreach ($cf->zones() as $z) {
+                if ($z['id'] === $zone_id && in_array(strtolower((string) $z['name']), $allowed, true)) {
+                    $match = true;
+                    break;
+                }
+            }
+            if (!$match) {
+                throw new HttpException(403, 'zone_not_accessible');
+            }
+        }
         $server_ip = $this->serverIp();
         $proxy = (bool) ($request->body['proxy'] ?? true);
 
@@ -153,7 +188,9 @@ final class CloudflareController extends Controller
         if (!preg_match('/^[a-f0-9]{32}$/', $record_id) || !preg_match('/^[a-f0-9]{32}$/', $zone_id)) {
             throw new HttpException(422, 'invalid_id');
         }
-        $this->client($ctx)->setProxied($zone_id, $record_id, (bool) ($request->body['proxied'] ?? false));
+        $account = $this->accountForZone($ctx, $zone_id);
+        $cf = new CloudflareClient((new Crypto($this->app->config))->decrypt((string) $account['api_token']));
+        $cf->setProxied($zone_id, $record_id, (bool) ($request->body['proxied'] ?? false));
         Response::ok();
     }
 
@@ -163,13 +200,84 @@ final class CloudflareController extends Controller
         return new CloudflareClient((new Crypto($this->app->config))->decrypt((string) $row['api_token']));
     }
 
-    /** Izabrani CF račun (po account_id) ili prvi povezani; ownership po user_id. @return array<string,mixed> */
+    /**
+     * Izabrani CF račun: vlastiti (po user_id) ILI račun vezan na domenu kojoj korisnik
+     * ima pristup (reseller smije koristiti povezani račun). @return array<string,mixed>
+     */
     private function accountRow(\ForgePanel\Web\Core\AuthContext $ctx, ?int $account_id): array
     {
-        $row = $account_id !== null
-            ? $this->app->db->one('SELECT id, api_token FROM cloudflare_accounts WHERE id = ? AND user_id = ?', [$account_id, $ctx->user_id])
-            : $this->app->db->one('SELECT id, api_token FROM cloudflare_accounts WHERE user_id = ? ORDER BY id LIMIT 1', [$ctx->user_id]);
-        return $row ?? throw new HttpException(409, 'cloudflare_not_connected');
+        if ($account_id !== null) {
+            $row = $this->app->db->one('SELECT id, api_token, user_id FROM cloudflare_accounts WHERE id = ? AND user_id = ?', [$account_id, $ctx->user_id]);
+            if ($row !== null) {
+                return $row;
+            }
+            if (in_array($account_id, $this->linkedAccountIds($ctx), true)) {
+                $row = $this->app->db->one('SELECT id, api_token, user_id FROM cloudflare_accounts WHERE id = ?', [$account_id]);
+                if ($row !== null) {
+                    return $row;
+                }
+            }
+            throw new HttpException(409, 'cloudflare_not_connected');
+        }
+        $row = $this->app->db->one('SELECT id, api_token, user_id FROM cloudflare_accounts WHERE user_id = ? ORDER BY id LIMIT 1', [$ctx->user_id]);
+        if ($row !== null) {
+            return $row;
+        }
+        $linked = $this->linkedAccountIds($ctx);
+        if ($linked !== []) {
+            $ph = implode(',', array_fill(0, count($linked), '?'));
+            $row = $this->app->db->one("SELECT id, api_token, user_id FROM cloudflare_accounts WHERE id IN ($ph) ORDER BY id LIMIT 1", $linked);
+            if ($row !== null) {
+                return $row;
+            }
+        }
+        throw new HttpException(409, 'cloudflare_not_connected');
+    }
+
+    /** CF računi vezani na domene kojima korisnik ima pristup (osim vlastitih). @return list<int> */
+    private function linkedAccountIds(\ForgePanel\Web\Core\AuthContext $ctx): array
+    {
+        $domains = $ctx->accessibleVhostDomains();
+        if ($domains === []) {
+            return [];
+        }
+        $ph = implode(',', array_fill(0, count($domains), '?'));
+        $rows = $this->app->db->all(
+            "SELECT cz.account_id AS id FROM cloudflare_zones cz JOIN vhosts v ON v.id = cz.vhost_id WHERE v.domain IN ($ph)
+             UNION
+             SELECT cf_account_id AS id FROM dns_zones WHERE domain IN ($ph) AND cf_account_id IS NOT NULL",
+            array_merge($domains, $domains)
+        );
+        $own = array_map(intval(...), array_column($this->app->db->all('SELECT id FROM cloudflare_accounts WHERE user_id = ?', [$ctx->user_id]), 'id'));
+        return array_values(array_diff(array_unique(array_map(intval(...), array_column($rows, 'id'))), $own));
+    }
+
+    /** Račun vezan na zonu (preko dostupnog vhosta); fallback na vlastiti. @return array<string,mixed> */
+    private function accountForZone(\ForgePanel\Web\Core\AuthContext $ctx, string $zone_id): array
+    {
+        if ($ctx->isAdmin()) {
+            $row = $this->app->db->one(
+                'SELECT a.id, a.api_token, a.user_id FROM cloudflare_zones z
+                 JOIN cloudflare_accounts a ON a.id = z.account_id WHERE z.zone_id = ? LIMIT 1',
+                [$zone_id]
+            );
+            return $row ?? $this->accountRow($ctx, null);
+        }
+        $domains = $ctx->accessibleVhostDomains();
+        if ($domains !== []) {
+            $ph = implode(',', array_fill(0, count($domains), '?'));
+            $row = $this->app->db->one(
+                "SELECT a.id, a.api_token, a.user_id FROM cloudflare_zones z
+                 JOIN cloudflare_accounts a ON a.id = z.account_id
+                 JOIN vhosts v ON v.id = z.vhost_id
+                 WHERE z.zone_id = ? AND v.domain IN ($ph) LIMIT 1",
+                array_merge([$zone_id], $domains)
+            );
+            if ($row !== null) {
+                return $row;
+            }
+        }
+        return $this->accountRow($ctx, null);
     }
 
     private function serverIp(): string

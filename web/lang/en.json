@@ -202,7 +202,7 @@
     "dash.disable": "Disable",
     "dash.enable_status": "Enable status page",
     "dash.status_enabled": "Status page enabled",
-    "dash.ssl_expiring": "SSL certificates expiring",
+    "dash.ssl_expiring": "certificates expire within 30 days",
     "dash.days": "days",
     "waf.title": "ModSecurity WAF",
     "waf.hint": "OWASP CRS per domain. Blocked requests and one-click whitelist (false positives).",
@@ -546,7 +546,6 @@
     "dash.updates_available": "Updates available",
     "dash.updates_none": "All components up to date",
     "dash.recent_tasks": "Recent tasks",
-    "dash.ssl_expiring": "certificates expire within 30 days",
     "files.no_vhosts": "No websites yet — create a domain first.",
     "mon.services": "Services",
     "mon.service": "Service",
@@ -574,7 +573,6 @@
     "cf.proxy": "Proxy",
     "cf.records": "Records",
     "ai.run": "Run",
-    "nav.toggle": "Collapse/expand menu",
     "nav.collapse": "Menu",
     "mon.refresh": "Auto-refresh",
     "mon.range": "Range",
@@ -591,5 +589,6 @@
     "mon.user": "User",
     "mon.apps": "apps",
     "mon.cache": "cache/buffer",
-    "mon.free": "free"
+    "mon.free": "free",
+    "cf.linked": "linked"
 }
