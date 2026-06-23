@@ -171,6 +171,22 @@ final class VhostsController extends Controller
             throw new HttpException(422, 'invalid_php_version');
         }
 
+        // Redirect vhost: nije zaseban "paket" (FPM/docroot) — samo 301/302 na postojeću
+        // stranicu na ovom hostingu (čuva path+query). Cilj mora već postojati kao vhost.
+        $web_backend = $request->str('web_backend') === 'redirect' ? 'redirect' : 'nginx';
+        $redirect_target = null;
+        $redirect_code = 301;
+        if ($web_backend === 'redirect') {
+            $redirect_target = strtolower(trim($request->str('redirect_target') ?? ''));
+            if ($redirect_target === '' || $redirect_target === $domain) {
+                throw new HttpException(422, 'redirect_target_required');
+            }
+            if ($this->app->db->one('SELECT 1 FROM vhosts WHERE domain = ?', [$redirect_target]) === null) {
+                throw new HttpException(422, 'redirect_target_not_found');
+            }
+            $redirect_code = $request->int('redirect_code') === 302 ? 302 : 301;
+        }
+
         $subscription_id = $request->int('subscription_id')
             ?? ($ctx->subscription_ids[0] ?? ($ctx->isAdmin() ? $this->adminSubscription($ctx) : null));
         if ($subscription_id === null) {
@@ -186,7 +202,7 @@ final class VhostsController extends Controller
         ) ?? throw new HttpException(422, 'subscription_inactive');
 
         $allowed_php = json_decode((string) $sub['php_versions'], true) ?: [];
-        if (!$ctx->isAdmin() && !in_array($php_version, $allowed_php, true)) {
+        if ($web_backend !== 'redirect' && !$ctx->isAdmin() && !in_array($php_version, $allowed_php, true)) {
             throw new HttpException(422, 'php_version_not_in_plan');
         }
 
@@ -200,9 +216,9 @@ final class VhostsController extends Controller
         }
 
         $this->app->db->run(
-            'INSERT INTO vhosts (domain, subscription_id, sys_user, php_version, docroot, status)
-             VALUES (?, ?, ?, ?, ?, \'creating\')',
-            [$domain, $subscription_id, 'pending', $php_version, "/var/www/vhosts/$domain/httpdocs"]
+            'INSERT INTO vhosts (domain, subscription_id, sys_user, php_version, web_backend, redirect_target, redirect_code, docroot, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, \'creating\')',
+            [$domain, $subscription_id, 'pending', $php_version, $web_backend, $redirect_target, $redirect_code, "/var/www/vhosts/$domain/httpdocs"]
         );
         $vhost_id = $this->app->db->lastId();
         $this->app->db->run('UPDATE vhosts SET sys_user = ? WHERE id = ?', ['vh_' . $vhost_id, $vhost_id]);
@@ -214,6 +230,8 @@ final class VhostsController extends Controller
             'cpu_quota_pct' => (int) $sub['cpu_quota_pct'],
             'memory_max_bytes' => (int) $sub['memory_max_bytes'],
             'tasks_max' => (int) $sub['tasks_max'],
+            'redirect_target' => $redirect_target,
+            'redirect_code' => $redirect_code,
         ], $ctx->user_id);
 
         // Auto-DNS: svaka nova domena odmah dobiva komplet zapisa (A/www/mail/MX/SPF/DMARC/CAA).

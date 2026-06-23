@@ -64,7 +64,9 @@ CREATE TABLE vhosts (
     subscription_id INT UNSIGNED NOT NULL,
     sys_user        VARCHAR(32) NOT NULL UNIQUE,            -- vh_<id>
     php_version     VARCHAR(8) NOT NULL DEFAULT '8.4',
-    web_backend     ENUM('nginx','nginx_apache','php_legacy') NOT NULL DEFAULT 'nginx',
+    web_backend     ENUM('nginx','nginx_apache','php_legacy','redirect') NOT NULL DEFAULT 'nginx',
+    redirect_target VARCHAR(255) NULL,                      -- web_backend='redirect': domena postojeće stranice
+    redirect_code   SMALLINT UNSIGNED NOT NULL DEFAULT 301, -- 301 (trajni) ili 302 (privremeni)
     docroot         VARCHAR(512) NOT NULL,
     status          ENUM('active','suspended','creating','error') NOT NULL DEFAULT 'creating',
     disk_bytes      BIGINT UNSIGNED NULL,                  -- du -sb vhost roota (osvježava agent periodički)

@@ -1466,15 +1466,37 @@ async function createVhostModal() {
                 <span class="hint">${t('vhost.cf_hint')}</span></div>
             <label class="inline" id="vcfproxy" style="display:none;margin-bottom:var(--gap)">
                 <input type="checkbox" name="cf_proxy" checked> ${t('cf.proxy')}</label>` : '';
+    // Redirect: stranica može biti samo 301/302 na neku postojeću (ne zaseban paket)
+    let sites = [];
+    try { sites = await api('/vhosts'); } catch { /* nema postojećih */ }
+    const typeField = sites.length ? `
+            <div class="field"><label>${t('vhost.type')}</label>
+                <select name="web_backend" id="vtype" class="mono">
+                    <option value="nginx">${t('vhost.type_full')}</option>
+                    <option value="redirect">${t('vhost.type_redirect')}</option>
+                </select></div>` : '';
+    const redirectField = sites.length ? `
+            <div id="vredirect" style="display:none">
+                <div class="field"><label>${t('vhost.redirect_target')}</label>
+                    <select name="redirect_target" class="mono">
+                        ${sites.map((s) => `<option value="${esc(s.domain)}">${esc(s.domain)}</option>`).join('')}
+                    </select></div>
+                <div class="field"><label>${t('vhost.redirect_code')}</label>
+                    <select name="redirect_code" class="mono">
+                        <option value="301">${t('vhost.redirect_301')}</option>
+                        <option value="302">${t('vhost.redirect_302')}</option>
+                    </select></div></div>` : '';
     const modal = openModal(`
         <div class="dialog-head"><h1>${t('vhost.create')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="vf">
             <div class="field"><label>${t('vhost.domain')}</label>
                 <input name="domain" required placeholder="example.com" class="mono" autocomplete="off">
                 <span class="hint">Bez www — alias se dodaje automatski (AutoSSL pokriva oba).</span></div>
+            ${typeField}
             ${subField}
-            <div class="field"><label>${t('vhost.php_version')}</label>
+            <div class="field" id="vphp"><label>${t('vhost.php_version')}</label>
                 <select name="php_version">${['8.5', '8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
+            ${redirectField}
             ${cfField}
             <div class="dialog-foot">
                 <button type="button" class="btn" data-close>${t('common.cancel')}</button>
@@ -1486,9 +1508,21 @@ async function createVhostModal() {
     acctSel?.addEventListener('change', () => {
         modal.querySelector('#vcfproxy').style.display = acctSel.value ? '' : 'none';
     });
+    // Tip: redirect skriva PHP verziju i prikazuje izbor ciljne stranice
+    const typeSel = modal.querySelector('#vtype');
+    typeSel?.addEventListener('change', () => {
+        const red = typeSel.value === 'redirect';
+        modal.querySelector('#vredirect').style.display = red ? '' : 'none';
+        const php = modal.querySelector('#vphp');
+        if (php) php.style.display = red ? 'none' : '';
+    });
     modal.querySelector('#vf').addEventListener('submit', async (e) => {
         e.preventDefault();
         const body = Object.fromEntries(new FormData(e.target));
+        if (body.web_backend !== 'redirect') {
+            delete body.redirect_target;
+            delete body.redirect_code;
+        }
         if (!body.cf_account_id) {
             delete body.cf_account_id; // "lokalni DNS" — bez CF-a
         } else {
@@ -1616,6 +1650,10 @@ async function pageWebsiteDetail(id) {
         <div class="card">
             <h2>Postavke</h2>
             <table class="data"><tbody>
+                ${vhost.web_backend === 'redirect' ? `
+                <tr><td>${t('vhost.type')}</td><td><span class="badge info">${t('vhost.type_redirect')}</span></td></tr>
+                <tr><td>${t('vhost.redirect_target')}</td><td class="mono">${vhost.redirect_code || 301} → ${esc(vhost.redirect_target || '')}</td></tr>
+                ` : `
                 <tr><td>${t('vhost.php_version')}</td><td>
                     ${vhost.web_backend === 'php_legacy'
                         ? `<span class="badge warn">PHP 7.2.34 · Docker (legacy)</span>`
@@ -1626,7 +1664,7 @@ async function pageWebsiteDetail(id) {
                         <option value="nginx" ${vhost.web_backend === 'nginx' ? 'selected' : ''}>nginx + FPM (brže)</option>
                         <option value="nginx_apache" ${vhost.web_backend === 'nginx_apache' ? 'selected' : ''}>nginx → Apache (.htaccess)</option>
                         <option value="php_legacy" ${vhost.web_backend === 'php_legacy' ? 'selected' : ''}>Legacy PHP 7.2 (Docker)</option>
-                    </select></td></tr>
+                    </select></td></tr>`}
                 <tr><td>Sistemski user</td><td class="mono">${esc(vhost.sys_user)}</td></tr>
                 <tr><td>Docroot</td><td class="mono">${esc(vhost.docroot)}</td></tr>
                 <tr><td>Kreirano</td><td>${fmtDate(vhost.created_at)}</td></tr>
@@ -1711,7 +1749,7 @@ async function pageWebsiteDetail(id) {
         } catch (err) { toast(err.message, 'err'); }
     });
 
-    main().querySelector('#backend').addEventListener('change', async (e) => {
+    main().querySelector('#backend')?.addEventListener('change', async (e) => {
         try {
             const r = await api(`/vhosts/${id}/backend`, { method: 'PUT', body: { web_backend: e.target.value } });
             watchTask(r.task_id, `backend ${vhost.domain}`);

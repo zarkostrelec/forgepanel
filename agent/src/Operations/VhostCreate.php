@@ -28,12 +28,25 @@ final class VhostCreate extends Operation
         Validator::positiveInt($params['vhost_id'] ?? null, 'vhost_id');
         Validator::fqdn($params['domain'] ?? null);
         Validator::phpVersion($params['php_version'] ?? null);
+        if (isset($params['redirect_target']) && $params['redirect_target'] !== '') {
+            Validator::fqdn($params['redirect_target'], 'redirect_target');
+        }
     }
 
     public function execute(array $params, TaskContext $context): array
     {
         $vhost_id = (int) $params['vhost_id'];
         $domain = Validator::fqdn($params['domain']);
+
+        // Redirect vhost: bez sistemskog usera/FPM poola/docroota — samo nginx redirect.
+        if (isset($params['redirect_target']) && $params['redirect_target'] !== '') {
+            return $this->createRedirect(
+                $vhost_id, $domain,
+                Validator::fqdn($params['redirect_target'], 'redirect_target'),
+                (int) ($params['redirect_code'] ?? 301), $context
+            );
+        }
+
         $php_version = Validator::phpVersion($params['php_version']);
         $sys_user = 'vh_' . $vhost_id;
         $vhost_root = Validator::VHOST_ROOT . '/' . $domain;
@@ -104,5 +117,40 @@ final class VhostCreate extends Operation
         $context->output("Vhost $domain kreiran.");
 
         return ['domain' => $domain, 'sys_user' => $sys_user, 'docroot' => $docroot];
+    }
+
+    /** Redirect vhost: samo nginx 301/302 config + self-signed cert (AutoSSL izda pravi). */
+    private function createRedirect(int $vhost_id, string $domain, string $target, int $code, TaskContext $context): array
+    {
+        $code = in_array($code, [301, 302], true) ? $code : 301;
+        $vhost_root = Validator::VHOST_ROOT . '/' . $domain;
+
+        $context->output("Redirect vhost: $domain → $target ($code)");
+        if (!is_dir($vhost_root)) {
+            mkdir($vhost_root, 0o755, true);
+        }
+        $context->progress(35);
+
+        $context->output('Privremeni self-signed certifikat (AutoSSL će izdati pravi)');
+        $ssl_dir = "/etc/forgepanel/ssl/$domain";
+        if (!is_file("$ssl_dir/fullchain.pem")) {
+            mkdir($ssl_dir, 0o700, true);
+            Proc::mustRun(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+                '-keyout', "$ssl_dir/privkey.pem", '-out', "$ssl_dir/fullchain.pem",
+                '-days', '7', '-subj', "/CN=$domain"]);
+        }
+        $context->progress(65);
+
+        $context->output('nginx redirect config + nginx -t + reload');
+        NginxConf::writeAndReload(
+            NginxConf::VHOST_CONF_DIR . "/$domain.conf",
+            NginxConf::vhostRedirectTemplate($domain, $target, $code)
+        );
+        $this->db->run("UPDATE vhosts SET status = 'active' WHERE id = ?", [$vhost_id]);
+
+        $context->progress(100);
+        $context->output("Redirect vhost $domain → $target kreiran.");
+
+        return ['domain' => $domain, 'redirect_target' => $target, 'redirect_code' => $code];
     }
 }

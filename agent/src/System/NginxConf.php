@@ -117,6 +117,36 @@ final class NginxConf
         NGINX;
     }
 
+    /**
+     * Redirect vhost — domena samo radi {$code} redirect na postojeću stranicu ($target),
+     * čuvajući path i query. Bez docroota/FPM-a. ACME challenge i dalje radi (AutoSSL).
+     */
+    public static function vhostRedirectTemplate(string $domain, string $target, int $code): string
+    {
+        $v6_80 = self::listenV6(80);
+        $v6_443 = self::listenV6(443, ' ssl');
+        return <<<NGINX
+        # ForgePanel vhost — {$domain} (redirect {$code} → {$target})
+        server {
+            listen 80;
+            {$v6_80}
+            server_name {$domain} www.{$domain};
+            location /.well-known/acme-challenge/ { root /var/www/forgepanel-acme; }
+            location / { return {$code} https://{$target}\$request_uri; }
+        }
+        server {
+            listen 443 ssl;
+            {$v6_443}
+            http2 on;
+            server_name {$domain} www.{$domain};
+            ssl_certificate     /etc/forgepanel/ssl/{$domain}/fullchain.pem;
+            ssl_certificate_key /etc/forgepanel/ssl/{$domain}/privkey.pem;
+            location /.well-known/acme-challenge/ { root /var/www/forgepanel-acme; }
+            location / { return {$code} https://{$target}\$request_uri; }
+        }
+        NGINX;
+    }
+
     /** nginx → reverse proxy na lokalni port (Docker container ili Node app). */
     public static function vhostProxyTemplateForPort(string $domain, int $port): string
     {
