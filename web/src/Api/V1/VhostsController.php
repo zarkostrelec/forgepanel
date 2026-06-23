@@ -201,7 +201,15 @@ final class VhostsController extends Controller
             'tasks_max' => (int) $sub['tasks_max'],
         ], $ctx->user_id);
 
-        // AutoSSL: svaki novi vhost automatski dobiva certifikat
+        // Auto-DNS: svaka nova domena odmah dobiva komplet zapisa (A/www/mail/MX/SPF/DMARC/CAA).
+        // Ako je u formi odabran Cloudflare račun → zapiši ih u odgovarajuću CF zonu i poveži
+        // vhost s tim računom (cloudflare_zones); inače lokalna BIND zona (ako je DNS instaliran).
+        // MORA prije ssl.issue: agentov AutoSSL po toj vezi bira DNS-01 umjesto http-01.
+        // Best-effort: greška u DNS-u ne ruši kreiranje vhosta (dovrši se ručno na DNS/CF ekranu).
+        $dns = $this->provisionDns($ctx, $request, $vhost_id, $domain, $subscription_id);
+
+        // AutoSSL: svaki novi vhost automatski dobiva certifikat (DNS-01 ako je domena na
+        // CF-u — radi i za proxied/wildcard; inače http-01).
         $contact = $this->setting('acme_email', $ctx->email);
         $ssl_task_id = $this->app->tasks->enqueue('ssl.issue', [
             'hostnames' => [$domain, "www.$domain"],
@@ -219,12 +227,6 @@ final class VhostsController extends Controller
             "INSERT INTO uptime_probes (vhost_id, type, target, interval_s) VALUES (?, 'https', ?, 300)",
             [$vhost_id, $domain]
         );
-
-        // Auto-DNS: svaka nova domena odmah dobiva komplet zapisa (A/www/mail/MX/SPF/DMARC/CAA).
-        // Ako je u formi odabran Cloudflare račun → zapiši ih u odgovarajuću CF zonu i poveži
-        // vhost s tim računom; inače kreiraj lokalnu BIND zonu (ako je DNS instaliran).
-        // Best-effort: greška u DNS-u ne ruši kreiranje vhosta (dovrši se ručno na DNS/CF ekranu).
-        $dns = $this->provisionDns($ctx, $request, $vhost_id, $domain, $subscription_id);
 
         $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.create', ['domain' => $domain], $request->ip);
         Response::ok(['vhost_id' => $vhost_id, 'task_id' => $task_id, 'ssl_task_id' => $ssl_task_id, 'dns' => $dns], 202);

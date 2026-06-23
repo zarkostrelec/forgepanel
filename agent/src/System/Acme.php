@@ -19,6 +19,7 @@ final class Acme
     private array $directory = [];
     private ?string $nonce = null;
     private ?string $kid = null;
+    private ?Dns01Provider $dns01 = null;
     private readonly \OpenSSLAsymmetricKey $account_key;
 
     public function __construct(private readonly string $directory_url = self::LE_DIRECTORY)
@@ -28,12 +29,15 @@ final class Acme
 
     /**
      * Izdaje certifikat za hostname(e); vraća ['fullchain' => pem, 'privkey' => pem].
+     * Uz $dns01 koristi dns-01 challenge (Cloudflare) — radi za proxied i wildcard
+     * domene; bez njega http-01 (panel hostname, lokalni DNS).
      * @param list<string> $hostnames
      * @return array{fullchain: string, privkey: string}
      */
-    public function issue(array $hostnames, string $contact_email, ?\Closure $log = null): array
+    public function issue(array $hostnames, string $contact_email, ?\Closure $log = null, ?Dns01Provider $dns01 = null): array
     {
         $log ??= static fn (string $s) => null;
+        $this->dns01 = $dns01;
         $this->bootstrap($contact_email);
 
         $log('ACME: kreiram order za ' . implode(', ', $hostnames));
@@ -65,17 +69,16 @@ final class Acme
         if ($authz['status'] === 'valid') {
             return;
         }
-        $challenge = null;
-        foreach ($authz['challenges'] as $c) {
-            if ($c['type'] === 'http-01') {
-                $challenge = $c;
-                break;
-            }
-        }
-        if ($challenge === null) {
-            throw new \RuntimeException('Nema http-01 challengea za ' . $authz['identifier']['value']);
+        $domain = $authz['identifier']['value'];
+
+        // DNS-01 (Cloudflare) ima prednost kad je domena na CF-u — jedini način koji
+        // radi za proxied (orange-cloud) i wildcard domene; http-01 inače.
+        if ($this->dns01 !== null) {
+            $this->satisfyDns01($authz_url, $authz, $domain, $log);
+            return;
         }
 
+        $challenge = $this->pickChallenge($authz, 'http-01', $domain);
         $key_authz = $challenge['token'] . '.' . $this->thumbprint();
         if (!is_dir(self::CHALLENGE_ROOT)) {
             mkdir(self::CHALLENGE_ROOT, 0o755, true);
@@ -84,12 +87,64 @@ final class Acme
         file_put_contents($token_file, $key_authz);
 
         try {
-            $log('ACME: http-01 challenge za ' . $authz['identifier']['value']);
+            $log("ACME: http-01 challenge za $domain");
             $this->signedRequest($challenge['url'], new \stdClass());
             $this->pollUntil($authz_url, ['valid'], ['invalid'], 'autorizacija');
         } finally {
             @unlink($token_file);
         }
+    }
+
+    /**
+     * dns-01: postavi _acme-challenge TXT kroz provider (CF), čekaj propagaciju,
+     * potvrdi LE-u, pa očisti zapis bez obzira na ishod.
+     * @param array<string, mixed> $authz
+     */
+    private function satisfyDns01(string $authz_url, array $authz, string $domain, \Closure $log): void
+    {
+        $challenge = $this->pickChallenge($authz, 'dns-01', $domain);
+        $value = self::b64(hash('sha256', $challenge['token'] . '.' . $this->thumbprint(), true));
+        $record = '_acme-challenge.' . $domain;
+
+        $log("ACME: dns-01 challenge za $domain (TXT $record)");
+        $handle = $this->dns01->set($domain, $value);
+        try {
+            $this->awaitDnsTxt($record, $value, $log);
+            $this->signedRequest($challenge['url'], new \stdClass());
+            $this->pollUntil($authz_url, ['valid'], ['invalid'], 'autorizacija');
+        } finally {
+            $this->dns01->clear($handle);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $authz
+     * @return array<string, mixed>
+     */
+    private function pickChallenge(array $authz, string $type, string $domain): array
+    {
+        foreach ($authz['challenges'] as $c) {
+            if ($c['type'] === $type) {
+                return $c;
+            }
+        }
+        throw new \RuntimeException("Nema $type challengea za $domain");
+    }
+
+    /** Čeka da _acme-challenge TXT postane vidljiv (best-effort; CF NS služe gotovo odmah). */
+    private function awaitDnsTxt(string $record, string $value, \Closure $log): void
+    {
+        for ($i = 0; $i < 20; $i++) {
+            foreach (@dns_get_record($record, DNS_TXT) ?: [] as $r) {
+                if (isset($r['txt']) && hash_equals($value, (string) $r['txt'])) {
+                    $log('ACME: dns-01 TXT propagiran');
+                    sleep(2);
+                    return;
+                }
+            }
+            sleep(3);
+        }
+        $log('ACME: dns-01 TXT nije potvrđen lokalnim resolverom, nastavljam');
     }
 
     private function pollOrder(string $order_url): string

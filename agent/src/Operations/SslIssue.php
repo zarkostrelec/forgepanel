@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace ForgePanel\Agent\Operations;
 
 use ForgePanel\Agent\System\Acme;
+use ForgePanel\Agent\System\CloudflareDns;
+use ForgePanel\Agent\System\Crypto;
+use ForgePanel\Agent\System\Dns01Provider;
 use ForgePanel\Agent\System\Systemd;
 use ForgePanel\Agent\TaskContext;
 use ForgePanel\Agent\ValidationException;
@@ -39,9 +42,10 @@ final class SslIssue extends Operation
         $context->output("AutoSSL: izdajem certifikat za $primary");
         $context->progress(10);
 
+        $dns01 = $this->cloudflareDns01($params, $context);
         try {
             $acme = new Acme();
-            $cert = $acme->issue($hostnames, (string) $params['contact_email'], $context->output(...));
+            $cert = $acme->issue($hostnames, (string) $params['contact_email'], $context->output(...), $dns01);
         } catch (\Throwable $e) {
             $this->db->run(
                 "UPDATE ssl_certs SET status = 'error', last_error = ? WHERE hostname = ?",
@@ -93,5 +97,36 @@ final class SslIssue extends Operation
         $context->output("Certifikat aktivan, vrijedi do $expires_at");
 
         return ['hostname' => $primary, 'expires_at' => $expires_at, 'cert_path' => "$ssl_dir/fullchain.pem", 'key_path' => "$ssl_dir/privkey.pem"];
+    }
+
+    /**
+     * DNS-01 provider ako je domena vezana uz aktivni Cloudflare račun (cloudflare_zones).
+     * Tada AutoSSL radi i za proxied domene — http-01 bi pao na CF proxyju (526/redirect).
+     * Inače null → http-01.
+     * @param array<string, mixed> $params
+     */
+    private function cloudflareDns01(array $params, TaskContext $context): ?Dns01Provider
+    {
+        if (!isset($params['vhost_id'])) {
+            return null;
+        }
+        $cf = $this->db->one(
+            'SELECT z.zone_id, a.api_token
+             FROM cloudflare_zones z JOIN cloudflare_accounts a ON a.id = z.account_id
+             WHERE z.vhost_id = ? AND z.dns_mode = \'cloudflare\' AND a.status = \'active\'
+             LIMIT 1',
+            [(int) $params['vhost_id']]
+        );
+        if ($cf === null) {
+            return null;
+        }
+        try {
+            $token = Crypto::fromConfig($this->config)->decrypt((string) $cf['api_token']);
+        } catch (\Throwable $e) {
+            $context->output('AutoSSL: CF token nedostupan (' . $e->getMessage() . ') — koristim http-01.');
+            return null;
+        }
+        $context->output('AutoSSL: DNS-01 challenge preko Cloudflarea (zona ' . $cf['zone_id'] . ')');
+        return new CloudflareDns($token, (string) $cf['zone_id']);
     }
 }
