@@ -72,7 +72,11 @@ final class CloudflareController extends Controller
     private function zones(Request $request): never
     {
         $ctx = $this->ctx($request, 'cloudflare:read');
-        Response::ok($this->client($ctx, $request->int('account_id'))->zones());
+        // account_id stiže kao query param (GET) — $request->int() čita body, pa bi inače
+        // uvijek vraćao zone prvog računa (izbor računa u UI-ju ne bi mijenjao popis).
+        $aq = $request->query('account_id');
+        $account_id = ($aq !== null && $aq !== '') ? (int) $aq : null;
+        Response::ok($this->client($ctx, $account_id)->zones());
     }
 
     /** Piše vhost A/MX/SPF/DKIM/DMARC zapise u CF zonu. */
@@ -131,11 +135,12 @@ final class CloudflareController extends Controller
     {
         $ctx = $this->ctx($request, 'cloudflare:write');
         $vhost = $ctx->vhostOr404((int) $request->param('id'));
-        $zone = $this->app->db->one('SELECT zone_id FROM cloudflare_zones WHERE vhost_id = ?', [$vhost['id']])
+        $zone = $this->app->db->one('SELECT zone_id, account_id FROM cloudflare_zones WHERE vhost_id = ?', [$vhost['id']])
             ?? throw new HttpException(409, 'vhost_not_on_cloudflare');
 
+        // Token računa kojem zona PRIPADA (ne prvog) — inače purge na zoni drugog računa pada.
         $urls = $request->body['urls'] ?? null;
-        $this->client($ctx)->purgeCache($zone['zone_id'], is_array($urls) && $urls !== [] ? $urls : null);
+        $this->client($ctx, (int) $zone['account_id'])->purgeCache($zone['zone_id'], is_array($urls) && $urls !== [] ? $urls : null);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'cloudflare.purge', ['domain' => $vhost['domain']], $request->ip);
         Response::ok();
     }
