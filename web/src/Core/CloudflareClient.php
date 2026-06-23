@@ -55,6 +55,11 @@ final class CloudflareClient
         $this->request('PATCH', "/zones/$zone_id/dns_records/$record_id", ['proxied' => $proxied]);
     }
 
+    public function deleteRecord(string $zone_id, string $record_id): void
+    {
+        $this->request('DELETE', "/zones/$zone_id/dns_records/$record_id");
+    }
+
     public function purgeCache(string $zone_id, ?array $urls = null): void
     {
         $body = $urls === null ? ['purge_everything' => true] : ['files' => array_values($urls)];

@@ -308,12 +308,42 @@ final class VhostsController extends Controller
             'php_version' => $vhost['php_version'],
         ], $ctx->user_id);
 
+        // Brisanje domene = brisanje njenog DNS-a. PRIJE DELETE vhosta (CASCADE briše
+        // cloudflare_zones vezu) ukloni zapise s povezane CF zone; zatim lokalnu zonu.
+        $this->cleanupCloudflareDns((int) $vhost['id'], (string) $vhost['domain']);
+        $this->deleteLocalZone((string) $vhost['domain']);
+
         $this->app->db->run('DELETE FROM vhosts WHERE id = ?', [$vhost['id']]);
-        // Auto-čišćenje DNS-a: ako je vhost poddomena (staging/subdomena) lokalne zone,
-        // ukloni njegov A/AAAA zapis iz matične zone.
+        // Ako je vhost poddomena (staging/subdomena) lokalne zone, ukloni njegov A/AAAA
+        // zapis iz matične zone (apex zona je već obrisana gore ako je postojala).
         $this->cleanupSubdomainDns((string) $vhost['domain']);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.delete', ['domain' => $vhost['domain']], $request->ip);
         Response::ok(['task_id' => $task_id], 202);
+    }
+
+    /** Obriši lokalnu (BIND) zonu domene + sve njene zapise (dns_records ide CASCADE). */
+    private function deleteLocalZone(string $domain): void
+    {
+        $zone = $this->app->db->one('SELECT id FROM dns_zones WHERE domain = ?', [$domain]);
+        if ($zone === null) {
+            return;
+        }
+        try {
+            $this->app->agent->call('dns.zone_delete', ['domain' => $domain]);
+        } catch (\Throwable $e) {
+            error_log('forgepanel: vhost.delete zone_delete: ' . $e->getMessage());
+        }
+        $this->app->db->run('DELETE FROM dns_zones WHERE id = ?', [(int) $zone['id']]);
+    }
+
+    /** Ukloni zapise koje je panel postavio s povezane CF zone (best-effort). */
+    private function cleanupCloudflareDns(int $vhost_id, string $domain): void
+    {
+        try {
+            \ForgePanel\Web\Core\DomainProvision::cloudflareCleanup($this->app, $vhost_id, $domain);
+        } catch (\Throwable $e) {
+            error_log('forgepanel: vhost.delete CF cleanup: ' . $e->getMessage());
+        }
     }
 
     /** Ukloni A/AAAA zapis poddomene iz matične lokalne zone (best-effort). */

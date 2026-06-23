@@ -100,6 +100,39 @@ final class DomainProvision
         return ['ok' => true, 'zone_id' => $zone_id, 'created' => $created];
     }
 
+    /**
+     * Ukloni s povezane CF zone sve zapise koji pripadaju domeni (apex + poddomene).
+     * Veza se traži po vhost_id (cloudflare_zones); best-effort po pojedinom zapisu.
+     * Zovi PRIJE brisanja vhosta — CASCADE briše cloudflare_zones vezu.
+     */
+    public static function cloudflareCleanup(App $app, int $vhost_id, string $domain): void
+    {
+        $cf = $app->db->one(
+            'SELECT z.zone_id, a.api_token FROM cloudflare_zones z
+             JOIN cloudflare_accounts a ON a.id = z.account_id
+             WHERE z.vhost_id = ? LIMIT 1',
+            [$vhost_id]
+        );
+        if ($cf === null) {
+            return;
+        }
+        $client = new CloudflareClient((new Crypto($app->config))->decrypt((string) $cf['api_token']));
+        $zone_id = (string) $cf['zone_id'];
+        $domain = strtolower($domain);
+        $suffix = '.' . $domain;
+        foreach ($client->dnsRecords($zone_id) as $r) {
+            $name = strtolower(rtrim((string) ($r['name'] ?? ''), '.'));
+            $id = $r['id'] ?? null;
+            if (is_string($id) && ($name === $domain || str_ends_with($name, $suffix))) {
+                try {
+                    $client->deleteRecord($zone_id, $id);
+                } catch (\Throwable) {
+                    // best-effort — ostatak nastavlja
+                }
+            }
+        }
+    }
+
     /** Javna IPv4 servera (settings.server_ipv4, JSON-enkodirana); fallback 127.0.0.1. */
     private static function serverIp(App $app): string
     {
