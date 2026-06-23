@@ -220,8 +220,54 @@ final class VhostsController extends Controller
             [$vhost_id, $domain]
         );
 
+        // Auto-DNS: svaka nova domena odmah dobiva komplet zapisa (A/www/mail/MX/SPF/DMARC/CAA).
+        // Ako je u formi odabran Cloudflare račun → zapiši ih u odgovarajuću CF zonu i poveži
+        // vhost s tim računom; inače kreiraj lokalnu BIND zonu (ako je DNS instaliran).
+        // Best-effort: greška u DNS-u ne ruši kreiranje vhosta (dovrši se ručno na DNS/CF ekranu).
+        $dns = $this->provisionDns($ctx, $request, $vhost_id, $domain, $subscription_id);
+
         $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.create', ['domain' => $domain], $request->ip);
-        Response::ok(['vhost_id' => $vhost_id, 'task_id' => $task_id, 'ssl_task_id' => $ssl_task_id], 202);
+        Response::ok(['vhost_id' => $vhost_id, 'task_id' => $task_id, 'ssl_task_id' => $ssl_task_id, 'dns' => $dns], 202);
+    }
+
+    /**
+     * Auto-provisioning DNS-a za novu domenu. Vraća sažetak za UI (toast).
+     * @return array<string, mixed>|null
+     */
+    private function provisionDns(\ForgePanel\Web\Core\AuthContext $ctx, Request $request, int $vhost_id, string $domain, int $subscription_id): ?array
+    {
+        $cf_account_id = $request->int('cf_account_id');
+        if ($cf_account_id !== null && $cf_account_id > 0) {
+            // Vlasništvo nad CF računom — klijent ne smije slati na tuđi račun
+            $account = $this->app->db->one(
+                'SELECT id, api_token FROM cloudflare_accounts WHERE id = ? AND user_id = ?',
+                [$cf_account_id, $ctx->user_id]
+            );
+            if ($account === null) {
+                throw new HttpException(422, 'cloudflare_account_not_found');
+            }
+            $proxy = (bool) ($request->body['cf_proxy'] ?? true);
+            try {
+                $res = \ForgePanel\Web\Core\DomainProvision::cloudflare(
+                    $this->app, $vhost_id, $domain,
+                    ['id' => (int) $account['id'], 'api_token' => (string) $account['api_token']],
+                    $proxy
+                );
+                $res['mode'] = 'cloudflare';
+                return $res;
+            } catch (\Throwable $e) {
+                error_log('forgepanel: vhost.create CF provision: ' . $e->getMessage());
+                return ['mode' => 'cloudflare', 'ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        try {
+            $zone_id = \ForgePanel\Web\Core\DomainProvision::localZone($this->app, $domain, $subscription_id);
+            return $zone_id !== null ? ['mode' => 'local', 'ok' => true, 'zone_id' => $zone_id] : null;
+        } catch (\Throwable $e) {
+            error_log('forgepanel: vhost.create local DNS: ' . $e->getMessage());
+            return ['mode' => 'local', 'ok' => false, 'error' => $e->getMessage()];
+        }
     }
 
     private function delete(Request $request): never

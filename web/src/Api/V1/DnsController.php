@@ -96,21 +96,13 @@ final class DnsController extends Controller
         );
         $zone_id = $this->app->db->lastId();
 
-        // Auto-generiranje kompletne zone: A/www/MX/SPF/DMARC/CAA
-        $server_ip = $this->serverIp();
-        $defaults = [
-            ['@', 'A', $server_ip, 3600, null],
-            ['www', 'A', $server_ip, 3600, null],
-            ['mail', 'A', $server_ip, 3600, null],
-            ['@', 'MX', "mail.$domain", 3600, 10],
-            ['@', 'TXT', 'v=spf1 a mx ~all', 3600, null],
-            ['_dmarc', 'TXT', "v=DMARC1; p=quarantine; rua=mailto:dmarc@$domain", 3600, null],
-            ['@', 'CAA', '0 issue "letsencrypt.org"', 3600, null],
-        ];
-        foreach ($defaults as [$name, $type, $content, $ttl, $prio]) {
+        // Auto-generiranje kompletne zone: A/www/mail/MX/SPF/DMARC/CAA (+ DKIM ako mail postoji).
+        // Isti set koristi i auto-DNS pri kreiranju domene (DomainProvision) → identična zona.
+        $mail = $this->app->db->one('SELECT dkim_selector, dkim_txt FROM mail_domains WHERE domain = ?', [$domain]);
+        foreach (\ForgePanel\Web\Core\DnsDefaults::records($domain, $this->serverIp(), $mail) as $r) {
             $this->app->db->run(
                 'INSERT INTO dns_records (zone_id, name, type, content, ttl, prio) VALUES (?, ?, ?, ?, ?, ?)',
-                [$zone_id, $name, $type, $content, $ttl, $prio]
+                [$zone_id, $r['name'], $r['type'], $r['content'], $r['ttl'], $r['prio']]
             );
         }
 

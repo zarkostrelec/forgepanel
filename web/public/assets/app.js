@@ -1453,6 +1453,18 @@ async function createVhostModal() {
                 <select name="subscription_id" class="mono">
                     ${subs.map((s) => `<option value="${s.id}">${esc(s.email)} — ${esc(s.plan)}</option>`).join('')}
                 </select></div>` : '';
+    // Cloudflare: izbor računa s kojim se domena povezuje (DNS zapisi idu na taj CF račun)
+    let cfAccounts = [];
+    try { cfAccounts = (await api('/cloudflare/account')).accounts || []; } catch { /* CF nije povezan */ }
+    const cfField = cfAccounts.length ? `
+            <div class="field"><label>${t('vhost.cf_account')}</label>
+                <select name="cf_account_id" id="vcfacct" class="mono">
+                    <option value="">${t('vhost.cf_local')}</option>
+                    ${cfAccounts.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+                </select>
+                <span class="hint">${t('vhost.cf_hint')}</span></div>
+            <label class="inline" id="vcfproxy" style="display:none;margin-bottom:var(--gap)">
+                <input type="checkbox" name="cf_proxy" checked> ${t('cf.proxy')}</label>` : '';
     const modal = openModal(`
         <div class="dialog-head"><h1>${t('vhost.create')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="vf">
@@ -1462,19 +1474,39 @@ async function createVhostModal() {
             ${subField}
             <div class="field"><label>${t('vhost.php_version')}</label>
                 <select name="php_version">${['8.5', '8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
+            ${cfField}
             <div class="dialog-foot">
                 <button type="button" class="btn" data-close>${t('common.cancel')}</button>
                 <button class="btn primary">${t('common.create')}</button>
             </div>
         </form>`);
+    // Proxy (narančasti oblak) checkbox vidljiv samo kad je odabran CF račun
+    const acctSel = modal.querySelector('#vcfacct');
+    acctSel?.addEventListener('change', () => {
+        modal.querySelector('#vcfproxy').style.display = acctSel.value ? '' : 'none';
+    });
     modal.querySelector('#vf').addEventListener('submit', async (e) => {
         e.preventDefault();
         const body = Object.fromEntries(new FormData(e.target));
+        if (!body.cf_account_id) {
+            delete body.cf_account_id; // "lokalni DNS" — bez CF-a
+        } else {
+            body.cf_proxy = modal.querySelector('[name=cf_proxy]')?.checked ?? true;
+        }
         try {
             const r = await api('/vhosts', { method: 'POST', body });
             modal.close();
             watchTask(r.task_id, `vhost.create ${body.domain}`);
             watchTask(r.ssl_task_id, `ssl.issue ${body.domain}`);
+            if (r.dns) {
+                if (r.dns.ok === false) {
+                    toast(r.dns.error === 'cf_zone_not_found' ? t('vhost.cf_zone_missing') : t('vhost.dns_failed'), 'warn');
+                } else if (r.dns.mode === 'cloudflare') {
+                    toast(t('vhost.cf_done'), 'ok');
+                } else if (r.dns.mode === 'local') {
+                    toast(t('vhost.dns_done'), 'ok');
+                }
+            }
             location.hash = '#/websites';
             route();
         } catch (err) { toast(err.message, 'err'); }
