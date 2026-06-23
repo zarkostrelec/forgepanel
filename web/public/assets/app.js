@@ -2693,20 +2693,32 @@ async function pageCloudflare() {
             api('/cloudflare/zones' + (accountId ? `?account_id=${accountId}` : '')).catch(() => []),
             api('/vhosts').catch(() => []),
         ]);
-        const zoneOpts = zones.map((z) => `<option value="${esc(z.id)}">${esc(z.name)}</option>`).join('');
+        // Pridruži svakoj domeni ISPRAVNU zonu na ovom računu (apex = ime zone, poddomena
+        // = sufiks); najspecifičnija (najduže ime) pobjeđuje. Domene bez zone na ovom računu
+        // se NE prikazuju — nema krivog povezivanja (npr. avallus.hr → forgepanel.online).
+        const matchZone = (domain) => {
+            const d = domain.toLowerCase();
+            let best = null;
+            for (const z of zones) {
+                const n = z.name.toLowerCase();
+                if ((d === n || d.endsWith('.' + n)) && (!best || n.length > best.name.length)) best = z;
+            }
+            return best;
+        };
+        const syncable = vhosts.map((v) => ({ v, zone: matchZone(v.domain) })).filter((x) => x.zone);
         box.innerHTML = `
         ${zones.length ? `<table class="data"><thead><tr><th>${t('cf.zone')}</th><th>${t('cf.status')}</th><th class="mono hide-sm">Zone ID</th></tr></thead>
         <tbody>${zones.map((z) => `<tr><td class="mono">${esc(z.name)}</td>
             <td><span class="badge ${z.status === 'active' ? 'ok' : 'warn'}">${esc(z.status)}</span></td>
             <td class="mono hide-sm" style="font-size:var(--fs-sm)">${esc(z.id)}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${t('cf.zones')}: 0</div>`}
-        ${vhosts.length && zones.length ? `<div class="card-head mt"><h2>${t('cf.sync')}</h2></div>
-        <table class="data"><thead><tr><th>${t('vhost.domain')}</th><th>${t('cf.zone')}</th><th></th></tr></thead>
-        <tbody>${vhosts.map((v) => `<tr data-vid="${v.id}">
+        ${zones.length ? `<div class="card-head mt"><h2>${t('cf.sync')}</h2></div>
+        ${syncable.length ? `<table class="data"><thead><tr><th>${t('vhost.domain')}</th><th>${t('cf.zone')}</th><th></th></tr></thead>
+        <tbody>${syncable.map(({ v, zone }) => `<tr data-vid="${v.id}" data-zone="${esc(zone.id)}">
             <td class="mono">${esc(v.domain)}</td>
-            <td><select class="mono cf-zone">${zoneOpts}</select>
+            <td><span class="mono">${esc(zone.name)}</span>
                 <label class="inline" style="margin-left:8px"><input type="checkbox" class="cf-proxy" checked> ${t('cf.proxy')}</label></td>
             <td class="num"><button class="btn cf-sync">${t('cf.sync')}</button><button class="btn cf-purge">${t('cf.purge')}</button></td>
-        </tr>`).join('')}</tbody></table>` : ''}`;
+        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('cf.no_syncable')}</div>`}` : ''}`;
 
         box.querySelectorAll('tr[data-vid]').forEach((tr) => {
             const vid = tr.dataset.vid;
@@ -2714,7 +2726,7 @@ async function pageCloudflare() {
                 e.target.disabled = true;
                 try {
                     const r = await api(`/vhosts/${vid}/cloudflare/sync`, { method: 'POST',
-                        body: { zone_id: tr.querySelector('.cf-zone').value, proxy: tr.querySelector('.cf-proxy').checked, account_id: accountId } });
+                        body: { zone_id: tr.dataset.zone, proxy: tr.querySelector('.cf-proxy').checked, account_id: accountId } });
                     toast(t('cf.sync_done') + ': ' + (r.created || []).join(', '), 'ok');
                 } catch (err) { toast(err.message, 'err'); } finally { e.target.disabled = false; }
             });

@@ -562,6 +562,7 @@
     "cf.zone": "Zona",
     "cf.status": "Status",
     "cf.sync": "Sinkroniziraj DNS",
+    "cf.no_syncable": "Nijedna domena nema odgovarajuću zonu na ovom računu (dodaj domenu kao zonu na Cloudflare).",
     "cf.purge": "Purgaj cache",
     "cf.purge_done": "Cache ispražnjen",
     "cf.sync_done": "DNS sinkroniziran",

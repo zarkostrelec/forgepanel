@@ -562,6 +562,7 @@
     "cf.zone": "Zone",
     "cf.status": "Status",
     "cf.sync": "Sync DNS",
+    "cf.no_syncable": "No domain has a matching zone on this account (add the domain as a zone on Cloudflare).",
     "cf.purge": "Purge cache",
     "cf.purge_done": "Cache purged",
     "cf.sync_done": "DNS synced",
