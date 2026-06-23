@@ -35,6 +35,21 @@ final class VhostsController extends Controller
         $router->add('PUT', '/api/v1/vhosts/{id}/php', $this->setPhp(...));
         $router->add('PUT', '/api/v1/vhosts/{id}/php-settings', $this->setPhpSettings(...));
         $router->add('PUT', '/api/v1/vhosts/{id}/backend', $this->setBackend(...));
+        $router->add('POST', '/api/v1/vhosts/{id}/dns/repair', $this->repairDns(...));
+    }
+
+    /**
+     * Popravak/dovršetak DNS-a za postojeću domenu: kreira lokalnu zonu ako fali i
+     * (opcionalno) gurne zapise na odabrani Cloudflare račun — ista logika kao pri
+     * kreiranju. Idempotentno: ponovni poziv ne duplicira zapise.
+     */
+    private function repairDns(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'vhosts:write');
+        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $dns = $this->provisionDns($ctx, $request, (int) $vhost['id'], (string) $vhost['domain'], (int) $vhost['subscription_id']);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.dns_repair', ['domain' => $vhost['domain']], $request->ip);
+        Response::ok(['dns' => $dns]);
     }
 
     /** Uređivanje PHP ini postavki po domeni (kao Plesk) → FPM pool + reload. */

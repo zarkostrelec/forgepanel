@@ -1513,6 +1513,53 @@ async function createVhostModal() {
     });
 }
 
+// Popravak DNS-a za postojeću domenu (kreira lokalnu zonu ako fali + opcionalno CF)
+async function repairDnsModal(vhost) {
+    let cfAccounts = [];
+    try { cfAccounts = (await api('/cloudflare/account')).accounts || []; } catch { /* CF nije povezan */ }
+    const cfField = cfAccounts.length ? `
+            <div class="field"><label>${t('vhost.cf_account')}</label>
+                <select name="cf_account_id" id="rcfacct" class="mono">
+                    <option value="">${t('vhost.cf_local')}</option>
+                    ${cfAccounts.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+                </select>
+                <span class="hint">${t('vhost.cf_hint')}</span></div>
+            <label class="inline" id="rcfproxy" style="display:none;margin-bottom:var(--gap)">
+                <input type="checkbox" name="cf_proxy" checked> ${t('cf.proxy')}</label>` : '';
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('vhost.dns_repair')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="rdf">
+            <p class="hint">${t('vhost.dns_repair_hint')} <span class="mono">${esc(vhost.domain)}</span></p>
+            ${cfField}
+            <div class="dialog-foot">
+                <button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('vhost.dns_repair_go')}</button>
+            </div>
+        </form>`);
+    const acctSel = modal.querySelector('#rcfacct');
+    acctSel?.addEventListener('change', () => {
+        modal.querySelector('#rcfproxy').style.display = acctSel.value ? '' : 'none';
+    });
+    modal.querySelector('#rdf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = Object.fromEntries(new FormData(e.target));
+        if (!body.cf_account_id) {
+            delete body.cf_account_id;
+        } else {
+            body.cf_proxy = modal.querySelector('[name=cf_proxy]')?.checked ?? true;
+        }
+        try {
+            const r = await api(`/vhosts/${vhost.id}/dns/repair`, { method: 'POST', body });
+            modal.close();
+            if (r.dns && r.dns.ok === false) {
+                toast(r.dns.error === 'cf_zone_not_found' ? t('vhost.cf_zone_missing') : t('vhost.dns_failed'), 'warn');
+            } else {
+                toast(t('vhost.dns_repair_done'), 'ok');
+            }
+        } catch (err) { toast(err.message, 'err'); }
+    });
+}
+
 // PHP postavke po domeni (Plesk-style) — override u FPM pool; prazno = PHP default
 function phpSettingsCard(vhost) {
     const ps = (() => { try { return JSON.parse(vhost.php_settings || '{}') || {}; } catch { return {}; } })();
@@ -1559,6 +1606,7 @@ async function pageWebsiteDetail(id) {
         <div class="spacer"></div>
         <button class="btn" id="bkp">${icon('archive')}${t('backup.create')}</button>
         ${state.me.role === 'admin' ? `<button class="btn" id="diag">${icon('spark')}${t('assistant.diagnose')}</button>` : ''}
+        <button class="btn" id="dnsrepair">${icon('globe')}${t('vhost.dns_repair')}</button>
         <button class="btn" id="renew">${icon('refresh')}SSL renew</button>
         <button class="btn danger" id="del">${t('common.delete')}</button>
     </div>
@@ -1646,6 +1694,7 @@ async function pageWebsiteDetail(id) {
             }
         }
     });
+    main().querySelector('#dnsrepair').addEventListener('click', () => repairDnsModal(vhost));
     main().querySelector('#renew').addEventListener('click', async () => {
         try {
             const r = await api(`/vhosts/${id}/ssl/renew`, { method: 'POST' });

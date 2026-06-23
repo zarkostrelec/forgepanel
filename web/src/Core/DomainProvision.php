@@ -89,7 +89,9 @@ final class DomainProvision
             }
         }
 
-        // Novi vhost → nema prethodne veze; plain INSERT (cloudflare_zones nema UNIQUE na vhost_id).
+        // Idempotentno (repair smije ponoviti): zamijeni postojeću vezu za ovaj vhost
+        // umjesto dupliciranja (cloudflare_zones nema UNIQUE na vhost_id).
+        $app->db->run('DELETE FROM cloudflare_zones WHERE vhost_id = ?', [$vhost_id]);
         $app->db->run(
             "INSERT INTO cloudflare_zones (vhost_id, account_id, zone_id, dns_mode, proxy_default)
              VALUES (?, ?, ?, 'cloudflare', ?)",
