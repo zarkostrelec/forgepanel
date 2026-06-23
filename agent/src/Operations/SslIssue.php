@@ -47,9 +47,13 @@ final class SslIssue extends Operation
             $acme = new Acme();
             $cert = $acme->issue($hostnames, (string) $params['contact_email'], $context->output(...), $dns01);
         } catch (\Throwable $e) {
+            // Označi koji je challenge korišten — odmah razlikuje uzrok u UI-ju:
+            // [dns-01] timeout = NS domene nisu delegirani na CF / token bez DNS:Edit;
+            // [http-01] 526/redirect = domena proxied a nema CF veze (ili stari agent).
+            $mode = $dns01 !== null ? 'dns-01' : 'http-01';
             $this->db->run(
                 "UPDATE ssl_certs SET status = 'error', last_error = ? WHERE hostname = ?",
-                [mb_substr($e->getMessage(), 0, 2000), $primary]
+                [mb_substr("[$mode] " . $e->getMessage(), 0, 2000), $primary]
             );
             throw $e;
         }

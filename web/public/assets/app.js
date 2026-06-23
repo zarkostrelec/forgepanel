@@ -2385,7 +2385,8 @@ async function pageSsl() {
         ${certs.map((c) => {
             const days = Math.floor((new Date(String(c.expires_at).replace(' ', 'T')) - Date.now()) / 864e5);
             return `<tr>
-                <td class="mono">${esc(c.hostname)}</td>
+                <td class="mono">${esc(c.hostname)}${c.status === 'error' && c.last_error
+                    ? `<div class="mono" style="color:#e5484d;font-size:11px;margin-top:3px;white-space:normal;max-width:560px">${esc(c.last_error)}</div>` : ''}</td>
                 <td class="mono hide-sm">${esc(c.type)}${Number(c.auto_renew) ? ' · auto' : ''}</td>
                 <td>${fmtDate(c.expires_at)} <span class="badge ${days < 14 ? 'err' : days < 30 ? 'warn' : 'ok'}">${days} d</span></td>
                 <td>${statusBadge(c.status)}</td>
