@@ -474,13 +474,14 @@ const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
 const TAB_GROUPS = {
     mail: [['mail', 'nav.mail', 'mail'], ['deliverability', 'nav.deliverability', 'activity']],
     monitoring: [['monitoring', 'nav.monitoring', 'pulse'], ['tasks', 'nav.tasks', 'clock']],
-    protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['cloudflare', 'nav.cloudflare', 'cloud', 'admin'], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
+    protect: [['ssl', 'nav.ssl', 'lock'], ['dns', 'nav.dns', 'globe'], ['cloudflare', 'nav.cloudflare', 'cloud', ['admin', 'reseller']], ['security', 'nav.security', 'shield'], ['firewall', 'nav.firewall', 'wall', 'admin']],
     server: [['updates', 'nav.updates', 'refresh'], ['config', 'nav.config', 'history'], ['system', 'nav.system', 'gear'], ['migrator', 'nav.migrator', 'upload'], ['distribution', 'nav.distribution', 'download'], ['licensing', 'nav.licensing', 'key']],
 };
 
 // tab strip za grupirane stranice (Zaštita: SSL · DNS · Sigurnost · Firewall, itd.)
 function tabsHtml(groupId, activePage) {
-    const tabs = (TAB_GROUPS[groupId] ?? []).filter(([, , , role]) => !role || role === state.me.role);
+    const tabs = (TAB_GROUPS[groupId] ?? []).filter(([, , , role]) =>
+        !role || (Array.isArray(role) ? role.includes(state.me.role) : role === state.me.role));
     if (tabs.length < 2) return '';
     return `<nav class="tabs">${tabs.map(([page, key, ic]) =>
         `<a href="#/${page}" class="${page === activePage ? 'active' : ''}">${icon(ic)}${t(key)}</a>`).join('')}</nav>`;

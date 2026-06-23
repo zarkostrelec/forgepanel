@@ -482,6 +482,14 @@ final class Scheduler
             CURLOPT_SSL_VERIFYPEER => false, // dostupnost, ne validnost certa (SSL expiry prati ssl modul)
             CURLOPT_SSL_VERIFYHOST => 0,
             CURLOPT_USERAGENT => 'ForgePanel-Uptime/1.0',
+            // Vhostovi su hostani lokalno → gađaj origin (127.0.0.1) s ispravnim SNI/Host.
+            // Bez ovoga proba domene iza Cloudflare proxyja zna lažno javiti "down" (server
+            // koji curla vlastitu domenu kroz CF = hairpin/NAT loopback), iako vanjski
+            // posjetitelji normalno prolaze. Ovako mjerimo servira li nginx zaista.
+            CURLOPT_RESOLVE => [
+                "$target:443:127.0.0.1", "$target:80:127.0.0.1",
+                "www.$target:443:127.0.0.1", "www.$target:80:127.0.0.1",
+            ],
         ]);
         curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
