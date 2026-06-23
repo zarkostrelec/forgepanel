@@ -247,10 +247,18 @@ final class Auth
         if ($user === null || $user['status'] !== 'active') {
             return null;
         }
-        $subscription_ids = array_map(
-            intval(...),
-            array_column($this->db->all('SELECT id FROM subscriptions WHERE user_id = ?', [$user_id]), 'id')
-        );
+        // Reseller vidi/upravlja svojim pretplatama I pretplatama svojih klijenata
+        // (users.reseller_id = reseller). Klijent vidi samo svoje.
+        if ($user['role'] === 'reseller') {
+            $rows = $this->db->all(
+                'SELECT s.id FROM subscriptions s JOIN users u ON u.id = s.user_id
+                 WHERE u.id = ? OR u.reseller_id = ?',
+                [$user_id, $user_id]
+            );
+        } else {
+            $rows = $this->db->all('SELECT id FROM subscriptions WHERE user_id = ?', [$user_id]);
+        }
+        $subscription_ids = array_map(intval(...), array_column($rows, 'id'));
         return new AuthContext($user_id, (string) $user['email'], (string) $user['role'], $scopes, $subscription_ids, $this->db);
     }
 

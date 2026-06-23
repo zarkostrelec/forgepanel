@@ -88,6 +88,35 @@ final class AuthContext
         return is_array($perms) && in_array($permission, $perms, true);
     }
 
+    /**
+     * Domene vhostova kojima korisnik ima pristup (pretplata + delegacija). Koristi se da
+     * DNS/CF prate pristup DOMENI (npr. reseller upravlja zonom domene koju vidi, i kad je
+     * zona zavedena pod drugom pretplatom). @return list<string>
+     */
+    public function accessibleVhostDomains(): array
+    {
+        if ($this->isAdmin()) {
+            return array_column($this->db->all('SELECT domain FROM vhosts'), 'domain');
+        }
+        $domains = [];
+        if ($this->subscription_ids !== []) {
+            $ph = implode(',', array_fill(0, count($this->subscription_ids), '?'));
+            $domains = array_column(
+                $this->db->all("SELECT domain FROM vhosts WHERE subscription_id IN ($ph)", $this->subscription_ids),
+                'domain'
+            );
+        }
+        $delegated = $this->delegatedVhostIds();
+        if ($delegated !== []) {
+            $ph = implode(',', array_fill(0, count($delegated), '?'));
+            $domains = array_merge($domains, array_column(
+                $this->db->all("SELECT domain FROM vhosts WHERE id IN ($ph)", $delegated),
+                'domain'
+            ));
+        }
+        return array_values(array_unique($domains));
+    }
+
     /** Vhostovi do kojih korisnik ima delegirani pristup (za listanje). @return list<int> */
     public function delegatedVhostIds(): array
     {

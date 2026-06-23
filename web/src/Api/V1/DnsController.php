@@ -60,15 +60,28 @@ final class DnsController extends Controller
                  LEFT JOIN cloudflare_accounts ca ON ca.id = z.cf_account_id ORDER BY z.domain'
             ));
         }
-        if ($ctx->subscription_ids === []) {
+        // Vidljivost prati i pretplatu i pristup domeni (vhost) — reseller/klijent vidi
+        // zonu domene kojom upravlja i kad je zona zavedena pod drugom pretplatom.
+        $subs = $ctx->subscription_ids;
+        $domains = $ctx->accessibleVhostDomains();
+        if ($subs === [] && $domains === []) {
             Response::ok([]);
         }
-        $placeholders = implode(',', array_fill(0, count($ctx->subscription_ids), '?'));
+        $where = [];
+        $args = [];
+        if ($subs !== []) {
+            $where[] = 'z.subscription_id IN (' . implode(',', array_fill(0, count($subs), '?')) . ')';
+            $args = array_merge($args, $subs);
+        }
+        if ($domains !== []) {
+            $where[] = 'z.domain IN (' . implode(',', array_fill(0, count($domains), '?')) . ')';
+            $args = array_merge($args, $domains);
+        }
         Response::ok($this->app->db->all(
             "SELECT z.*, ca.name AS cf_account FROM dns_zones z
              LEFT JOIN cloudflare_accounts ca ON ca.id = z.cf_account_id
-             WHERE z.subscription_id IN ($placeholders) ORDER BY z.domain",
-            $ctx->subscription_ids
+             WHERE " . implode(' OR ', $where) . ' ORDER BY z.domain',
+            $args
         ));
     }
 
@@ -325,7 +338,11 @@ final class DnsController extends Controller
         if ($zone === null) {
             throw new HttpException(404, 'not_found');
         }
-        $ctx->requireSubscription((int) $zone['subscription_id']);
-        return $zone;
+        // Pristup preko pretplate ILI preko vhosta iste domene (DNS prati pristup domeni).
+        if ($ctx->isAdmin() || in_array((int) $zone['subscription_id'], $ctx->subscription_ids, true)
+            || in_array((string) $zone['domain'], $ctx->accessibleVhostDomains(), true)) {
+            return $zone;
+        }
+        throw new HttpException(404, 'not_found');
     }
 }
