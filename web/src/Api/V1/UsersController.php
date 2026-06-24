@@ -41,11 +41,57 @@ final class UsersController extends Controller
         $ctx->requireRole('admin', 'reseller');
         $rid = $ctx->isAdmin() && $request->query('reseller_id') !== null
             ? (int) $request->query('reseller_id') : $ctx->user_id;
+        // Iskorišteno = plan-limiti klijenata + reseller-ova VLASTITA potrošnja (stranice koje
+        // su mu izravno dodijeljene idu pod njegovu pretplatu, pa moraju ulaziti u kvotu).
+        $clients = $this->resellerAllocated($rid);
+        $own = $this->resellerOwnUsage($rid);
+        $used = [];
+        foreach (['max_domains', 'max_mailboxes', 'max_databases', 'disk_bytes'] as $k) {
+            $used[$k] = (int) $clients[$k] + (int) $own[$k];
+        }
         Response::ok([
             'reseller_id' => $rid,
             'ceiling' => $this->resellerCeiling($rid),
-            'allocated' => $this->resellerAllocated($rid),
+            'allocated' => $used,
+            'own' => $own,
+            'clients' => $clients,
         ]);
+    }
+
+    /**
+     * Reseller-ova VLASTITA potrošnja: stvarni broj resursa pod njegovim izravnim pretplatama
+     * (stranice koje mu je admin dodijelio kao njegove). Razlikuje se od resellerAllocated, koji
+     * broji plan-limite njegovih KLIJENATA. Vraća iste ključeve radi zbrajanja.
+     *
+     * @return array{max_domains: int, max_mailboxes: int, max_databases: int, disk_bytes: int}
+     */
+    private function resellerOwnUsage(int $reseller_id): array
+    {
+        $sites = $this->app->db->one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(v.disk_bytes),0) AS disk
+             FROM vhosts v JOIN subscriptions s ON s.id = v.subscription_id
+             WHERE s.user_id = ? AND s.status = 'active'",
+            [$reseller_id]
+        );
+        $mailboxes = $this->app->db->one(
+            "SELECT COUNT(*) AS n FROM mailboxes mb
+             JOIN mail_domains md ON md.id = mb.mail_domain_id
+             JOIN subscriptions s ON s.id = md.subscription_id
+             WHERE s.user_id = ? AND s.status = 'active'",
+            [$reseller_id]
+        );
+        $databases = $this->app->db->one(
+            "SELECT COUNT(*) AS n FROM db_databases d
+             JOIN subscriptions s ON s.id = d.subscription_id
+             WHERE s.user_id = ? AND s.status = 'active'",
+            [$reseller_id]
+        );
+        return [
+            'max_domains' => (int) ($sites['n'] ?? 0),
+            'max_mailboxes' => (int) ($mailboxes['n'] ?? 0),
+            'max_databases' => (int) ($databases['n'] ?? 0),
+            'disk_bytes' => (int) ($sites['disk'] ?? 0),
+        ];
     }
 
     /** Ukupni limit resellera (zbroj njegovih aktivnih pretplata-paketa) ili null ako nema paket. */

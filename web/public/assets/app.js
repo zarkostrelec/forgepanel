@@ -3641,21 +3641,26 @@ const isResellerPlan = (p) => planFeatures(p).reseller === true;
 
 // reseller kvota: paket (ceiling) vs. raspodijeljeno klijentima (allocated)
 function resellerQuotaCard(q) {
-    const c = q.ceiling, a = q.allocated;
-    const bar = (label, used, limit, fmt = (x) => x) => {
-        const pct = limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0;
+    const c = q.ceiling, used = q.allocated, own = q.own || {}, cli = q.clients || {};
+    const bar = (label, key, fmt = (x) => x) => {
+        const u = Number(used[key] || 0), limit = Number(c[key] || 0);
+        const pct = limit > 0 ? Math.min(100, Math.round(u / limit * 100)) : 0;
         const tone = pct >= 90 ? 'meter-bad' : (pct >= 75 ? 'meter-warn' : 'meter-ok');
+        const o = Number(own[key] || 0), cl = Number(cli[key] || 0);
+        // razlomi na "tvoje" vs "klijenti" samo kad oboje doprinose
+        const split = (o > 0 && cl > 0)
+            ? `<span class="quota-split">${fmt(o)} ${t('reseller.own')} · ${fmt(cl)} ${t('reseller.clients')}</span>` : '';
         return `<div class="usage-item"><div class="row" style="justify-content:space-between">
-            <span>${label}</span><span class="mono small">${fmt(used)} / ${fmt(limit)}</span></div>
+            <span>${label}${split}</span><span class="mono small">${fmt(u)} / ${fmt(limit)}</span></div>
             <div class="meter"><span class="${tone}" style="width:${pct}%"></span></div></div>`;
     };
     return `<div class="card" style="margin-bottom:var(--gap)">
         <div class="card-head"><h2>${t('reseller.quota')}</h2></div>
         <p class="hint">${t('reseller.quota_hint')}</p>
-        ${bar(t('nav.websites'), a.max_domains, c.max_domains)}
-        ${bar(t('dash.mailboxes'), a.max_mailboxes, c.max_mailboxes)}
-        ${bar(t('nav.databases'), a.max_databases, c.max_databases)}
-        ${bar(t('dash.disk'), a.disk_bytes, c.disk_bytes, fmtBytes)}
+        ${bar(t('nav.websites'), 'max_domains')}
+        ${bar(t('dash.mailboxes'), 'max_mailboxes')}
+        ${bar(t('nav.databases'), 'max_databases')}
+        ${bar(t('dash.disk'), 'disk_bytes', fmtBytes)}
     </div>`;
 }
 

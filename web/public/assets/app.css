@@ -1052,6 +1052,7 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 /* labela lijevo, vrijednost desno (bez ovoga se "Web stranice0 / 10" zalijepi) */
 .usage-item .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .usage-item .row .mono { white-space: nowrap; }
+.quota-split { margin-left: 8px; font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }
 .meter-warn { background: var(--warn); }
 
 /* WAF whitelist inline remove */
