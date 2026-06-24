@@ -102,6 +102,7 @@
     "cron.enabled": "enabled",
     "cron.disabled": "paused",
     "files.upload": "Upload",
+    "files.redirect_to": "%s is a redirect — opened the file manager of its target %t",
     "files.download": "Download",
     "files.mkdir": "New directory",
     "files.uploaded": "uploaded",

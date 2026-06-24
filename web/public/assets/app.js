@@ -1238,7 +1238,9 @@ const bindVhostRows = () => main().querySelectorAll('[data-vhost]').forEach((tr)
 // ---- Siteovi: master-detail (lista + detalj panel) ----
 const dotKind = (v) => v.status === 'active' ? 'ok' : v.status === 'error' ? 'err' : v.status === 'suspended' ? 'warn' : 'info';
 const appLabel = (a) => ({ wordpress: 'WordPress', woocommerce: 'WooCommerce', laravel: 'Laravel', node: 'Node.js', nextjs: 'Next.js', astro: 'Astro', static: 'Static', php: 'PHP' }[a] || '');
-const stackText = (v) => `PHP ${esc(v.php_version)} · ${v.web_backend === 'nginx_apache' ? 'apache' : 'nginx'}`;
+const stackText = (v) => v.web_backend === 'redirect'
+    ? `redirect · ${v.redirect_code || 301}`
+    : `PHP ${esc(v.php_version)} · ${v.web_backend === 'nginx_apache' ? 'apache' : 'nginx'}`;
 const fmtNum = (n) => { n = Number(n) || 0; return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace('.0', '') + 'k' : String(n); };
 const parseSpark = (s) => { try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 const sparkBars = (arr) => {
@@ -1254,6 +1256,8 @@ const sitesList = (vhosts, selectedId) => {
     // matični vhost: eksplicitni parent_vhost_id (Dodaj poddomenu) ili heuristika po sufiksu
     // domene (staging i poddomene zavedene prije parent_vhost_id polja)
     const parentOf = (v) => {
+        // redirect domena se gnijezdi ispod domene na koju preusmjerava
+        if (v.web_backend === 'redirect' && v.redirect_target && domains.has(v.redirect_target)) return v.redirect_target;
         if (v.parent_vhost_id != null && byId.has(String(v.parent_vhost_id))) return byId.get(String(v.parent_vhost_id));
         const parts = v.domain.split('.');
         for (let i = 1; i < parts.length - 1; i++) {
@@ -1285,7 +1289,9 @@ const sitesList = (vhosts, selectedId) => {
         <tr class="row-link ${child ? 'child' : ''} ${v.id === selectedId ? 'selected' : ''}" data-vhost="${v.id}">
             <td><div class="site-cell${child ? ' nested' : ''}"><span class="status-dot ${dotKind(v)}"></span>
                 <div><a href="#/websites/${v.id}" class="mono site-name" data-open>${esc(v.domain)}</a>
-                ${appLabel(v.app_type) ? `<div class="sub">${appLabel(v.app_type)}</div>` : ''}</div></div></td>
+                ${v.web_backend === 'redirect'
+                    ? `<div class="sub redir">↪ ${esc(v.redirect_target || '')}</div>`
+                    : (appLabel(v.app_type) ? `<div class="sub">${appLabel(v.app_type)}</div>` : '')}</div></div></td>
             <td class="mono hide-sm sub2">${stackText(v)}</td>
             <td class="mono hide-md num sub2">${v.traffic_7d != null ? fmtNum(v.traffic_7d) : '—'}</td>
             <td>${sslBadge(v.ssl_days)}</td>
@@ -2323,7 +2329,16 @@ async function pageFiles() {
         return;
     }
     const saved = Number(sessionStorage.getItem('fp_files_vhost'));
-    const current = vhosts.find((v) => v.id === saved) ?? vhosts[0];
+    let current = vhosts.find((v) => v.id === saved) ?? vhosts[0];
+    // Redirect domena nema vlastiti docroot — file manager otvara matičnu (ciljnu) domenu
+    if (current.web_backend === 'redirect' && current.redirect_target) {
+        const target = vhosts.find((v) => v.domain === current.redirect_target);
+        if (target) {
+            toast(t('files.redirect_to').replace('%s', current.domain).replace('%t', target.domain), 'info');
+            current = target;
+            sessionStorage.setItem('fp_files_vhost', String(current.id));
+        }
+    }
     main().innerHTML = `
     <div class="page-head">
         <select id="fvh" class="input mono">${vhosts.map((v) =>

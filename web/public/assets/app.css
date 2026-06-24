@@ -901,6 +901,7 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 a.site-name { color: var(--ink); text-decoration: none; }
 a.site-name:hover { color: var(--accent-deep); text-decoration: underline; }
 .sites-table .sub { color: var(--ink-3); font-size: var(--fs-xs); margin-top: 1px; }
+.sites-table .sub.redir { color: var(--accent-deep); font-family: var(--mono); }
 .sites-table .sub2 { color: var(--ink-2); }
 .sites-table .num { text-align: right; }
 

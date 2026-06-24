@@ -102,6 +102,7 @@
     "cron.enabled": "aktivan",
     "cron.disabled": "pauziran",
     "files.upload": "Upload",
+    "files.redirect_to": "%s je redirect — otvoren je file manager matične domene %t",
     "files.download": "Preuzmi",
     "files.mkdir": "Novi direktorij",
     "files.uploaded": "uploadano",
