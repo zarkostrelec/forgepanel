@@ -3593,7 +3593,7 @@ async function pageUsers() {
                 <button class="btn ghost" data-toggle="${u.id}" data-status="${u.status}">${u.status === 'active' ? t('bulk.suspend') : t('bulk.unsuspend')}</button>
                 <button class="btn ghost" data-edit="${u.id}">${t('common.edit')}</button>
                 <button class="btn danger" data-del="${u.id}">${t('common.delete')}</button>
-            </td></tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`;
+            </td></tr>`).join('')}</tbody></table>` : `<div class="empty">${t(state.me.role === 'reseller' ? 'users.empty_clients' : 'users.empty')}</div>`;
 
     const canEditPlan = (p) => state.me.role === 'admin' || p.owner_user_id != null;
     const planRow = (p) => `<tr>
@@ -3827,11 +3827,13 @@ function brandingModal() {
             const r = await api('/branding', { method: 'PUT', body: f });
             state.branding = r;
             document.documentElement.style.setProperty('--accent', r.accent);
-            // Primijeni odmah na shell (logo, naziv, title) — bez reloada
+            // Primijeni odmah na shell (logo, naziv, title) — bez reloada.
+            // VAŽNO: samo logo .rail-label, ne svi (inače se nazivi nav stavki prepišu nazivom panela).
             document.title = r.panel_name || 'ForgePanel';
-            document.querySelectorAll('.rail-label').forEach((el) => { el.textContent = r.panel_name; });
+            const logoLabel = document.querySelector('.rail-logo .rail-label');
+            if (logoLabel) logoLabel.innerHTML = (r.panel_name && r.panel_name !== 'ForgePanel') ? esc(r.panel_name) : 'Forge<b>Panel</b>';
             const railLogo = document.querySelector('.rail-logo');
-            if (railLogo) railLogo.title = r.panel_name;
+            if (railLogo) railLogo.title = r.panel_name || 'ForgePanel';
             modal.close();
             toast(t('brand.saved'));
         } catch (err) { toast(err.message, 'err'); }

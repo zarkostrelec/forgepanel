@@ -413,6 +413,8 @@
     "users.password_keep": "Leave empty to keep current",
     "users.branding": "White-label",
     "users.plans": "Plans",
+    "users.empty": "No users yet.",
+    "users.empty_clients": "No clients yet.",
     "users.new_plan": "New plan",
     "users.plan": "Plan",
     "users.site_access": "Website access",

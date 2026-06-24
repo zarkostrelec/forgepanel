@@ -413,6 +413,8 @@
     "users.password_keep": "Ostavi prazno da zadržiš trenutnu",
     "users.branding": "White-label",
     "users.plans": "Planovi",
+    "users.empty": "Još nema korisnika.",
+    "users.empty_clients": "Još nemaš klijenata.",
     "users.new_plan": "Novi plan",
     "users.plan": "Plan",
     "users.site_access": "Pristup web stranicama",

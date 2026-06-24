@@ -1049,6 +1049,9 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
 /* klijentski dashboard — potrošnja plana */
 .usage-item { margin-bottom: 12px; }
 .usage-item:last-child { margin-bottom: 0; }
+/* labela lijevo, vrijednost desno (bez ovoga se "Web stranice0 / 10" zalijepi) */
+.usage-item .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.usage-item .row .mono { white-space: nowrap; }
 .meter-warn { background: var(--warn); }
 
 /* WAF whitelist inline remove */
