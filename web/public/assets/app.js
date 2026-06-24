@@ -2957,17 +2957,38 @@ async function pageDns() {
     }
 
     const zones = await api('/dns/zones');
+    // poddomenske zone (npr. radnovrijeme.avallus.org) gnijezde se ispod matične zone;
+    // njihovi zapisi su ionako dio matične zone pa nemaju CF export
+    const zdomains = new Set(zones.map((z) => z.domain));
+    const zoneParent = (z) => {
+        const parts = z.domain.split('.');
+        for (let i = 1; i < parts.length - 1; i++) {
+            const cand = parts.slice(i).join('.');
+            if (zdomains.has(cand)) return cand;
+        }
+        return null;
+    };
+    const sortedZones = [...zones].sort((a, b) => {
+        const ra = zoneParent(a) || a.domain, rb = zoneParent(b) || b.domain;
+        if (ra !== rb) return ra < rb ? -1 : 1;
+        const ca = zoneParent(a) ? 1 : 0, cb = zoneParent(b) ? 1 : 0;
+        if (ca !== cb) return ca - cb;
+        return a.domain < b.domain ? -1 : 1;
+    });
     document.getElementById('zones').innerHTML = zones.length ? `
         <table class="data"><thead><tr><th>${t('dns.zone')}</th><th class="hide-sm">Serial</th><th>DNSSEC</th><th>Cloudflare</th><th></th></tr></thead><tbody>
-        ${zones.map((z) => `<tr class="row-link" data-zone="${z.id}" data-domain="${esc(z.domain)}">
-            <td class="mono">${esc(z.domain)}</td>
+        ${sortedZones.map((z) => {
+            const child = zoneParent(z) !== null;
+            return `<tr class="row-link ${child ? 'child' : ''}" data-zone="${z.id}" data-domain="${esc(z.domain)}" data-child="${child ? '1' : '0'}">
+            <td class="mono"><span class="zone-name${child ? ' nested' : ''}">${esc(z.domain)}</span></td>
             <td class="mono hide-sm">${esc(z.serial)}</td>
             <td><span class="badge ${Number(z.dnssec_enabled) ? 'ok' : ''}">${Number(z.dnssec_enabled) ? 'on' : 'off'}</span></td>
-            <td>${z.cf_account ? `<span class="badge info">${icon('cloud', 12)} ${esc(z.cf_account)}</span>` : '<span class="mono" style="color:var(--ink-3)">—</span>'}</td>
+            <td>${child ? '<span class="mono" style="color:var(--ink-3)">—</span>' : (z.cf_account ? `<span class="badge info">${icon('cloud', 12)} ${esc(z.cf_account)}</span>` : '<span class="mono" style="color:var(--ink-3)">—</span>')}</td>
             <td class="num">
-                <button class="btn ghost" data-cfexp="${z.id}" data-domain="${esc(z.domain)}">${icon('cloud')}${t('dns.cf_export')}</button>
+                ${child ? '' : `<button class="btn ghost" data-cfexp="${z.id}" data-domain="${esc(z.domain)}">${icon('cloud')}${t('dns.cf_export')}</button>`}
                 <button class="btn danger" data-delzone="${z.id}">${t('common.delete')}</button></td>
-        </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('nav.dns')}: 0</div>`;
+        </tr>`;
+        }).join('')}</tbody></table>` : `<div class="empty">${t('nav.dns')}: 0</div>`;
 
     main().querySelectorAll('[data-cfexp]').forEach((b) => b.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -2981,10 +3002,10 @@ async function pageDns() {
         catch (err) { toast(err.message, 'err'); }
     }));
     main().querySelectorAll('[data-zone]').forEach((tr) => tr.addEventListener('click', () =>
-        dnsRecords(Number(tr.dataset.zone), tr.dataset.domain)));
+        dnsRecords(Number(tr.dataset.zone), tr.dataset.domain, tr.dataset.child === '1')));
 }
 
-async function dnsRecords(zoneId, domain) {
+async function dnsRecords(zoneId, domain, isChild = false) {
     const container = document.getElementById('records');
     container.innerHTML = `<div class="card mt">${t('common.loading')}</div>`;
     const records = await api(`/dns/zones/${zoneId}/records`);
@@ -2992,7 +3013,7 @@ async function dnsRecords(zoneId, domain) {
     container.innerHTML = `
     <div class="card mt">
         <div class="page-head"><h2 class="mono">${esc(domain)}</h2><div class="spacer"></div>
-            <button class="btn" id="cfexport">${icon('cloud')}${t('dns.cf_export')}</button></div>
+            ${isChild ? '' : `<button class="btn" id="cfexport">${icon('cloud')}${t('dns.cf_export')}</button>`}</div>
         <table class="data"><thead><tr>
             <th>${t('dns.name')}</th><th>Tip</th><th>${t('dns.content')}</th><th class="hide-sm">TTL</th><th class="hide-sm">Prio</th><th></th>
         </tr></thead><tbody>
@@ -3025,17 +3046,17 @@ async function dnsRecords(zoneId, domain) {
         if (!body.prio) delete body.prio;
         try {
             await api(`/dns/zones/${zoneId}/records`, { method: 'POST', body });
-            dnsRecords(zoneId, domain);
+            dnsRecords(zoneId, domain, isChild);
         } catch (err) { toast(err.message, 'err'); }
     });
     container.querySelectorAll('[data-delrec]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(t('common.confirm_delete'))) return;
-        try { await api(`/dns/zones/${zoneId}/records/${b.dataset.delrec}`, { method: 'DELETE' }); dnsRecords(zoneId, domain); }
+        try { await api(`/dns/zones/${zoneId}/records/${b.dataset.delrec}`, { method: 'DELETE' }); dnsRecords(zoneId, domain, isChild); }
         catch (err) { toast(err.message, 'err'); }
     }));
     container.querySelectorAll('[data-editrec]').forEach((b) => b.addEventListener('click', () =>
         editDnsRecordModal(zoneId, domain, records.find((r) => String(r.id) === b.dataset.editrec))));
-    container.querySelector('#cfexport').addEventListener('click', () => exportZoneToCloudflare(zoneId, domain));
+    container.querySelector('#cfexport')?.addEventListener('click', () => exportZoneToCloudflare(zoneId, domain));
 }
 
 // Export zone na Cloudflare — bira račun ako ih ima više
