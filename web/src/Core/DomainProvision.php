@@ -101,6 +101,86 @@ final class DomainProvision
     }
 
     /**
+     * Auto-provisioning DNS-a za NOVU poddomenu (vhost.create nad poddomenom). Za razliku
+     * od apex domene NE kreira novu zonu — dodaje A/AAAA poddomene u postojeću DNS infrastrukturu
+     * matičnog vhosta:
+     *   - lokalna BIND zona roditelja → kopira root (@) A/AAAA na labelu poddomene,
+     *   - ako je roditelj vezan na Cloudflare zonu → doda A zapis poddomene u tu zonu i
+     *     poveže poddomenu-vhost na istu zonu (cloudflare_zones) radi AutoSSL DNS-01 + cleanupa.
+     * Best-effort po pojedinom kanalu — greška ne ruši kreiranje poddomene.
+     *
+     * @return array{local: bool, cloudflare: bool}
+     */
+    public static function subdomain(App $app, int $parent_vhost_id, string $parent_domain, string $label, int $sub_vhost_id): array
+    {
+        $result = ['local' => false, 'cloudflare' => false];
+        $full = $label . '.' . $parent_domain;
+
+        // 1) Lokalna (BIND) zona roditelja → A/AAAA poddomene (kopija root @ → isti server)
+        $zone = $app->db->one('SELECT id FROM dns_zones WHERE domain = ?', [$parent_domain]);
+        if ($zone !== null) {
+            $zone_id = (int) $zone['id'];
+            $added = false;
+            $had_root = false;
+            foreach (['A', 'AAAA'] as $type) {
+                $root = $app->db->one(
+                    'SELECT content FROM dns_records WHERE zone_id = ? AND name = ? AND type = ? LIMIT 1',
+                    [$zone_id, '@', $type]
+                );
+                if ($root === null) {
+                    continue;
+                }
+                $had_root = true;
+                if ($app->db->one('SELECT 1 FROM dns_records WHERE zone_id = ? AND name = ? AND type = ?', [$zone_id, $label, $type]) !== null) {
+                    continue; // već postoji (idempotentno)
+                }
+                $app->db->run(
+                    'INSERT INTO dns_records (zone_id, name, type, content, ttl) VALUES (?, ?, ?, ?, 3600)',
+                    [$zone_id, $label, $type, $root['content']]
+                );
+                $added = true;
+            }
+            if ($added) {
+                try {
+                    DnsSync::sync($app, $zone_id);
+                    $result['local'] = true;
+                } catch (\Throwable $e) {
+                    error_log('forgepanel: subdomain local DNS sync: ' . $e->getMessage());
+                }
+            } elseif ($had_root) {
+                $result['local'] = true; // zapis je već postojao
+            }
+        }
+
+        // 2) Cloudflare zona roditelja → A zapis poddomene + veza poddomena-vhost ↔ ista zona
+        $cf = $app->db->one(
+            'SELECT z.zone_id, z.account_id, z.proxy_default, a.api_token
+             FROM cloudflare_zones z JOIN cloudflare_accounts a ON a.id = z.account_id
+             WHERE z.vhost_id = ? LIMIT 1',
+            [$parent_vhost_id]
+        );
+        if ($cf !== null) {
+            try {
+                $client = new CloudflareClient((new Crypto($app->config))->decrypt((string) $cf['api_token']));
+                $proxy = (bool) $cf['proxy_default'];
+                $client->createRecord((string) $cf['zone_id'], 'A', $full, self::serverIp($app), $proxy, 3600, null);
+                // Veza poddomene na istu CF zonu (idempotentno) → AutoSSL DNS-01 + cleanup
+                $app->db->run('DELETE FROM cloudflare_zones WHERE vhost_id = ?', [$sub_vhost_id]);
+                $app->db->run(
+                    "INSERT INTO cloudflare_zones (vhost_id, account_id, zone_id, dns_mode, proxy_default)
+                     VALUES (?, ?, ?, 'cloudflare', ?)",
+                    [$sub_vhost_id, (int) $cf['account_id'], (string) $cf['zone_id'], (int) $proxy]
+                );
+                $result['cloudflare'] = true;
+            } catch (\Throwable $e) {
+                error_log('forgepanel: subdomain CF DNS: ' . $e->getMessage());
+            }
+        }
+
+        return $result;
+    }
+
+    /**
      * Ukloni s povezane CF zone sve zapise koji pripadaju domeni (apex + poddomene).
      * Veza se traži po vhost_id (cloudflare_zones); best-effort po pojedinom zapisu.
      * Zovi PRIJE brisanja vhosta — CASCADE briše cloudflare_zones vezu.

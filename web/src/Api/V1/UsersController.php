@@ -401,12 +401,13 @@ final class UsersController extends Controller
         $features['reseller'] = $ctx->isAdmin() && (bool) ($request->body['reseller'] ?? false);
 
         $this->app->db->run(
-            'INSERT INTO plans (owner_user_id, name, disk_bytes, max_domains, max_mailboxes, max_databases, php_versions, features, cpu_quota_pct, memory_max_bytes, tasks_max)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO plans (owner_user_id, name, disk_bytes, max_domains, max_subdomains, max_mailboxes, max_databases, php_versions, features, cpu_quota_pct, memory_max_bytes, tasks_max)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $owner, $name,
                 max(0, $request->int('disk_bytes', 10737418240)),
                 max(1, $request->int('max_domains', 5)),
+                max(0, $request->int('max_subdomains', 10)),
                 max(0, $request->int('max_mailboxes', 10)),
                 max(0, $request->int('max_databases', 5)),
                 json_encode(array_values($php_versions)),
@@ -444,11 +445,12 @@ final class UsersController extends Controller
         }
 
         $this->app->db->run(
-            'UPDATE plans SET name = ?, disk_bytes = ?, max_domains = ?, max_mailboxes = ?, max_databases = ?, php_versions = ?, features = ?, cpu_quota_pct = ?, memory_max_bytes = ?, tasks_max = ? WHERE id = ?',
+            'UPDATE plans SET name = ?, disk_bytes = ?, max_domains = ?, max_subdomains = ?, max_mailboxes = ?, max_databases = ?, php_versions = ?, features = ?, cpu_quota_pct = ?, memory_max_bytes = ?, tasks_max = ? WHERE id = ?',
             [
                 $name,
                 max(0, $request->int('disk_bytes', (int) $plan['disk_bytes'])),
                 max(1, $request->int('max_domains', (int) $plan['max_domains'])),
+                max(0, $request->int('max_subdomains', (int) ($plan['max_subdomains'] ?? 10))),
                 max(0, $request->int('max_mailboxes', (int) $plan['max_mailboxes'])),
                 max(0, $request->int('max_databases', (int) $plan['max_databases'])),
                 json_encode(array_values($php_versions)),

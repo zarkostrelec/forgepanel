@@ -36,6 +36,7 @@ CREATE TABLE plans (
     name            VARCHAR(64) NOT NULL,
     disk_bytes      BIGINT UNSIGNED NOT NULL,
     max_domains     INT UNSIGNED NOT NULL,
+    max_subdomains  INT UNSIGNED NOT NULL DEFAULT 10,       -- limit poddomena po pretplati
     max_mailboxes   INT UNSIGNED NOT NULL,
     max_databases   INT UNSIGNED NOT NULL,
     php_versions    JSON NOT NULL,                          -- ["8.1","8.2","8.3","8.4"]
@@ -62,6 +63,7 @@ CREATE TABLE vhosts (
     id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     domain          VARCHAR(255) NOT NULL UNIQUE,
     subscription_id INT UNSIGNED NOT NULL,
+    parent_vhost_id INT UNSIGNED NULL,                      -- poddomena: matični vhost (Dodaj poddomenu)
     sys_user        VARCHAR(32) NOT NULL UNIQUE,            -- vh_<id>
     php_version     VARCHAR(8) NOT NULL DEFAULT '8.4',
     web_backend     ENUM('nginx','nginx_apache','php_legacy','redirect') NOT NULL DEFAULT 'nginx',
@@ -76,6 +78,7 @@ CREATE TABLE vhosts (
     php_settings    JSON NULL,                             -- per-domena PHP override (memory_limit, upload_max_filesize, ...)
     stats_at        DATETIME NULL,                         -- zadnje osvježavanje statistika
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_parent_vhost (parent_vhost_id),
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

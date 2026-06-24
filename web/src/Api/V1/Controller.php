@@ -79,9 +79,9 @@ abstract class Controller
         $plan = $this->app->db->one("SELECT id FROM plans WHERE name = 'Admin' AND owner_user_id IS NULL");
         if ($plan === null) {
             $this->app->db->run(
-                "INSERT INTO plans (owner_user_id, name, disk_bytes, max_domains, max_mailboxes,
+                "INSERT INTO plans (owner_user_id, name, disk_bytes, max_domains, max_subdomains, max_mailboxes,
                                     max_databases, php_versions, features, cpu_quota_pct, memory_max_bytes, tasks_max)
-                 VALUES (NULL, 'Admin', 1099511627776, 10000, 10000, 10000, ?, '{}', 400, 4294967296, 1024)",
+                 VALUES (NULL, 'Admin', 1099511627776, 10000, 10000, 10000, 10000, ?, '{}', 400, 4294967296, 1024)",
                 [json_encode(['8.1', '8.2', '8.3', '8.4', '8.5'])]
             );
             $plan_id = $this->app->db->lastId();

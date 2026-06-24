@@ -508,6 +508,16 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
     box-shadow: 0 0 0 3px var(--accent-glow);
 }
 .field .hint, .hint { font-size: var(--fs-xs); color: var(--ink-3); }
+/* Poddomena: input s nepromjenjivim sufiksom matične domene (Plesk-style) */
+.sub-input { display: flex; align-items: stretch; }
+.sub-input input { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.sub-suffix {
+    display: flex; align-items: center; padding: 0 10px; white-space: nowrap;
+    background: var(--surface-2); color: var(--ink-2);
+    border: 1px solid var(--line); border-left: 0;
+    border-top-right-radius: var(--radius-sm); border-bottom-right-radius: var(--radius-sm);
+    font-size: var(--fs-sm); max-width: 55%; overflow: hidden; text-overflow: ellipsis;
+}
 
 .alert { padding: 9px 12px; border-radius: var(--radius-sm); font-size: var(--fs-sm); margin-bottom: 12px; border: 1px solid; }
 .alert.err { color: var(--danger-deep); border-color: color-mix(in oklab, var(--danger) 35%, transparent); background: var(--danger-soft); }

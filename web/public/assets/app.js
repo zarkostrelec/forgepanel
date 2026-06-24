@@ -1250,8 +1250,11 @@ const sparkBars = (arr) => {
 const sitesList = (vhosts, selectedId) => {
     if (!vhosts.length) return `<div class="empty">${t('nav.websites')}: 0</div>`;
     const domains = new Set(vhosts.map((v) => v.domain));
-    // matični vhost (ako poddomena/staging: domena završava na ".<parent>" gdje parent postoji u listi)
+    const byId = new Map(vhosts.map((v) => [String(v.id), v.domain]));
+    // matični vhost: eksplicitni parent_vhost_id (Dodaj poddomenu) ili heuristika po sufiksu
+    // domene (staging i poddomene zavedene prije parent_vhost_id polja)
     const parentOf = (v) => {
+        if (v.parent_vhost_id != null && byId.has(String(v.parent_vhost_id))) return byId.get(String(v.parent_vhost_id));
         const parts = v.domain.split('.');
         for (let i = 1; i < parts.length - 1; i++) {
             const cand = parts.slice(i).join('.');
@@ -1343,6 +1346,7 @@ async function pageWebsites() {
         <div class="spacer"></div>
         <span class="sites-count mono">${vhosts.length} ${t('sites.sites')} · ${domainCount} ${t('sites.domains')}</span>
         <button class="btn" id="bulkbtn">${t('bulk.title')}</button>
+        <button class="btn" id="newsub">${icon('plus')}${t('subdomain.create')}</button>
         <button class="btn primary" id="new">${icon('plus')}${t('vhost.create')}</button>
     </div>
     <div id="bulkbar" hidden class="card mb"></div>
@@ -1355,6 +1359,7 @@ async function pageWebsites() {
     const pc = document.getElementById('pc');
     if (probCount) pc.textContent = probCount; else pc.remove();
     document.getElementById('new').addEventListener('click', createVhostModal);
+    document.getElementById('newsub').addEventListener('click', () => createSubdomainModal(vhosts, selectedId));
 
     const filtered = () => vhosts.filter((v) => filter === 'all' ? true : filter === 'live' ? v.status === 'active' : isProblem(v));
 
@@ -1545,6 +1550,67 @@ async function createVhostModal() {
             location.hash = '#/websites';
             route();
         } catch (err) { toast(err.message, 'err'); }
+    });
+}
+
+// Dodaj poddomenu (Plesk-style) — bira matičnu domenu + labelu; backend automatski
+// kreira vlastiti docroot/FPM/SSL i DNS u infrastrukturi roditelja.
+async function createSubdomainModal(vhostsHint = null, preselectId = null) {
+    let sites = Array.isArray(vhostsHint) ? vhostsHint : [];
+    if (!sites.length) { try { sites = await api('/vhosts'); } catch { /* */ } }
+    // Moguća matična domena = prava (hostana) stranica, ne redirect i ne sama poddomena
+    const parents = sites.filter((s) => s.web_backend !== 'redirect' && !s.parent_vhost_id);
+    if (!parents.length) { toast(t('subdomain.no_parent'), 'err'); return; }
+    // Ako je odabran red bio poddomena → preselektiraj njenog roditelja
+    const pre = sites.find((s) => String(s.id) === String(preselectId));
+    const preParentId = pre ? (pre.parent_vhost_id || pre.id) : null;
+    const curId = parents.some((s) => String(s.id) === String(preParentId)) ? String(preParentId) : String(parents[0].id);
+    const domainOf = (id) => parents.find((s) => String(s.id) === String(id))?.domain || '';
+
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('subdomain.create')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="sf">
+            <div class="field"><label>${t('subdomain.parent')}</label>
+                <select name="parent_id" id="sparent" class="mono">
+                    ${parents.map((s) => `<option value="${s.id}" ${String(s.id) === curId ? 'selected' : ''}>${esc(s.domain)}</option>`).join('')}
+                </select></div>
+            <div class="field"><label>${t('subdomain.label')}</label>
+                <div class="sub-input">
+                    <input name="label" required placeholder="blog" class="mono" autocomplete="off" id="slabel">
+                    <span class="sub-suffix" id="ssuffix">.${esc(domainOf(curId))}</span>
+                </div>
+                <span class="hint">${t('subdomain.hint')}</span></div>
+            <div class="field"><label>${t('vhost.php_version')}</label>
+                <select name="php_version">${['8.5', '8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
+            <div class="dialog-foot">
+                <button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('common.create')}</button>
+            </div>
+        </form>`);
+    const parentSel = modal.querySelector('#sparent');
+    const suffix = modal.querySelector('#ssuffix');
+    parentSel.addEventListener('change', () => { suffix.textContent = '.' + domainOf(parentSel.value); });
+    modal.querySelector('#sf').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = Object.fromEntries(new FormData(e.target));
+        const fqdn = `${(f.label || '').toLowerCase()}.${domainOf(f.parent_id)}`;
+        try {
+            const r = await api(`/vhosts/${f.parent_id}/subdomains`, { method: 'POST', body: { label: f.label, php_version: f.php_version } });
+            modal.close();
+            watchTask(r.task_id, `vhost.create ${fqdn}`);
+            if (r.ssl_task_id) watchTask(r.ssl_task_id, `ssl.issue ${fqdn}`);
+            if (r.dns && (r.dns.local || r.dns.cloudflare)) toast(t('subdomain.dns_done'), 'ok');
+            location.hash = '#/websites';
+            route();
+        } catch (err) {
+            const m = {
+                plan_subdomain_limit_reached: t('subdomain.err_limit'),
+                domain_exists: t('subdomain.err_exists'),
+                parent_not_hostable: t('subdomain.err_parent'),
+                invalid_subdomain: t('subdomain.err_label'),
+            }[err.message];
+            toast(m || err.message, 'err');
+        }
     });
 }
 
@@ -3667,6 +3733,7 @@ function planModal(plan = null, presetReseller = false) {
             <div class="grid cols-2">
                 <div class="field"><label>Disk (GB)</label><input name="disk_gb" type="number" value="${edit ? Math.round(plan.disk_bytes / 1073741824) : 10}" class="mono"></div>
                 <div class="field"><label>Max domena</label><input name="max_domains" type="number" value="${v(5, 'max_domains')}" class="mono"></div>
+                <div class="field"><label>${t('plan.max_subdomains')}</label><input name="max_subdomains" type="number" value="${v(10, 'max_subdomains')}" class="mono"></div>
                 <div class="field"><label>Max mailboxa</label><input name="max_mailboxes" type="number" value="${v(10, 'max_mailboxes')}" class="mono"></div>
                 <div class="field"><label>Max baza</label><input name="max_databases" type="number" value="${v(5, 'max_databases')}" class="mono"></div>
             </div>
@@ -3685,6 +3752,7 @@ function planModal(plan = null, presetReseller = false) {
             name: f.name,
             disk_bytes: Number(f.disk_gb) * 1073741824,
             max_domains: Number(f.max_domains),
+            max_subdomains: Number(f.max_subdomains),
             max_mailboxes: Number(f.max_mailboxes),
             max_databases: Number(f.max_databases),
             php_versions: php,

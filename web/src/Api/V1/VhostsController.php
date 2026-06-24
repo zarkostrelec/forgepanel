@@ -30,6 +30,7 @@ final class VhostsController extends Controller
     {
         $router->add('GET', '/api/v1/vhosts', $this->index(...));
         $router->add('POST', '/api/v1/vhosts', $this->create(...));
+        $router->add('POST', '/api/v1/vhosts/{id}/subdomains', $this->createSubdomain(...));
         $router->add('GET', '/api/v1/vhosts/{id}', $this->show(...));
         $router->add('DELETE', '/api/v1/vhosts/{id}', $this->delete(...));
         $router->add('PUT', '/api/v1/vhosts/{id}/php', $this->setPhp(...));
@@ -266,6 +267,123 @@ final class VhostsController extends Controller
     }
 
     /**
+     * Dodaj poddomenu (Plesk-style) — prvorazredni vhost pod matičnom domenom: vlastiti
+     * docroot, sistemski user, FPM pool, SSL i uptime proba (sve kroz isti vhost.create task),
+     * a DNS se dodaje u POSTOJEĆU infrastrukturu roditelja (lokalna zona i/ili CF zona),
+     * ne kao nova zona. Limit broja poddomena ide po pretplati (plan.max_subdomains).
+     */
+    private function createSubdomain(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'vhosts:write');
+        $this->requireActiveLicense();
+        $parent = $ctx->vhostOr404((int) $request->param('id'));
+
+        // Poddomena se radi samo nad pravom (hostanom) stranicom, ne nad redirectom,
+        // i ne ugnježđujemo poddomene (parent ne smije ni sam biti poddomena).
+        if ($parent['web_backend'] === 'redirect') {
+            throw new HttpException(422, 'parent_not_hostable');
+        }
+        if ($parent['parent_vhost_id'] !== null) {
+            throw new HttpException(422, 'parent_is_subdomain');
+        }
+
+        // Labela poddomene: jedna ili više pod-labela (npr. "api" ili "api.v2")
+        $label = strtolower(trim($request->str('label') ?? ''));
+        if (!preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/', $label)) {
+            throw new HttpException(422, 'invalid_subdomain');
+        }
+        $domain = $label . '.' . $parent['domain'];
+        if (strlen($domain) > 255) {
+            throw new HttpException(422, 'invalid_domain');
+        }
+
+        $php_version = $request->str('php_version') ?? (string) $parent['php_version'];
+        if (!in_array($php_version, self::PHP_VERSIONS, true)) {
+            throw new HttpException(422, 'invalid_php_version');
+        }
+        $web_backend = $request->str('web_backend') === 'nginx_apache' ? 'nginx_apache' : 'nginx';
+
+        // Poddomena pripada istoj pretplati kao matični vhost
+        $subscription_id = (int) $parent['subscription_id'];
+        $sub = $this->app->db->one(
+            'SELECT s.id, p.max_subdomains, p.php_versions, p.cpu_quota_pct, p.memory_max_bytes, p.tasks_max
+             FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+             WHERE s.id = ? AND s.status = \'active\'',
+            [$subscription_id]
+        ) ?? throw new HttpException(422, 'subscription_inactive');
+
+        $allowed_php = json_decode((string) $sub['php_versions'], true) ?: [];
+        if (!$ctx->isAdmin() && !in_array($php_version, $allowed_php, true)) {
+            throw new HttpException(422, 'php_version_not_in_plan');
+        }
+
+        // Limit poddomena po pretplati (admin bez limita)
+        $count = $this->app->db->one(
+            'SELECT COUNT(*) AS n FROM vhosts WHERE subscription_id = ? AND parent_vhost_id IS NOT NULL',
+            [$subscription_id]
+        );
+        if (!$ctx->isAdmin() && (int) $count['n'] >= (int) $sub['max_subdomains']) {
+            throw new HttpException(422, 'plan_subdomain_limit_reached');
+        }
+
+        if ($this->app->db->one('SELECT 1 FROM vhosts WHERE domain = ?', [$domain]) !== null) {
+            throw new HttpException(409, 'domain_exists');
+        }
+
+        $this->app->db->run(
+            'INSERT INTO vhosts (domain, subscription_id, parent_vhost_id, sys_user, php_version, web_backend, docroot, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, \'creating\')',
+            [$domain, $subscription_id, (int) $parent['id'], 'pending', $php_version, $web_backend, "/var/www/vhosts/$domain/httpdocs"]
+        );
+        $vhost_id = $this->app->db->lastId();
+        $this->app->db->run('UPDATE vhosts SET sys_user = ? WHERE id = ?', ['vh_' . $vhost_id, $vhost_id]);
+
+        $task_id = $this->app->tasks->enqueue('vhost.create', [
+            'vhost_id' => $vhost_id,
+            'domain' => $domain,
+            'php_version' => $php_version,
+            'cpu_quota_pct' => (int) $sub['cpu_quota_pct'],
+            'memory_max_bytes' => (int) $sub['memory_max_bytes'],
+            'tasks_max' => (int) $sub['tasks_max'],
+            'redirect_target' => null,
+            'redirect_code' => 301,
+        ], $ctx->user_id);
+
+        // Auto-DNS u POSTOJEĆOJ infrastrukturi roditelja (lokalna zona i/ili CF). MORA prije
+        // ssl.issue: agentov AutoSSL po CF vezi bira DNS-01 umjesto http-01. Best-effort.
+        $dns = ['local' => false, 'cloudflare' => false];
+        try {
+            $dns = \ForgePanel\Web\Core\DomainProvision::subdomain(
+                $this->app, (int) $parent['id'], (string) $parent['domain'], $label, $vhost_id
+            );
+        } catch (\Throwable $e) {
+            error_log('forgepanel: subdomain.create DNS: ' . $e->getMessage());
+        }
+
+        // AutoSSL: samo hostname poddomene (bez www. — ne postoji www.<sub> u DNS-u)
+        $contact = $this->setting('acme_email', $ctx->email);
+        $ssl_task_id = $this->app->tasks->enqueue('ssl.issue', [
+            'hostnames' => [$domain],
+            'contact_email' => $contact,
+            'vhost_id' => $vhost_id,
+        ], $ctx->user_id);
+        $this->app->db->run(
+            'INSERT INTO ssl_certs (vhost_id, hostname, type, cert_path, key_path, expires_at, status)
+             VALUES (?, ?, \'letsencrypt\', ?, ?, NOW(), \'pending\')',
+            [$vhost_id, $domain, "/etc/forgepanel/ssl/$domain/fullchain.pem", "/etc/forgepanel/ssl/$domain/privkey.pem"]
+        );
+
+        // Eksterni uptime monitoring — i poddomena dobiva HTTPS probu
+        $this->app->db->run(
+            "INSERT INTO uptime_probes (vhost_id, type, target, interval_s) VALUES (?, 'https', ?, 300)",
+            [$vhost_id, $domain]
+        );
+
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'subdomain.create', ['domain' => $domain, 'parent' => $parent['domain']], $request->ip);
+        Response::ok(['vhost_id' => $vhost_id, 'task_id' => $task_id, 'ssl_task_id' => $ssl_task_id, 'dns' => $dns], 202);
+    }
+
+    /**
      * Auto-provisioning DNS-a za novu domenu. Vraća sažetak za UI (toast).
      * @return array<string, mixed>|null
      */
@@ -319,6 +437,18 @@ final class VhostsController extends Controller
     {
         $ctx = $this->ctx($request, 'vhosts:write');
         $vhost = $ctx->vhostOr404((int) $request->param('id'));
+
+        // Brisanje matične domene briše i sve njene poddomene (vlastiti FPM/docroot/SSL/DNS).
+        foreach ($this->app->db->all('SELECT id, domain, php_version FROM vhosts WHERE parent_vhost_id = ?', [(int) $vhost['id']]) as $child) {
+            $this->app->tasks->enqueue('vhost.delete', [
+                'vhost_id' => (int) $child['id'],
+                'domain' => $child['domain'],
+                'php_version' => $child['php_version'],
+            ], $ctx->user_id);
+            $this->cleanupCloudflareDns((int) $child['id'], (string) $child['domain']);
+            $this->app->db->run('DELETE FROM vhosts WHERE id = ?', [(int) $child['id']]);
+            $this->cleanupSubdomainDns((string) $child['domain']);
+        }
 
         $task_id = $this->app->tasks->enqueue('vhost.delete', [
             'vhost_id' => (int) $vhost['id'],
