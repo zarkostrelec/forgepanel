@@ -659,6 +659,7 @@ select.mono, input.mono, textarea.mono { font-family: var(--font-mono); font-siz
 .dialog-head { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
 .dialog-head h1 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dialog-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+.confirm-msg { margin: 2px 0 0; color: var(--ink-2); line-height: 1.5; word-break: break-word; }
 
 /* ---------------------------------------------------------------- command palette */
 .palette-dialog {

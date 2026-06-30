@@ -222,6 +222,57 @@ function openModal(html, { wide = false, editor = false } = {}) {
     return modal;
 }
 
+// Temirani confirm (zamjena za native await confirmDialog()) — Promise<boolean>.
+// Escape / klik na pozadinu / X / Odustani → false; potvrdni gumb → true.
+function confirmDialog(message, opts = {}) {
+    const { title, confirmText = t('common.confirm'), cancelText = t('common.cancel'), danger = true } = opts;
+    return new Promise((resolve) => {
+        const modal = openModal(`
+            <div class="dialog-head"><h1>${esc(title || t('common.confirm_title'))}</h1>
+                <button class="btn ghost icon" data-close aria-label="${t('common.cancel')}">${icon('x')}</button></div>
+            <p class="confirm-msg">${esc(message)}</p>
+            <div class="dialog-foot">
+                <button type="button" class="btn" data-close>${esc(cancelText)}</button>
+                <button type="button" class="btn ${danger ? 'danger' : 'primary'}" data-ok>${esc(confirmText)}</button>
+            </div>`);
+        const realClose = modal.close.bind(modal);
+        let settled = false;
+        const finish = (val) => { if (settled) return; settled = true; resolve(val); realClose(); };
+        modal.close = () => finish(false); // Escape / pozadina / data-close
+        modal.querySelector('[data-ok]').addEventListener('click', () => finish(true));
+        modal.querySelector('[data-ok]').focus();
+    });
+}
+
+// Temirani prompt (zamjena za native prompt()) — Promise<string|null>.
+// Submit → vrijednost inputa; Escape / pozadina / X / Odustani → null.
+function promptDialog(message, opts = {}) {
+    const { title, defaultValue = '', placeholder = '', confirmText = t('common.ok'), mono = false } = opts;
+    return new Promise((resolve) => {
+        const modal = openModal(`
+            <div class="dialog-head"><h1>${esc(title || t('common.input_title'))}</h1>
+                <button class="btn ghost icon" data-close aria-label="${t('common.cancel')}">${icon('x')}</button></div>
+            <form id="pf">
+                <div class="field"><label>${esc(message)}</label>
+                    <input name="v" class="${mono ? 'mono' : ''}" value="${esc(defaultValue)}" placeholder="${esc(placeholder)}" autocomplete="off"></div>
+                <div class="dialog-foot">
+                    <button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                    <button type="submit" class="btn primary">${esc(confirmText)}</button></div>
+            </form>`);
+        const realClose = modal.close.bind(modal);
+        let settled = false;
+        const finish = (val) => { if (settled) return; settled = true; resolve(val); realClose(); };
+        modal.close = () => finish(null);
+        modal.querySelector('#pf').addEventListener('submit', (e) => {
+            e.preventDefault();
+            finish(modal.querySelector('input[name="v"]').value);
+        });
+        const inp = modal.querySelector('input[name="v"]');
+        inp.focus();
+        inp.select();
+    });
+}
+
 // ---------------------------------------------------------------- <fp-palette> — Ctrl+K command palette
 class FpPalette extends HTMLElement {
     async open() {
@@ -939,7 +990,7 @@ async function renderAiDrawer() {
         renderThread();
     });
     drawer.querySelector('[data-disconnect]')?.addEventListener('click', async () => {
-        if (!confirm(t('assistant.confirm_disconnect'))) return;
+        if (!await confirmDialog(t('assistant.confirm_disconnect'))) return;
         try { await api('/assistant/key', { method: 'DELETE' }); state.aiThread = []; localStorage.removeItem('fp_ai_thread'); renderAiDrawer(); }
         catch (err) { toast(err.message, 'err'); }
     });
@@ -981,7 +1032,7 @@ const svcActionsHtml = (name) => state.me?.role !== 'admin' ? '' : `<span class=
     <button class="svc-act stop" data-svc-action="stop" data-svc="${esc(name)}" title="${t('svc.stop')}" aria-label="${t('svc.stop')} ${esc(name)}">${icon('stop', 13)}</button></span>`;
 
 async function doServiceAction(service, action, btn) {
-    if (action === 'stop' && !confirm(`${t('svc.confirm_stop')} ${service}?`)) return;
+    if (action === 'stop' && !await confirmDialog(`${t('svc.confirm_stop')} ${service}?`)) return;
     const grp = btn.closest('.svc-actions');
     grp?.querySelectorAll('button').forEach((b) => { b.disabled = true; });
     try {
@@ -2013,7 +2064,7 @@ async function pageWebsiteDetail(id) {
         } catch (err) { toast(err.message, 'err'); }
     });
     main().querySelector('#del').addEventListener('click', async () => {
-        if (!confirm(`${t('common.confirm_delete')} (${vhost.domain})`)) return;
+        if (!await confirmDialog(`${t('common.confirm_delete')} (${vhost.domain})`)) return;
         try {
             const r = await api(`/vhosts/${id}`, { method: 'DELETE' });
             watchTask(r.task_id, `vhost.delete ${vhost.domain}`);
@@ -2069,7 +2120,7 @@ async function pageWebsiteDetail(id) {
         }));
     }
     main().querySelector('#newstg').addEventListener('click', async () => {
-        const sub = prompt(t('staging.prompt'), 'staging');
+        const sub = await promptDialog(t('staging.prompt'), { defaultValue: 'staging' });
         if (!sub) return;
         try {
             const r = await api(`/vhosts/${id}/staging`, { method: 'POST', body: { subdomain: sub } });
@@ -2149,7 +2200,7 @@ async function loadInstalledApps(vhost, box) {
         <div class="hr" style="margin:16px 0 14px"></div>`;
 
     box.querySelectorAll('[data-uninstall]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('apps.uninstall_confirm'))) return;
+        if (!await confirmDialog(t('apps.uninstall_confirm'))) return;
         try {
             await api(`/vhosts/${vhost.id}/apps/${b.dataset.uninstall}`, { method: 'DELETE' });
             toast(t('apps.uninstalled'));
@@ -2167,7 +2218,7 @@ async function installApp(vhost, appId, result) {
     };
     try {
         if (appId === 'node' || appId === 'python') {
-            const entry = prompt(t(appId === 'node' ? 'apps.node_entry' : 'apps.python_entry'), appId === 'node' ? 'index.js' : 'app:app');
+            const entry = await promptDialog(t(appId === 'node' ? 'apps.node_entry' : 'apps.python_entry'), { defaultValue: appId === 'node' ? 'index.js' : 'app:app', mono: true });
             if (!entry) return;
             const r = await api(`/vhosts/${vhost.id}/${appId}`, { method: 'POST', body: { entry } });
             watchTask(r.task_id, `${appId} ${vhost.domain}`);
@@ -2248,7 +2299,7 @@ async function gitSection(vhost, container) {
         } catch (err) { toast(err.message, 'err'); }
     });
     container.querySelector('#gremove')?.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/vhosts/${vhost.id}/git`, { method: 'DELETE' }); gitSection(vhost, container); }
         catch (err) { toast(err.message, 'err'); }
     });
@@ -2288,7 +2339,7 @@ async function ftpSection(vhost, container) {
         } catch (err) { toast(err.message, 'err'); }
     });
     container.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/vhosts/${vhost.id}/ftp/${b.dataset.del}`, { method: 'DELETE' }); ftpSection(vhost, container); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -2335,7 +2386,7 @@ async function cronSection(vhost, container) {
         } catch (err) { toast(err.message, 'err'); }
     });
     container.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/vhosts/${vhost.id}/cron/${b.dataset.del}`, { method: 'DELETE' }); cronSection(vhost, container); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -2407,7 +2458,7 @@ async function fileManager(vhost, container, relPath) {
     });
     delBtn.addEventListener('click', async () => {
         const names = [...container.querySelectorAll('.fsel:checked')].map((c) => c.value);
-        if (names.length === 0 || !confirm(`${t('files.confirm_delete_n')} (${names.length})`)) return;
+        if (names.length === 0 || !await confirmDialog(`${t('files.confirm_delete_n')} (${names.length})`)) return;
         try {
             for (const name of names) {
                 await api(`/vhosts/${vhost.id}/files/delete`, { method: 'POST', body: { path: `${relPath}/${name}` } });
@@ -2442,7 +2493,7 @@ async function fileManager(vhost, container, relPath) {
         } catch (err) { toast(err.message, 'err'); }
     });
     container.querySelector('[data-mkdir]').addEventListener('click', async () => {
-        const name = prompt('Naziv direktorija:');
+        const name = await promptDialog(t('files.new_dir_name'), { mono: true });
         if (!name) return;
         try {
             await api(`/vhosts/${vhost.id}/files/mkdir`, { method: 'POST', body: { path: `${relPath}/${name}` } });
@@ -2519,7 +2570,7 @@ async function openFileEditor(vhost, container, relPath, entry) {
         } catch (err) { toast(err.message, 'err'); }
     });
     modal.querySelector('#fdel').addEventListener('click', async () => {
-        if (!confirm(`${t('common.confirm_delete')} (${entry.name})`)) return;
+        if (!await confirmDialog(`${t('common.confirm_delete')} (${entry.name})`)) return;
         try {
             await api(`/vhosts/${vhost.id}/files/delete`, { method: 'POST', body: { path: filePath } });
             modal.close();
@@ -2625,7 +2676,7 @@ const dbItemsHtml = (dbs, { showDomain = false } = {}) => dbs.length ? dbs.map((
 // veže akcije nad db-itemima; `refresh` se zove nakon mutacije (stranica ili sekcija)
 function bindDbItems(scope, dbs, refresh) {
     scope.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(`${t('common.confirm_delete')} (${b.dataset.name})`)) return;
+        if (!await confirmDialog(`${t('common.confirm_delete')} (${b.dataset.name})`)) return;
         try { await api(`/databases/${b.dataset.del}`, { method: 'DELETE' }); refresh(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -2635,7 +2686,7 @@ function bindDbItems(scope, dbs, refresh) {
         editDbUserModal(b.dataset.db, d.users.find((x) => String(x.id) === b.dataset.uedit), refresh);
     }));
     scope.querySelectorAll('[data-udel]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(`${t('common.confirm_delete')} (${b.dataset.uname})`)) return;
+        if (!await confirmDialog(`${t('common.confirm_delete')} (${b.dataset.uname})`)) return;
         try { await api(`/databases/${b.dataset.db}/users/${b.dataset.udel}`, { method: 'DELETE' }); refresh(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -3087,7 +3138,7 @@ async function pageCloudflare() {
         catch (err) { toast(err.message, 'err'); }
     });
     main().querySelectorAll('[data-cfdel]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/cloudflare/account/${b.dataset.cfdel}`, { method: 'DELETE' }); pageCloudflare(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -3234,7 +3285,7 @@ async function pageDns() {
 
     main().querySelectorAll('[data-delzone]').forEach((b) => b.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/dns/zones/${b.dataset.delzone}`, { method: 'DELETE' }); pageDns(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -3287,7 +3338,7 @@ async function dnsRecords(zoneId, domain, isChild = false) {
         } catch (err) { toast(err.message, 'err'); }
     });
     container.querySelectorAll('[data-delrec]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/dns/zones/${zoneId}/records/${b.dataset.delrec}`, { method: 'DELETE' }); dnsRecords(zoneId, domain, isChild); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -3388,7 +3439,7 @@ async function pageMail() {
     <div id="detail"></div>`;
 
     document.getElementById('wmsetup')?.addEventListener('click', async () => {
-        const hostname = prompt(t('mail.webmail_hostname'), `webmail.${location.hostname}`);
+        const hostname = await promptDialog(t('mail.webmail_hostname'), { defaultValue: `webmail.${location.hostname}`, mono: true });
         if (!hostname) return;
         try {
             const r = await api('/mail/webmail', { method: 'POST', body: { hostname } });
@@ -3428,7 +3479,7 @@ async function pageMail() {
 
     main().querySelectorAll('[data-deldom]').forEach((b) => b.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm(t('mail.confirm_delete_domain'))) return;
+        if (!await confirmDialog(t('mail.confirm_delete_domain'))) return;
         try { await api(`/mail/domains/${b.dataset.deldom}`, { method: 'DELETE' }); pageMail(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -3502,12 +3553,12 @@ async function mailDomainDetail(domainId, domainName, domain) {
         } catch (err) { toast(err.message, 'err'); }
     });
     container.querySelectorAll('[data-delmb]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/mail/domains/${domainId}/mailboxes/${b.dataset.delmb}`, { method: 'DELETE' }); mailDomainDetail(domainId, domainName, domain); }
         catch (err) { toast(err.message, 'err'); }
     }));
     container.querySelectorAll('[data-delal]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/mail/domains/${domainId}/aliases/${b.dataset.delal}`, { method: 'DELETE' }); mailDomainDetail(domainId, domainName, domain); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -3595,7 +3646,7 @@ async function pageDeliverability() {
             catch (err) { toast(err.message, 'err'); }
         });
         document.getElementById('qdelall').addEventListener('click', async () => {
-            if (!confirm(t('deliver.confirm_delete_all'))) return;
+            if (!await confirmDialog(t('deliver.confirm_delete_all'))) return;
             try { renderQueue(await api('/deliverability/queue/delete-all', { method: 'POST' })); }
             catch (err) { toast(err.message, 'err'); }
         });
@@ -3735,7 +3786,7 @@ async function pageBackups() {
         });
     }));
     main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/backups/${b.dataset.del}`, { method: 'DELETE' }); pageBackups(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -3812,7 +3863,7 @@ async function pageDocker() {
         } catch (err) { toast(err.message, 'err'); }
     }));
     main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/docker/${b.dataset.del}`, { method: 'DELETE' }); pageDocker(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -3876,7 +3927,7 @@ async function pageUsers() {
     document.getElementById('newpkg')?.addEventListener('click', () => planModal(null, true));
     main().querySelectorAll('[data-pedit]').forEach((b) => b.addEventListener('click', () => planModal(plans.find((p) => String(p.id) === b.dataset.pedit))));
     main().querySelectorAll('[data-pdel]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/plans/${b.dataset.pdel}`, { method: 'DELETE' }); pageUsers(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -3888,7 +3939,7 @@ async function pageUsers() {
     }));
     main().querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => userModal(users.find((u) => String(u.id) === b.dataset.edit), plans, vhosts)));
     main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/users/${b.dataset.del}`, { method: 'DELETE' }); pageUsers(); }
         catch (err) { userErr(err); }
     }));
@@ -4208,7 +4259,7 @@ async function pageLicensing() {
             </tr>`;
             }).join('')}</tbody></table>` : `<div class="empty">${t('lic.no_nodes')}</div>`;
         wrap.querySelectorAll('[data-noderm]').forEach((b) => b.addEventListener('click', async () => {
-            if (!confirm(t('lic.node_remove_confirm'))) return;
+            if (!await confirmDialog(t('lic.node_remove_confirm'))) return;
             try {
                 await api(`/licenses/nodes/${encodeURIComponent(b.dataset.noderm)}`, { method: 'DELETE' });
                 for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i].fingerprint === b.dataset.noderm) nodes.splice(i, 1);
@@ -4247,7 +4298,7 @@ async function pageLicensing() {
         catch (err) { toast(err.message, 'err'); }
     }));
     main().querySelectorAll('[data-licdel]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/licenses/${b.dataset.licdel}`, { method: 'DELETE' }); pageLicensing(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -4350,7 +4401,7 @@ async function pageDistribution() {
                     <button class="btn primary sm" id="applyupd">${icon('download')}${t('dist.apply')}</button></div>`
                 : `<div class="alert ok">${t('dist.uptodate')} (v${esc(r.current)})</div>`;
             document.getElementById('applyupd')?.addEventListener('click', async (e) => {
-                if (!confirm(t('dist.apply_confirm'))) return;
+                if (!await confirmDialog(t('dist.apply_confirm'))) return;
                 e.target.disabled = true;
                 try { const a = await api('/distribution/apply', { method: 'POST' }); watchTask(a.task_id, `panel update v${a.version}`); toast(t('dist.applying'), 'ok'); }
                 catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
@@ -4449,7 +4500,7 @@ async function renderMigratorReport(out, token, type, parsed) {
 
     out.querySelector('#impf').addEventListener('submit', async (e) => {
         e.preventDefault();
-        if (!confirm(t('migrator.confirm_import'))) return;
+        if (!await confirmDialog(t('migrator.confirm_import'))) return;
         const subscription_id = Number(new FormData(e.target).get('subscription_id'));
         const impout = document.getElementById('impout');
         impout.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
@@ -4558,7 +4609,7 @@ async function pageConfig() {
             <div class="task-output">${esc(r.diff || 'nema promjena')}</div>`, { wide: true });
     }));
     main().querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('config.confirm_restore'))) return;
+        if (!await confirmDialog(t('config.confirm_restore'))) return;
         try { await api(`/config-history/${b.dataset.restore}/restore`, { method: 'POST' }); toast(t('config.restored')); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -4614,12 +4665,12 @@ async function pageSecurity() {
         </tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`;
 
     main().querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('security.confirm_restore'))) return;
+        if (!await confirmDialog(t('security.confirm_restore'))) return;
         try { await api(`/security/quarantine/${b.dataset.restore}/restore`, { method: 'POST' }); pageSecurity(); }
         catch (err) { toast(err.message, 'err'); }
     }));
     main().querySelectorAll('[data-purge]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm(t('common.confirm_delete'))) return;
+        if (!await confirmDialog(t('common.confirm_delete'))) return;
         try { await api(`/security/quarantine/${b.dataset.purge}/delete`, { method: 'POST' }); pageSecurity(); }
         catch (err) { toast(err.message, 'err'); }
     }));
@@ -4887,7 +4938,7 @@ async function pageProfile() {
     });
 
     document.getElementById('recoveryregen')?.addEventListener('click', async () => {
-        if (!confirm(t('profile.recovery_regenerate_confirm'))) return;
+        if (!await confirmDialog(t('profile.recovery_regenerate_confirm'))) return;
         try {
             const r = await api('/auth/twofa/recovery-codes', { method: 'POST' });
             const box = document.getElementById('totpbox');
@@ -4912,7 +4963,7 @@ async function pageProfile() {
         </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('profile.no_keys')}</div>`;
 
         document.getElementById('keys').querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-            if (!confirm(t('profile.confirm_delete_key'))) return;
+            if (!await confirmDialog(t('profile.confirm_delete_key'))) return;
             try { await api(`/auth/webauthn/keys/${b.dataset.del}`, { method: 'DELETE' }); renderKeys(); }
             catch (err) { toast(err.message, 'err'); }
         }));
