@@ -32,6 +32,37 @@ fi
 echo "→ sync $SRC -> $DEST (bez --delete; ne dira runtime podatke)"
 rsync -a --exclude='.git' --exclude='deploy.sh' "$SRC"/ "$DEST"/
 
+# ── DB migracije (idempotentno, file-level tracking) ──
+# Primijeni database/migrations/*.sql koje još nisu zabilježene u schema_migrations.
+# Bez ovoga nova kolona/tablica fali pa stranice koje je koriste vraćaju internal_error
+# ("deployao sam ali Baze/DNS/... pucaju"). Već ručno primijenjene se samo zabilježe.
+echo "→ DB migracije"
+MYSQL="$(command -v mysql || command -v mariadb || true)"
+MIG_DIR="$SRC/database/migrations"
+DB="${FP_DB:-forgepanel}"
+if [ -n "$MYSQL" ] && [ -d "$MIG_DIR" ]; then
+    "$MYSQL" "$DB" -e "CREATE TABLE IF NOT EXISTS schema_migrations (filename VARCHAR(191) PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB" 2>/dev/null || true
+    for mig in $(ls -1 "$MIG_DIR"/*.sql 2>/dev/null | sort); do
+        fname="$(basename "$mig")"
+        seen="$("$MYSQL" -N -B "$DB" -e "SELECT 1 FROM schema_migrations WHERE filename='$fname' LIMIT 1" 2>/dev/null || true)"
+        [ -n "$seen" ] && continue
+        if "$MYSQL" "$DB" < "$mig" 2>/tmp/fp_mig_err; then
+            "$MYSQL" "$DB" -e "INSERT INTO schema_migrations (filename) VALUES ('$fname')" 2>/dev/null || true
+            echo "   ✓ $fname"
+        elif grep -qiE "exists|duplicate|already" /tmp/fp_mig_err; then
+            # već primijenjena ručno → samo zabilježi (ne blokira buduće deployeve)
+            "$MYSQL" "$DB" -e "INSERT IGNORE INTO schema_migrations (filename) VALUES ('$fname')" 2>/dev/null || true
+            echo "   ↷ $fname (već primijenjena)"
+        else
+            # prava greška → NE bilježi (retry idući put) + glasno javi, ali ne ruši deploy
+            echo "   ⚠ $fname GREŠKA: $(tr '\n' ' ' < /tmp/fp_mig_err)"
+        fi
+    done
+    rm -f /tmp/fp_mig_err
+else
+    echo "   (mysql/mariadb ili migrations dir nedostupan — preskačem)"
+fi
+
 # PHP-FPM: reload OBAVEZNO (inače opcache servira STARI web/src kod — čest uzrok
 # "deployao sam ali se ništa nije promijenilo"). Reloadamo sve prisutne php*-fpm poolove.
 echo "→ reload PHP-FPM (čisti opcache, učitava novi web/src)"
