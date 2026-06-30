@@ -4449,6 +4449,7 @@ async function pageAbout() {
                 <li>PHP 8.1–8.5 paralelno (+ <b>Legacy PHP 7.x preko Dockera</b>), <span class="mono">strict_types</span>, bez frameworka</li>
                 <li>MariaDB / MySQL (<span class="mono">utf8mb4</span>, prepared statements)</li>
                 <li>Vanilla JS (ES2024) + Web Components, bez build alata</li>
+                <li>Cloud-console UI (redizajn 2026): Inter, svijetla + tamna tema, command palette (Ctrl K), mobilno responzivno</li>
                 <li>SSE realtime (log / task / monitoring stream)</li>
                 <li>Ubuntu 26.04 native: apt deb822, systemd, ufw, cgroup v2</li>
             </ul></div>
