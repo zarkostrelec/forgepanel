@@ -37,6 +37,9 @@ final class MailController extends Controller
         Response::ok([
             'installed' => $this->mailInstalled(),
             'webmail' => $webmail === null ? null : json_decode((string) $webmail['value'], true),
+            // Mail server (Postfix myhostname + Dovecot) koristi panel FQDN i panelov cert
+            // → to je host za mail klijente (IMAP/POP3/SMTP) s valjanim certifikatom.
+            'server_hostname' => $this->app->config->get('panel_fqdn', (string) gethostname()),
         ]);
     }
 
@@ -81,14 +84,18 @@ final class MailController extends Controller
     {
         $ctx = $this->ctx($request, 'mail:read');
         if ($ctx->isAdmin()) {
-            Response::ok($this->app->db->all('SELECT * FROM mail_domains ORDER BY domain'));
+            Response::ok($this->app->db->all(
+                'SELECT m.*, (SELECT COUNT(*) FROM mailboxes mb WHERE mb.mail_domain_id = m.id) AS mailbox_count
+                 FROM mail_domains m ORDER BY m.domain'
+            ));
         }
         if ($ctx->subscription_ids === []) {
             Response::ok([]);
         }
         $placeholders = implode(',', array_fill(0, count($ctx->subscription_ids), '?'));
         Response::ok($this->app->db->all(
-            "SELECT * FROM mail_domains WHERE subscription_id IN ($placeholders) ORDER BY domain",
+            "SELECT m.*, (SELECT COUNT(*) FROM mailboxes mb WHERE mb.mail_domain_id = m.id) AS mailbox_count
+             FROM mail_domains m WHERE m.subscription_id IN ($placeholders) ORDER BY m.domain",
             $ctx->subscription_ids
         ));
     }

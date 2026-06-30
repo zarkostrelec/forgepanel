@@ -3470,11 +3470,14 @@ async function pageMail() {
 
     const domains = await api('/mail/domains');
     document.getElementById('domains').innerHTML = domains.length ? `
-        <table class="data"><thead><tr><th>${t('vhost.domain')}</th><th class="hide-sm">DKIM</th><th></th></tr></thead><tbody>
-        ${domains.map((d) => `<tr class="row-link" data-dom="${d.id}" data-name="${esc(d.domain)}">
-            <td class="mono">${esc(d.domain)}</td>
+        <table class="data"><thead><tr><th>${t('vhost.domain')}</th><th class="hide-sm">DKIM</th><th class="num">${t('mail.mailboxes')}</th><th></th></tr></thead><tbody>
+        ${domains.map((d) => `<tr class="row-link" data-dom="${d.id}">
+            <td><span class="mono" style="font-weight:600">${esc(d.domain)}</span></td>
             <td class="hide-sm"><span class="badge ${d.dkim_txt ? 'ok' : 'warn'}">${d.dkim_txt ? esc(d.dkim_selector) : '—'}</span></td>
-            <td class="num"><button class="btn danger" data-deldom="${d.id}">${t('common.delete')}</button></td>
+            <td class="num mono">${Number(d.mailbox_count ?? 0)}</td>
+            <td class="num" style="white-space:nowrap">
+                <a class="btn ghost sm" href="#/mail/${d.id}" data-stop>${t('mail.manage')} ${icon('chevR')}</a>
+                <button class="btn danger sm" data-deldom="${d.id}">${t('common.delete')}</button></td>
         </tr>`).join('')}</tbody></table>` : `<div class="empty">${t('nav.mail')}: 0</div>`;
 
     main().querySelectorAll('[data-deldom]').forEach((b) => b.addEventListener('click', async (e) => {
@@ -3483,85 +3486,207 @@ async function pageMail() {
         try { await api(`/mail/domains/${b.dataset.deldom}`, { method: 'DELETE' }); pageMail(); }
         catch (err) { toast(err.message, 'err'); }
     }));
-    main().querySelectorAll('[data-dom]').forEach((tr) => tr.addEventListener('click', () =>
-        mailDomainDetail(Number(tr.dataset.dom), tr.dataset.name, domains.find((d) => d.id == tr.dataset.dom))));
+    main().querySelectorAll('[data-stop]').forEach((a) => a.addEventListener('click', (e) => e.stopPropagation()));
+    main().querySelectorAll('[data-dom]').forEach((tr) => tr.addEventListener('click', () => { location.hash = `#/mail/${tr.dataset.dom}`; }));
 }
 
-async function mailDomainDetail(domainId, domainName, domain) {
-    const container = document.getElementById('detail');
-    container.innerHTML = `<div class="card mt">${t('common.loading')}</div>`;
-    const [mailboxes, aliases] = await Promise.all([
-        api(`/mail/domains/${domainId}/mailboxes`),
-        api(`/mail/domains/${domainId}/aliases`),
+// Per-domena upravljanje e-mailom (Plesk-style zaseban prozor)
+async function pageMailDomain(id) {
+    setActive('mail', [t('nav.mail'), '…']);
+    main().innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+    const [status, domains] = await Promise.all([
+        api('/mail/status').catch(() => ({ webmail: null })),
+        api('/mail/domains'),
     ]);
+    const domain = domains.find((d) => Number(d.id) === id);
+    if (!domain) { location.hash = '#/mail'; return; }
+    setActive('mail', [t('nav.mail'), domain.domain]);
+    const server = status.server_hostname || location.hostname;
+    const webmailHost = status.webmail?.hostname || null;
 
-    container.innerHTML = `
-    <div class="grid cols-2 mt top">
-        <div class="card">
-            <h2>${t('mail.mailboxes')} — <span class="mono">${esc(domainName)}</span></h2>
-            ${mailboxes.length ? `<table class="data"><tbody>
+    const render = async () => {
+        const [mailboxes, aliases] = await Promise.all([
+            api(`/mail/domains/${id}/mailboxes`),
+            api(`/mail/domains/${id}/aliases`),
+        ]);
+        main().innerHTML = `
+        <div class="page-head">
+            <a class="btn ghost" href="#/mail">${icon('chevR')}${t('nav.mail')}</a>
+            <h1 class="mono">${esc(domain.domain)}</h1>
+            <span class="badge ${domain.dkim_txt ? 'ok' : 'warn'}">DKIM ${domain.dkim_txt ? esc(domain.dkim_selector) : '—'}</span>
+            <div class="spacer"></div>
+            ${webmailHost ? `<a class="btn" href="https://${esc(webmailHost)}" target="_blank" rel="noopener">${icon('mail')}${t('mail.webmail')}</a>` : ''}
+            <button class="btn primary" id="newmb">${icon('plus')}${t('mail.new_address')}</button>
+        </div>
+        <div class="card flush">
+            <div class="card-head"><h2>${t('mail.mailboxes')}</h2><span class="count">${mailboxes.length}</span></div>
+            ${mailboxes.length ? `<table class="data"><thead><tr><th>${t('mail.address')}</th><th class="num">${t('mail.quota')}</th><th></th></tr></thead><tbody>
                 ${mailboxes.map((m) => `<tr>
-                    <td class="mono">${esc(m.local_part)}@${esc(domainName)}</td>
-                    <td class="mono num">${fmtBytes(m.quota_bytes)}</td>
-                    <td class="num"><button class="btn danger" data-delmb="${m.id}">${t('common.delete')}</button></td>
-                </tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`}
-            <form id="mbf" class="mt">
-                <div class="grid cols-2">
-                    <div class="field"><label>${t('mail.local_part')}</label>
-                        <input name="local_part" required pattern="[a-z0-9][a-z0-9._\\-]{0,63}" class="mono"></div>
-                    <div class="field"><label>${t('auth.password')}</label>
-                        <input name="password" type="password" required minlength="10"></div>
-                </div>
-                <button class="btn primary">${icon('plus')}${t('common.create')}</button>
-            </form>
+                    <td><span class="mono" style="font-weight:600">${esc(m.local_part)}@${esc(domain.domain)}</span></td>
+                    <td class="num mono">${fmtBytes(m.quota_bytes)}</td>
+                    <td class="num" style="white-space:nowrap">
+                        <button class="btn ghost sm" data-setup="${esc(m.local_part)}">${icon('info')}${t('mail.client_setup_short')}</button>
+                        ${webmailHost ? `<button class="btn ghost sm" data-webmail="${esc(m.local_part)}">${icon('mail')}${t('mail.webmail')}</button>` : ''}
+                        <button class="btn ghost sm" data-edit="${m.id}">${icon('gear')}${t('common.edit')}</button>
+                        <button class="btn danger sm" data-del="${m.id}">${t('common.delete')}</button>
+                    </td></tr>`).join('')}
+                </tbody></table>` : `<div class="empty">${t('mail.no_mailboxes')}</div>`}
         </div>
-        <div class="card">
-            <h2>${t('mail.aliases')}</h2>
-            ${aliases.length ? `<table class="data"><tbody>
-                ${aliases.map((a) => `<tr>
-                    <td class="mono">${esc(a.source)}</td>
-                    <td class="mono">→ ${esc(a.destination)}</td>
-                    <td class="num"><button class="btn danger" data-delal="${a.id}">${t('common.delete')}</button></td>
-                </tr>`).join('')}</tbody></table>` : `<div class="empty">0</div>`}
-            <form id="alf" class="mt">
-                <div class="grid cols-2">
-                    <div class="field"><label>${t('mail.alias_source')}</label>
-                        <input name="source" required pattern="[a-z0-9][a-z0-9._\\-]{0,63}" class="mono" placeholder="info"></div>
-                    <div class="field"><label>${t('mail.alias_destination')}</label>
-                        <input name="destination" type="email" required class="mono"></div>
-                </div>
-                <button class="btn primary">${icon('plus')}${t('common.create')}</button>
-            </form>
-            ${domain?.dkim_txt ? `
-            <h2 class="mt">DKIM (${esc(domain.dkim_selector)}._domainkey TXT)</h2>
-            <div class="task-output">${esc(domain.dkim_txt)}</div>` : ''}
-        </div>
-    </div>`;
+        <div class="grid cols-2 mt top">
+            <div class="card">
+                <div class="page-head"><h2>${t('mail.aliases')}</h2></div>
+                ${aliases.length ? `<table class="data"><tbody>
+                    ${aliases.map((a) => `<tr><td class="mono">${esc(a.source)}</td><td class="mono">→ ${esc(a.destination)}</td>
+                        <td class="num"><button class="btn danger sm" data-delal="${a.id}">${t('common.delete')}</button></td></tr>`).join('')}
+                    </tbody></table>` : `<div class="empty-row">${t('mail.no_aliases')}</div>`}
+                <form id="alf" class="addform">
+                    <div class="addform-h">${t('mail.new_alias')}</div>
+                    <div class="addform-grid">
+                        <div class="field"><label>${t('mail.alias_source')}</label>
+                            <div class="sub-input"><input name="source" required pattern="[a-z0-9][a-z0-9._\\-]{0,63}" class="mono" placeholder="info"><span class="sub-suffix mono">@${esc(domain.domain)}</span></div></div>
+                        <div class="field"><label>${t('mail.alias_destination')}</label><input name="destination" type="email" required class="mono" placeholder="cilj@example.com"></div>
+                    </div>
+                    <div class="addform-foot"><button class="btn primary">${icon('plus')}${t('common.create')}</button></div>
+                </form>
+            </div>
+            <div class="card">
+                <div class="page-head"><h2>${t('mail.client_setup')}</h2></div>
+                <p class="hint">${t('mail.client_note')}</p>
+                <table class="data mt"><tbody>
+                    <tr><td>${t('mail.server')}</td><td class="mono">${esc(server)}</td></tr>
+                    <tr><td>IMAP</td><td class="mono">993 · SSL/TLS</td></tr>
+                    <tr><td>POP3</td><td class="mono">995 · SSL/TLS</td></tr>
+                    <tr><td>SMTP</td><td class="mono">465 · SSL/TLS <span style="color:var(--ink-3)">/ 587 · STARTTLS</span></td></tr>
+                </tbody></table>
+                ${domain.dkim_txt ? `<h2 class="mt">DKIM (${esc(domain.dkim_selector)}._domainkey TXT)</h2>
+                <div class="task-output">${esc(domain.dkim_txt)}</div>` : ''}
+            </div>
+        </div>`;
 
-    container.querySelector('#mbf').addEventListener('submit', async (e) => {
+        main().querySelector('#newmb').addEventListener('click', () => createMailboxModal(id, domain.domain, render));
+        main().querySelector('#alf').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try { await api(`/mail/domains/${id}/aliases`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); render(); }
+            catch (err) { toast(err.message, 'err'); }
+        });
+        main().querySelectorAll('[data-setup]').forEach((b) => b.addEventListener('click', () =>
+            mailClientSetupModal(`${b.dataset.setup}@${domain.domain}`, server)));
+        main().querySelectorAll('[data-webmail]').forEach((b) => b.addEventListener('click', () =>
+            openWebmail(webmailHost, `${b.dataset.webmail}@${domain.domain}`)));
+        main().querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => {
+            const m = mailboxes.find((x) => String(x.id) === b.dataset.edit);
+            editMailboxModal(id, m, domain.domain, render);
+        }));
+        main().querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+            if (!await confirmDialog(t('common.confirm_delete'))) return;
+            try { await api(`/mail/domains/${id}/mailboxes/${b.dataset.del}`, { method: 'DELETE' }); render(); }
+            catch (err) { toast(err.message, 'err'); }
+        }));
+        main().querySelectorAll('[data-delal]').forEach((b) => b.addEventListener('click', async () => {
+            if (!await confirmDialog(t('common.confirm_delete'))) return;
+            try { await api(`/mail/domains/${id}/aliases/${b.dataset.delal}`, { method: 'DELETE' }); render(); }
+            catch (err) { toast(err.message, 'err'); }
+        }));
+    };
+    render();
+}
+
+// kvota preseti + sigurni generator lozinke (dijele mailbox modali)
+const MAIL_QUOTAS = [
+    [536870912, '512 MB'], [1073741824, '1 GB'], [2147483648, '2 GB'],
+    [5368709120, '5 GB'], [10737418240, '10 GB'], [26843545600, '25 GB'], [53687091200, '50 GB'],
+];
+const quotaOptions = (sel = 1073741824) => {
+    const list = MAIL_QUOTAS.some(([v]) => v === sel) ? MAIL_QUOTAS : [[sel, fmtBytes(sel)], ...MAIL_QUOTAS];
+    return list.map(([v, l]) => `<option value="${v}" ${v === sel ? 'selected' : ''}>${l}</option>`).join('');
+};
+const genPassword = (len = 16) => {
+    const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*';
+    return Array.from(crypto.getRandomValues(new Uint32Array(len)), (x) => c[x % c.length]).join('');
+};
+
+function createMailboxModal(domainId, domainName, onCreated) {
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('mail.new_address')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="cmf">
+            <div class="field"><label>${t('mail.address')}</label>
+                <div class="sub-input"><input name="local_part" required pattern="[a-z0-9][a-z0-9._\\-]{0,63}" class="mono" placeholder="info" autocomplete="off">
+                    <span class="sub-suffix mono">@${esc(domainName)}</span></div></div>
+            <div class="field"><label>${t('auth.password')}</label>
+                <div style="display:flex;gap:8px">
+                    <input name="password" type="text" required minlength="10" class="mono" style="flex:1" autocomplete="new-password">
+                    <button type="button" class="btn" id="genpw">${icon('refresh')}${t('mail.password_generate')}</button></div>
+                <span class="hint">${t('mail.password_hint')}</span></div>
+            <div class="field"><label>${t('mail.quota')}</label>
+                <select name="quota_bytes" class="mono">${quotaOptions()}</select></div>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('common.create')}</button></div>
+        </form>`);
+    modal.querySelector('#genpw').addEventListener('click', () => { modal.querySelector('input[name="password"]').value = genPassword(); });
+    modal.querySelector('#cmf').addEventListener('submit', async (e) => {
         e.preventDefault();
         try {
             await api(`/mail/domains/${domainId}/mailboxes`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
-            mailDomainDetail(domainId, domainName, domain);
+            modal.close(); onCreated();
         } catch (err) { toast(err.message, 'err'); }
     });
-    container.querySelector('#alf').addEventListener('submit', async (e) => {
+}
+
+function editMailboxModal(domainId, mailbox, domainName, onSaved) {
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('mail.edit_address')}: <span class="mono">${esc(mailbox.local_part)}@${esc(domainName)}</span></h1>
+            <button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <form id="emf">
+            <div class="field"><label>${t('auth.password')}</label>
+                <div style="display:flex;gap:8px">
+                    <input name="password" type="text" minlength="10" class="mono" style="flex:1" placeholder="${t('users.password_keep')}" autocomplete="new-password">
+                    <button type="button" class="btn" id="genpw">${icon('refresh')}${t('mail.password_generate')}</button></div>
+                <span class="hint">${t('db.pw_keep_hint')}</span></div>
+            <div class="field"><label>${t('mail.quota')}</label>
+                <select name="quota_bytes" class="mono">${quotaOptions(Number(mailbox.quota_bytes))}</select></div>
+            <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
+                <button class="btn primary">${t('common.save')}</button></div>
+        </form>`);
+    modal.querySelector('#genpw').addEventListener('click', () => { modal.querySelector('input[name="password"]').value = genPassword(); });
+    modal.querySelector('#emf').addEventListener('submit', async (e) => {
         e.preventDefault();
-        try {
-            await api(`/mail/domains/${domainId}/aliases`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
-            mailDomainDetail(domainId, domainName, domain);
-        } catch (err) { toast(err.message, 'err'); }
+        const f = new FormData(e.target);
+        const body = { quota_bytes: Number(f.get('quota_bytes')) };
+        if (f.get('password')) body.password = f.get('password');
+        try { await api(`/mail/domains/${domainId}/mailboxes/${mailbox.id}`, { method: 'PUT', body }); modal.close(); onSaved(); }
+        catch (err) { toast(err.message, 'err'); }
     });
-    container.querySelectorAll('[data-delmb]').forEach((b) => b.addEventListener('click', async () => {
-        if (!await confirmDialog(t('common.confirm_delete'))) return;
-        try { await api(`/mail/domains/${domainId}/mailboxes/${b.dataset.delmb}`, { method: 'DELETE' }); mailDomainDetail(domainId, domainName, domain); }
-        catch (err) { toast(err.message, 'err'); }
+}
+
+// Info popup s uputama za podešavanje mail klijenta (server, portovi, username)
+function mailClientSetupModal(email, server) {
+    const copyBtn = (val) => `<button class="btn ghost sm" data-copy="${esc(val)}" title="${t('mail.copy')}">${icon('file', 13)}</button>`;
+    const modal = openModal(`
+        <div class="dialog-head"><h1>${t('mail.client_setup')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <p class="hint" style="margin:0 0 14px">${t('mail.client_note')}</p>
+        <table class="data"><tbody>
+            <tr><td>${t('mail.username')}</td><td class="mono">${esc(email)}</td><td class="num">${copyBtn(email)}</td></tr>
+            <tr><td>${t('mail.server')}</td><td class="mono">${esc(server)}</td><td class="num">${copyBtn(server)}</td></tr>
+        </tbody></table>
+        <h2 class="mt">${t('mail.ports')}</h2>
+        <table class="data"><thead><tr><th>${t('mail.protocol')}</th><th class="num">Port</th><th>${t('mail.encryption')}</th></tr></thead><tbody>
+            <tr><td class="mono">IMAP</td><td class="num mono">993</td><td>SSL/TLS</td></tr>
+            <tr><td class="mono">POP3</td><td class="num mono">995</td><td>SSL/TLS</td></tr>
+            <tr><td class="mono">SMTP</td><td class="num mono">465</td><td>SSL/TLS</td></tr>
+            <tr><td class="mono">SMTP</td><td class="num mono">587</td><td>STARTTLS</td></tr>
+        </tbody></table>
+        <div class="dialog-foot"><button type="button" class="btn primary" data-close>${t('common.close')}</button></div>`, { wide: false });
+    modal.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
+        navigator.clipboard?.writeText(b.dataset.copy);
+        toast(t('mail.copied'));
     }));
-    container.querySelectorAll('[data-delal]').forEach((b) => b.addEventListener('click', async () => {
-        if (!await confirmDialog(t('common.confirm_delete'))) return;
-        try { await api(`/mail/domains/${domainId}/aliases/${b.dataset.delal}`, { method: 'DELETE' }); mailDomainDetail(domainId, domainName, domain); }
-        catch (err) { toast(err.message, 'err'); }
-    }));
+}
+
+// Otvori webmail s pred-popunjenim korisničkim imenom (+ kopiraj u međuspremnik kao fallback)
+function openWebmail(host, email) {
+    if (!host) { toast(t('mail.no_webmail'), 'err'); return; }
+    navigator.clipboard?.writeText(email).then(() => toast(`${t('mail.username_copied')}: ${email}`)).catch(() => {});
+    window.open(`https://${host}/?_user=${encodeURIComponent(email)}`, '_blank', 'noopener');
 }
 
 // ---------------------------------------------------------------- deliverability (mail health)
@@ -5009,6 +5134,7 @@ const ROUTES = [
     [/^#\/files$/, pageFiles],
     [/^#\/databases$/, pageDatabases],
     [/^#\/mail$/, pageMail],
+    [/^#\/mail\/(\d+)$/, (m) => pageMailDomain(Number(m[1]))],
     [/^#\/deliverability$/, pageDeliverability],
     [/^#\/dns$/, pageDns],
     [/^#\/cloudflare$/, pageCloudflare],
