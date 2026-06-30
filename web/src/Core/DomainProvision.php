@@ -152,32 +152,88 @@ final class DomainProvision
             }
         }
 
-        // 2) Cloudflare zona roditelja → A zapis poddomene + veza poddomena-vhost ↔ ista zona
-        $cf = $app->db->one(
-            'SELECT z.zone_id, z.account_id, z.proxy_default, a.api_token
-             FROM cloudflare_zones z JOIN cloudflare_accounts a ON a.id = z.account_id
-             WHERE z.vhost_id = ? LIMIT 1',
-            [$parent_vhost_id]
-        );
+        // 2) Cloudflare: ako je MATIČNA domena na CF-u (bilo preko per-vhost veze
+        //    cloudflare_zones, bilo samo preko dns_zones.cf_account_id "exporta"), dodaj A
+        //    zapis poddomene u CF zonu i poveži poddomenu-vhost s tom zonom. Time agentov
+        //    AutoSSL bira DNS-01 (radi i za proxied domene) — http-01 bi pao jer poddomena
+        //    nije javno razrješiva (autoritativni NS matične domene je Cloudflare).
+        $cf = self::resolveParentCloudflare($app, $parent_vhost_id, $parent_domain);
         if ($cf !== null) {
+            // Vezu (cloudflare_zones) zapiši PRVO i bezuvjetno — AutoSSL DNS-01 ovisi SAMO o
+            // njoj. Da je iza createRecord, greška u API zapisu (npr. konflikt) bi je preskočila
+            // i poddomena bi opet pala na http-01.
+            $app->db->run('DELETE FROM cloudflare_zones WHERE vhost_id = ?', [$sub_vhost_id]);
+            $app->db->run(
+                "INSERT INTO cloudflare_zones (vhost_id, account_id, zone_id, dns_mode, proxy_default)
+                 VALUES (?, ?, ?, 'cloudflare', ?)",
+                [$sub_vhost_id, $cf['account_id'], $cf['zone_id'], $cf['proxy_default']]
+            );
+            $result['cloudflare'] = true;
+            // A zapis poddomene u CF zonu — best-effort, izolirano (da ne sruši vezu gore)
             try {
-                $client = new CloudflareClient((new Crypto($app->config))->decrypt((string) $cf['api_token']));
-                $proxy = (bool) $cf['proxy_default'];
-                $client->createRecord((string) $cf['zone_id'], 'A', $full, self::serverIp($app), $proxy, 3600, null);
-                // Veza poddomene na istu CF zonu (idempotentno) → AutoSSL DNS-01 + cleanup
-                $app->db->run('DELETE FROM cloudflare_zones WHERE vhost_id = ?', [$sub_vhost_id]);
-                $app->db->run(
-                    "INSERT INTO cloudflare_zones (vhost_id, account_id, zone_id, dns_mode, proxy_default)
-                     VALUES (?, ?, ?, 'cloudflare', ?)",
-                    [$sub_vhost_id, (int) $cf['account_id'], (string) $cf['zone_id'], (int) $proxy]
-                );
-                $result['cloudflare'] = true;
+                $client = new CloudflareClient((new Crypto($app->config))->decrypt($cf['api_token']));
+                $client->createRecord($cf['zone_id'], 'A', $full, self::serverIp($app), (bool) $cf['proxy_default'], 3600, null);
             } catch (\Throwable $e) {
-                error_log('forgepanel: subdomain CF DNS: ' . $e->getMessage());
+                error_log('forgepanel: subdomain CF A-record: ' . $e->getMessage());
             }
         }
 
         return $result;
+    }
+
+    /**
+     * CF kontekst MATIČNE domene za poddomenu. Dva izvora:
+     *  a) per-vhost veza (cloudflare_zones) — domena kreirana s odabranim CF računom;
+     *  b) fallback: zona je samo "exportana" na CF (dns_zones.cf_account_id, bez per-vhost
+     *     veze) → zone_id se dohvaća preko CF API-ja po imenu domene.
+     * Bez (a)/(b) → null (matična nije na CF-u; poddomena ide http-01 preko lokalne zone).
+     *
+     * @return array{account_id: int, zone_id: string, api_token: string, proxy_default: int}|null
+     */
+    private static function resolveParentCloudflare(App $app, int $parent_vhost_id, string $parent_domain): ?array
+    {
+        $link = $app->db->one(
+            'SELECT z.zone_id, z.account_id, z.proxy_default, a.api_token
+             FROM cloudflare_zones z JOIN cloudflare_accounts a ON a.id = z.account_id
+             WHERE z.vhost_id = ? AND z.dns_mode = \'cloudflare\' AND a.status = \'active\' LIMIT 1',
+            [$parent_vhost_id]
+        );
+        if ($link !== null) {
+            return [
+                'account_id' => (int) $link['account_id'],
+                'zone_id' => (string) $link['zone_id'],
+                'api_token' => (string) $link['api_token'],
+                'proxy_default' => (int) $link['proxy_default'],
+            ];
+        }
+
+        // (b) exportana zona — nema per-vhost veze; nađi zone_id preko CF API-ja po imenu
+        $acct = $app->db->one(
+            'SELECT a.id, a.api_token FROM dns_zones z JOIN cloudflare_accounts a ON a.id = z.cf_account_id
+             WHERE z.domain = ? AND a.status = \'active\' LIMIT 1',
+            [$parent_domain]
+        );
+        if ($acct === null) {
+            return null;
+        }
+        try {
+            $client = new CloudflareClient((new Crypto($app->config))->decrypt((string) $acct['api_token']));
+            foreach ($client->zones() as $z) {
+                if (strtolower((string) ($z['name'] ?? '')) === strtolower($parent_domain)) {
+                    return [
+                        'account_id' => (int) $acct['id'],
+                        'zone_id' => (string) $z['id'],
+                        'api_token' => (string) $acct['api_token'],
+                        // exportani zapisi su grey (ne-proxied) — poddomena jednako, da
+                        // radi izravno na origin (i http-01 i DNS-01 prolaze)
+                        'proxy_default' => 0,
+                    ];
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log('forgepanel: subdomain CF zone lookup: ' . $e->getMessage());
+        }
+        return null;
     }
 
     /**

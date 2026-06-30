@@ -717,8 +717,9 @@ final class Scheduler
         $contact = $this->config->get('acme_email', 'admin@localhost.localdomain');
         $panel_fqdn = (string) $this->config->get('panel_fqdn', '');
         $due = $this->db->all(
-            "SELECT c.id, c.hostname, c.vhost_id
+            "SELECT c.id, c.hostname, c.vhost_id, v.parent_vhost_id
              FROM ssl_certs c
+             LEFT JOIN vhosts v ON v.id = c.vhost_id
              WHERE c.auto_renew = 1 AND c.status = 'active'
                AND c.expires_at < DATE_ADD(NOW(), INTERVAL 30 DAY)"
         );
@@ -736,10 +737,15 @@ final class Scheduler
             if ($already !== null) {
                 continue;
             }
+            // Poddomena: obnovi SAMO njen hostname (www.<poddomena> ne postoji u DNS-u i
+            // srušio bi izdavanje); apex domena dobiva i www.
+            $hostnames = $cert['parent_vhost_id'] !== null
+                ? [$cert['hostname']]
+                : [$cert['hostname'], 'www.' . $cert['hostname']];
             $this->db->run(
                 'INSERT INTO tasks (op, params) VALUES (?, ?)',
                 ['ssl.issue', json_encode([
-                    'hostnames' => [$cert['hostname'], 'www.' . $cert['hostname']],
+                    'hostnames' => $hostnames,
                     'contact_email' => $contact,
                     'vhost_id' => $cert['vhost_id'] === null ? null : (int) $cert['vhost_id'],
                 ], JSON_UNESCAPED_SLASHES)]

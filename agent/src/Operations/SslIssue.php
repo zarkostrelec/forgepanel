@@ -114,10 +114,17 @@ final class SslIssue extends Operation
         if (!isset($params['vhost_id'])) {
             return null;
         }
+        // Veza se traži za sam vhost ILI njegovog roditelja (poddomena nasljeđuje DNS-01 od
+        // matične zone — _acme-challenge.<sub> TXT ide u istu CF zonu). Prednost ima vlastita
+        // veza poddomene, pa tek roditeljeva. Tako DNS-01 radi i ako poddomenina veza nije
+        // zapisana, dok god je matična domena na Cloudflareu.
         $cf = $this->db->one(
             'SELECT z.zone_id, a.api_token
-             FROM cloudflare_zones z JOIN cloudflare_accounts a ON a.id = z.account_id
-             WHERE z.vhost_id = ? AND z.dns_mode = \'cloudflare\' AND a.status = \'active\'
+             FROM vhosts v
+             JOIN cloudflare_zones z ON z.vhost_id IN (v.id, v.parent_vhost_id)
+             JOIN cloudflare_accounts a ON a.id = z.account_id
+             WHERE v.id = ? AND z.dns_mode = \'cloudflare\' AND a.status = \'active\'
+             ORDER BY (z.vhost_id = v.id) DESC
              LIMIT 1',
             [(int) $params['vhost_id']]
         );

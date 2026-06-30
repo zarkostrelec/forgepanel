@@ -41,8 +41,26 @@ final class SslController extends Controller
         $ctx = $this->ctx($request, 'ssl:write');
         $vhost = $ctx->vhostOr404((int) $request->param('id'));
 
+        // Poddomena: certifikat pokriva SAMO njen hostname (www.<poddomena> ne postoji u
+        // DNS-u i srušio bi izdavanje). Uz to osiguraj CF vezu roditelja → AutoSSL DNS-01,
+        // čime "Obnovi SSL" postaje jednoklik popravak i za postojeće poddomene.
+        if ($vhost['parent_vhost_id'] !== null) {
+            $hostnames = [(string) $vhost['domain']];
+            $parent = $this->app->db->one('SELECT id, domain FROM vhosts WHERE id = ?', [(int) $vhost['parent_vhost_id']]);
+            if ($parent !== null && str_ends_with((string) $vhost['domain'], '.' . $parent['domain'])) {
+                $label = substr((string) $vhost['domain'], 0, -strlen('.' . $parent['domain']));
+                try {
+                    \ForgePanel\Web\Core\DomainProvision::subdomain($this->app, (int) $parent['id'], (string) $parent['domain'], $label, (int) $vhost['id']);
+                } catch (\Throwable $e) {
+                    error_log('forgepanel: ssl.renew subdomain relink: ' . $e->getMessage());
+                }
+            }
+        } else {
+            $hostnames = [(string) $vhost['domain'], 'www.' . $vhost['domain']];
+        }
+
         $task_id = $this->app->tasks->enqueue('ssl.issue', [
-            'hostnames' => [$vhost['domain'], 'www.' . $vhost['domain']],
+            'hostnames' => $hostnames,
             'contact_email' => $this->setting('acme_email', $ctx->email),
             'vhost_id' => (int) $vhost['id'],
         ], $ctx->user_id);

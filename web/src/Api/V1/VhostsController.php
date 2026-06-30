@@ -48,6 +48,29 @@ final class VhostsController extends Controller
     {
         $ctx = $this->ctx($request, 'vhosts:write');
         $vhost = $ctx->vhostOr404((int) $request->param('id'));
+
+        // Poddomena: NE stvaraj zasebnu zonu — zapisi idu u zonu roditelja (+ CF veza za
+        // DNS-01), pa re-izdaj certifikat (sad kad veza postoji AutoSSL ide DNS-01).
+        if ($vhost['parent_vhost_id'] !== null) {
+            $parent = $this->app->db->one('SELECT id, domain FROM vhosts WHERE id = ?', [(int) $vhost['parent_vhost_id']]);
+            $dns = ['local' => false, 'cloudflare' => false];
+            if ($parent !== null && str_ends_with((string) $vhost['domain'], '.' . $parent['domain'])) {
+                $label = substr((string) $vhost['domain'], 0, -strlen('.' . $parent['domain']));
+                try {
+                    $dns = \ForgePanel\Web\Core\DomainProvision::subdomain($this->app, (int) $parent['id'], (string) $parent['domain'], $label, (int) $vhost['id']);
+                } catch (\Throwable $e) {
+                    error_log('forgepanel: subdomain dns repair: ' . $e->getMessage());
+                }
+            }
+            $ssl_task_id = $this->app->tasks->enqueue('ssl.issue', [
+                'hostnames' => [(string) $vhost['domain']],
+                'contact_email' => $this->setting('acme_email', $ctx->email),
+                'vhost_id' => (int) $vhost['id'],
+            ], $ctx->user_id);
+            $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.dns_repair', ['domain' => $vhost['domain'], 'subdomain' => true], $request->ip);
+            Response::ok(['dns' => $dns, 'ssl_task_id' => $ssl_task_id]);
+        }
+
         $dns = $this->provisionDns($ctx, $request, (int) $vhost['id'], (string) $vhost['domain'], (int) $vhost['subscription_id']);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.dns_repair', ['domain' => $vhost['domain']], $request->ip);
         Response::ok(['dns' => $dns]);
