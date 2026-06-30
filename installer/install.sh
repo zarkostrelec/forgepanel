@@ -665,7 +665,12 @@ optional_components() {
 # ---------------------------------------------------------------- 6. hardening
 hardening() {
     export DEBIAN_FRONTEND=noninteractive
-    apt-get install -y -q ufw fail2ban
+    # quota = setquota/repquota (disk project quota po vhostu); e2fsprogs (chattr) je u baznom sustavu.
+    # NAPOMENA: za enforcement disk kvote fs s /var/www mora biti montiran s prjquota
+    # (npr. ext4: tune2fs -O project,quota /dev/… + mount -o prjquota; xfs: pquota) — to se
+    # postavlja ručno/po želji jer remount korijenskog fs-a traži reboot. Bez toga je disk
+    # kvota no-op (panel nastavlja raditi), CPU/RAM kvote rade neovisno (cgroup, bez fs-a).
+    apt-get install -y -q ufw fail2ban quota
 
     ufw allow 22/tcp
     ufw allow 80/tcp

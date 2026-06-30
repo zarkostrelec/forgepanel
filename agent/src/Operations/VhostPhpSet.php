@@ -33,14 +33,16 @@ final class VhostPhpSet extends Operation
         // promjena verzije zadržava per-domena PHP override
         $settings = is_array($row) ? (json_decode((string) ($row['php_settings'] ?? ''), true) ?: []) : [];
 
+        // Dedicirani FPM servis je per-vhost (NEovisan o PHP verziji): writePool samo
+        // prepiše master conf na novu verziju i restarta isti servis. Stari pool ne
+        // postoji zasebno (removePool bi srušio upravo ovaj servis) — zato ga ne zovemo.
+        // $old se zadržava radi API kompatibilnosti taska.
+        unset($old);
         PhpFpm::writePool($new, $sys_user, $vhost_root, $settings);
         NginxConf::writeAndReload(
             NginxConf::VHOST_CONF_DIR . "/$domain.conf",
             NginxConf::templateFor($backend, $domain, $vhost_root . '/httpdocs', $new, $sys_user)
         );
-        if ($old !== $new) {
-            PhpFpm::removePool($old, $sys_user);
-        }
 
         return ['domain' => $domain, 'php_version' => $new];
     }

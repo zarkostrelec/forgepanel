@@ -219,7 +219,7 @@ final class VhostsController extends Controller
         $ctx->requireSubscription($subscription_id);
 
         $sub = $this->app->db->one(
-            'SELECT s.id, p.max_domains, p.php_versions, p.cpu_quota_pct, p.memory_max_bytes, p.tasks_max
+            'SELECT s.id, p.max_domains, p.php_versions, p.cpu_quota_pct, p.memory_max_bytes, p.tasks_max, p.disk_bytes
              FROM subscriptions s JOIN plans p ON p.id = s.plan_id
              WHERE s.id = ? AND s.status = \'active\'',
             [$subscription_id]
@@ -254,6 +254,7 @@ final class VhostsController extends Controller
             'cpu_quota_pct' => (int) $sub['cpu_quota_pct'],
             'memory_max_bytes' => (int) $sub['memory_max_bytes'],
             'tasks_max' => (int) $sub['tasks_max'],
+            'disk_bytes' => (int) $sub['disk_bytes'],
             'redirect_target' => $redirect_target,
             'redirect_code' => $redirect_code,
         ], $ctx->user_id);

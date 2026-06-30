@@ -100,6 +100,38 @@ final class Fs
         chmod($path, $mode);
     }
 
+    /**
+     * Disk project quota (ext4/xfs) za vhost dir: projid (= vhost_id) + hard limit u
+     * bajtovima — enforcement disk kvote plana PO VHOSTU bez CloudLinuxa. Best-effort:
+     * vraća false ako fs nije montiran s prjquota ili alati nedostaju (NE baca — disk
+     * kvota ne smije srušiti kreiranje vhosta). Validacija puta: unutar VHOST_ROOT.
+     */
+    public static function setProjectQuota(string $path, int $bytes, int $projid): bool
+    {
+        $real = realpath($path);
+        if ($real === false || $projid <= 0 || $bytes <= 0) {
+            return false;
+        }
+        if ($real !== Validator::VHOST_ROOT && !str_starts_with($real, Validator::VHOST_ROOT . '/')) {
+            return false;
+        }
+        $fstype = trim(Proc::run(['findmnt', '-no', 'FSTYPE', '--target', $real])->stdout);
+        $mount = trim(Proc::run(['findmnt', '-no', 'TARGET', '--target', $real])->stdout);
+        if ($mount === '') {
+            return false;
+        }
+        if ($fstype === 'xfs') {
+            $set = Proc::run(['xfs_quota', '-x', '-c', "project -s -p {$real} {$projid}", $mount]);
+            $lim = Proc::run(['xfs_quota', '-x', '-c', "limit -p bhard={$bytes} {$projid}", $mount]);
+            return $set->ok() && $lim->ok();
+        }
+        // ext4 i ostali quota-tools fs: projid + inherit flag (+P), pa hard limit u 1K blokovima
+        $chattr = Proc::run(['chattr', '-R', '-p', (string) $projid, '+P', $real]);
+        $blocks_kb = (int) ceil($bytes / 1024);
+        $setq = Proc::run(['setquota', '-P', (string) $projid, '0', (string) $blocks_kb, '0', '0', $mount]);
+        return $chattr->ok() && $setq->ok();
+    }
+
     private static function rrmdir(string $dir): void
     {
         $items = new \RecursiveIteratorIterator(

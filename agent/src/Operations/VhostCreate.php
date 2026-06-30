@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace ForgePanel\Agent\Operations;
 
+use ForgePanel\Agent\System\Fs;
 use ForgePanel\Agent\System\NginxConf;
 use ForgePanel\Agent\System\PhpFpm;
 use ForgePanel\Agent\System\Proc;
-use ForgePanel\Agent\System\Systemd;
 use ForgePanel\Agent\TaskContext;
 use ForgePanel\Agent\Validator;
 
@@ -71,16 +71,25 @@ final class VhostCreate extends Operation
         Proc::mustRun(['usermod', '-aG', $sys_user, 'nginx']);
         file_put_contents($docroot . '/index.html', "<!doctype html><title>$domain</title><h1>$domain</h1><p>ForgePanel</p>");
         Proc::mustRun(['chown', "$sys_user:$sys_user", $docroot . '/index.html']);
+
+        // Disk project quota (ext4/xfs) — enforcement disk kvote PLANA po vhostu (projid = vhost_id).
+        // Best-effort: zahtijeva fs montiran s prjquota (installer prerequisite); inače no-op, ne ruši create.
+        if (isset($params['disk_bytes']) && (int) $params['disk_bytes'] > 0) {
+            $ok = Fs::setProjectQuota($vhost_root, (int) $params['disk_bytes'], $vhost_id);
+            $context->output($ok
+                ? 'Disk project quota postavljena (' . (int) $params['disk_bytes'] . ' B)'
+                : 'Disk project quota preskočena (fs bez prjquota?) — best-effort');
+        }
         $context->progress(35);
 
-        $context->output("PHP-FPM {$php_version} pool ($sys_user, ondemand, open_basedir)");
+        $context->output("PHP-FPM {$php_version} dedicirani pool/servis ($sys_user, ondemand, open_basedir)");
         PhpFpm::writePool($php_version, $sys_user, $vhost_root);
         $context->progress(55);
 
         if (isset($params['cpu_quota_pct'], $params['memory_max_bytes'], $params['tasks_max'])) {
-            $context->output('cgroup v2 kvote (CPUQuota/MemoryMax/TasksMax)');
-            Systemd::writeResourceDropin(
-                "php{$php_version}-fpm.service",
+            $context->output('Per-vhost cgroup kvote (CPUQuota/MemoryMax/TasksMax) na dediciranom FPM servisu');
+            PhpFpm::setLimits(
+                $sys_user,
                 (int) $params['cpu_quota_pct'],
                 (int) $params['memory_max_bytes'],
                 (int) $params['tasks_max'],

@@ -156,8 +156,14 @@ final class MonitoringController extends Controller
     {
         $ctx = $this->ctx($request, 'monitoring:read');
         $scope = $_GET['scope'] ?? 'server';
-        if (!$ctx->isAdmin() && !preg_match('/^vhost:\d+$/', (string) $scope)) {
-            $scope = 'server'; // klijent dobiva samo agregat servera ili svoje vhostove
+        if (!$ctx->isAdmin()) {
+            // Klijent: ili agregat servera, ili VLASTITI vhost. vhostOr404 baca 404 za
+            // tuđi/nepostojeći vhost — bez ovoga bi se per-vhost metrike čitale cross-tenant.
+            if (preg_match('/^vhost:(\d+)$/', (string) $scope, $vm)) {
+                $ctx->vhostOr404((int) $vm[1]);
+            } else {
+                $scope = 'server';
+            }
         }
         $metric = preg_match('/^[a-z][a-z0-9_]{0,31}$/', (string) ($_GET['metric'] ?? '')) ? $_GET['metric'] : 'cpu_load1';
 

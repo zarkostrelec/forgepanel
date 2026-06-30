@@ -603,6 +603,31 @@ final class Scheduler
             }
         }
 
+        // Per-vhost CPU/RAM iz dediciranih FPM servisa (forge-fpm-vh_<id>.service) → scope 'vhost:<id>'.
+        // Omogućuje klijentski dashboard potrošnje vlastitih resursa (read putanja u
+        // MonitoringController već postoji). Moguće tek otkad svaki vhost ima zaseban cgroup.
+        foreach (glob('/sys/fs/cgroup/system.slice/forge-fpm-vh_*.service') ?: [] as $cg) {
+            if (!is_dir($cg) || !preg_match('/forge-fpm-vh_(\d+)\.service$/', $cg, $vm)) {
+                continue;
+            }
+            $scope = 'vhost:' . $vm[1];
+            $mem = (int) trim((string) @file_get_contents("$cg/memory.current"));
+            if ($mem > 0) {
+                $rows[] = [$scope, 'mem_bytes', (float) $mem];
+            }
+            if (preg_match('/usage_usec\s+(\d+)/', (string) @file_get_contents("$cg/cpu.stat"), $cm)) {
+                $key = "cpu:$scope";
+                if (isset($this->rate_last[$key])) {
+                    $dt = $now - $this->rate_last[$key][0];
+                    $dusec = (float) $cm[1] - $this->rate_last[$key][1];
+                    if ($dt > 0 && $dusec >= 0) {
+                        $rows[] = [$scope, 'cpu_pct', min(100.0, ($dusec / 1e6) / $dt / $cpu_count * 100)];
+                    }
+                }
+                $this->rate_last[$key] = [$now, (float) $cm[1]];
+            }
+        }
+
         // Batch insert
         $values = [];
         $params = [];
