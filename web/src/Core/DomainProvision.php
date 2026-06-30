@@ -92,7 +92,35 @@ final class DomainProvision
             'INSERT INTO mail_domains (domain, subscription_id, dkim_selector, dkim_txt) VALUES (?, ?, ?, ?)',
             [$domain, $subscription_id, $selector, $dkim_txt]
         );
-        return $app->db->lastId();
+        $mail_domain_id = $app->db->lastId();
+
+        // Ako lokalna DNS zona za domenu VEĆ postoji (npr. backfill postojeće domene):
+        // dodaj DKIM TXT u nju + sync. Za NOVE domene zona još ne postoji ovdje — DKIM
+        // uđe kasnije preko localZone()/DnsDefaults; zato i provjera postojanja zapisa
+        // (idempotentno, bez dupliranja).
+        if ($dkim_txt !== null) {
+            $zone = $app->db->one('SELECT id FROM dns_zones WHERE domain = ?', [$domain]);
+            if ($zone !== null) {
+                $name = $selector . '._domainkey';
+                $exists = $app->db->one(
+                    'SELECT 1 FROM dns_records WHERE zone_id = ? AND name = ? AND type = ?',
+                    [(int) $zone['id'], $name, 'TXT']
+                );
+                if ($exists === null) {
+                    $app->db->run(
+                        "INSERT INTO dns_records (zone_id, name, type, content, ttl) VALUES (?, ?, 'TXT', ?, 3600)",
+                        [(int) $zone['id'], $name, $dkim_txt]
+                    );
+                    try {
+                        DnsSync::sync($app, (int) $zone['id']);
+                    } catch (\Throwable $e) {
+                        error_log('forgepanel: mailDomain DKIM DNS sync (' . $domain . '): ' . $e->getMessage());
+                    }
+                }
+            }
+        }
+
+        return $mail_domain_id;
     }
 
     /**

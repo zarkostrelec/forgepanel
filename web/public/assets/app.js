@@ -1624,7 +1624,7 @@ async function pageWebsites() {
                             <option value="backup">${t('bulk.backup')}</option>
                             <option value="suspend">${t('bulk.suspend')}</option>
                             <option value="unsuspend">${t('bulk.unsuspend')}</option>
-                            ${state.me.role === 'admin' ? `<option value="reapply_isolation">${t('bulk.reapply_isolation')}</option>` : ''}
+                            ${state.me.role === 'admin' ? `<option value="reapply_isolation">${t('bulk.reapply_isolation')}</option><option value="provision_mail">${t('bulk.provision_mail')}</option>` : ''}
                         </select></div>
                     <div class="field" id="phpwrap"><label>PHP</label>
                         <select id="bphp" class="mono">${['8.5', '8.4', '8.3', '8.2', '8.1'].map((v) => `<option>${v}</option>`).join('')}</select></div>
