@@ -53,14 +53,32 @@ final class DatabasesController extends Controller
     private function index(Request $request): never
     {
         $ctx = $this->ctx($request, 'databases:read');
+
+        // Filter po domeni (?vhost_id=) — detalj domene prikazuje samo svoje baze.
+        $vhost_filter = (int) ($request->query('vhost_id') ?? 0);
+        if ($vhost_filter > 0) {
+            $ctx->vhostOr404($vhost_filter); // postojanje + vlasništvo
+            $dbs = $this->app->db->all(
+                'SELECT d.*, v.domain AS vhost_domain FROM db_databases d
+                 LEFT JOIN vhosts v ON v.id = d.vhost_id WHERE d.vhost_id = ? ORDER BY d.name',
+                [$vhost_filter]
+            );
+            $this->reconcileUsers($dbs);
+            Response::ok($this->withUsers($dbs));
+        }
+
         if ($ctx->isAdmin()) {
-            $dbs = $this->app->db->all('SELECT * FROM db_databases ORDER BY name');
+            $dbs = $this->app->db->all(
+                'SELECT d.*, v.domain AS vhost_domain FROM db_databases d
+                 LEFT JOIN vhosts v ON v.id = d.vhost_id ORDER BY d.name'
+            );
         } elseif ($ctx->subscription_ids === []) {
             Response::ok([]);
         } else {
             $placeholders = implode(',', array_fill(0, count($ctx->subscription_ids), '?'));
             $dbs = $this->app->db->all(
-                "SELECT * FROM db_databases WHERE subscription_id IN ($placeholders) ORDER BY name",
+                "SELECT d.*, v.domain AS vhost_domain FROM db_databases d
+                 LEFT JOIN vhosts v ON v.id = d.vhost_id WHERE d.subscription_id IN ($placeholders) ORDER BY d.name",
                 $ctx->subscription_ids
             );
         }
@@ -118,12 +136,21 @@ final class DatabasesController extends Controller
             throw new HttpException(422, 'invalid_database_name');
         }
 
-        $subscription_id = $request->int('subscription_id')
-            ?? ($ctx->subscription_ids[0] ?? ($ctx->isAdmin() ? $this->adminSubscription($ctx) : null));
-        if ($subscription_id === null) {
-            throw new HttpException(422, 'subscription_required');
+        // Baza se može vezati na konkretnu domenu (Plesk-style) — tada nasljeđuje njenu
+        // pretplatu i prikazuje se u kontekstu te domene. Bez vhost_id → baza pretplate.
+        $vhost_id = $request->int('vhost_id');
+        if ($vhost_id !== null && $vhost_id > 0) {
+            $vhost = $ctx->vhostOr404($vhost_id); // postojanje + vlasništvo
+            $subscription_id = (int) $vhost['subscription_id'];
+        } else {
+            $vhost_id = null;
+            $subscription_id = $request->int('subscription_id')
+                ?? ($ctx->subscription_ids[0] ?? ($ctx->isAdmin() ? $this->adminSubscription($ctx) : null));
+            if ($subscription_id === null) {
+                throw new HttpException(422, 'subscription_required');
+            }
+            $ctx->requireSubscription($subscription_id);
         }
-        $ctx->requireSubscription($subscription_id);
 
         $limit = $this->app->db->one(
             'SELECT p.max_databases, (SELECT COUNT(*) FROM db_databases d WHERE d.subscription_id = s.id) AS used
@@ -140,11 +167,11 @@ final class DatabasesController extends Controller
 
         $this->app->agent->call('db.create', ['name' => $name]);
         $this->app->db->run(
-            'INSERT INTO db_databases (subscription_id, name) VALUES (?, ?)',
-            [$subscription_id, $name]
+            'INSERT INTO db_databases (subscription_id, vhost_id, name) VALUES (?, ?, ?)',
+            [$subscription_id, $vhost_id, $name]
         );
-        $this->app->audit->log($ctx->user_id, $ctx->email, 'db.create', ['name' => $name], $request->ip);
-        Response::ok(['id' => $this->app->db->lastId(), 'name' => $name], 201);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'db.create', ['name' => $name, 'vhost_id' => $vhost_id], $request->ip);
+        Response::ok(['id' => $this->app->db->lastId(), 'name' => $name, 'vhost_id' => $vhost_id], 201);
     }
 
     private function delete(Request $request): never

@@ -101,6 +101,7 @@
     "vhost.status.suspended": "suspendirano",
     "vhost.status.error": "greška",
     "db.create": "Nova baza",
+    "db.domain": "Domena",
     "db.name": "Naziv baze",
     "db.user": "DB korisnik",
     "ssl.expires": "Vrijedi do",

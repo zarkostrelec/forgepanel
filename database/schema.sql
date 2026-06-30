@@ -153,10 +153,12 @@ CREATE TABLE mail_aliases (
 CREATE TABLE db_databases (
     id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     subscription_id INT UNSIGNED NOT NULL,
+    vhost_id        INT UNSIGNED NULL,
     name            VARCHAR(64) NOT NULL UNIQUE,
     size_bytes      BIGINT UNSIGNED NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id),
+    FOREIGN KEY (vhost_id) REFERENCES vhosts(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE db_users (

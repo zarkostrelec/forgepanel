@@ -1949,6 +1949,12 @@ async function pageWebsiteDetail(id) {
         </div>
     </div>
     ${phpSettingsCard(vhost)}
+    ${vhost.web_backend !== 'redirect' ? `
+    <div class="card mt">
+        <div class="page-head"><h2>${t('nav.databases')}</h2><div class="spacer"></div>
+            <button class="btn primary" id="newdb">${icon('plus')}${t('db.create')}</button></div>
+        <div id="dbs"></div>
+    </div>` : ''}
     <div class="grid cols-2 mt">
         <div class="card">
             <div class="page-head"><h2>${t('cron.title')}</h2></div>
@@ -2053,6 +2059,15 @@ async function pageWebsiteDetail(id) {
     stagingSection(vhost, main().querySelector('#staging'));
     appsSection(vhost, main().querySelector('#apps'));
     if (state.me.role === 'admin') terminalSection(vhost, main().querySelector('#term'));
+    if (vhost.web_backend !== 'redirect') {
+        const dbsBox = main().querySelector('#dbs');
+        databasesSection(vhost, dbsBox);
+        main().querySelector('#newdb').addEventListener('click', () => createDbModal({
+            vhostId: vhost.id,
+            domain: vhost.domain,
+            onCreated: () => databasesSection(vhost, dbsBox),
+        }));
+    }
     main().querySelector('#newstg').addEventListener('click', async () => {
         const sub = prompt(t('staging.prompt'), 'staging');
         if (!sub) return;
@@ -2578,46 +2593,54 @@ async function pageDatabases() {
     }
 
     const list = document.getElementById('dblist');
-    list.innerHTML = dbs.length ? dbs.map((d) => `
-        <div class="db-item">
-            <div class="db-head">
-                <div class="db-meta"><span class="mono db-title">${esc(d.name)}</span>
-                    <span class="db-sub mono">${fmtBytes(d.size_bytes)} · ${fmtDate(d.created_at)}</span></div>
-                <div class="db-acts">
-                    <button class="btn ghost" data-pma="${d.id}">${t('db.pma')}</button>
-                    <button class="btn ghost" data-user="${d.id}">${icon('plus')}${t('db.user')}</button>
-                    <button class="btn danger" data-del="${d.id}" data-name="${esc(d.name)}">${t('common.delete')}</button>
-                </div>
-            </div>
-            <div class="db-users">
-                ${(d.users && d.users.length) ? d.users.map((u) => `
-                    <div class="db-user">
-                        <span class="mono">${esc(u.username)}</span>
-                        <span class="badge ${Number(u.remote_access) ? 'warn' : ''}">${Number(u.remote_access) ? t('db.remote') : t('db.local')}</span>
-                        <div class="spacer"></div>
-                        <button class="btn ghost sm" data-uedit="${u.id}" data-db="${d.id}">${t('common.edit')}</button>
-                        <button class="btn danger sm" data-udel="${u.id}" data-db="${d.id}" data-uname="${esc(u.username)}">${t('common.delete')}</button>
-                    </div>`).join('') : `<div class="db-nousers">${t('db.no_users')}</div>`}
-            </div>
-        </div>`).join('') : `<div class="empty">${t('nav.databases')}: 0</div>`;
+    list.innerHTML = dbItemsHtml(dbs, { showDomain: true });
+    bindDbItems(list, dbs, pageDatabases);
+}
 
-    list.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+// db-item markup (dijele globalna stranica baza i sekcija na detalju domene)
+const dbItemsHtml = (dbs, { showDomain = false } = {}) => dbs.length ? dbs.map((d) => `
+    <div class="db-item">
+        <div class="db-head">
+            <div class="db-meta"><span class="mono db-title">${esc(d.name)}</span>
+                <span class="db-sub mono">${fmtBytes(d.size_bytes)} · ${fmtDate(d.created_at)}</span></div>
+            ${showDomain && d.vhost_domain ? `<span class="badge info" title="${t('db.domain')}">${icon('globe', 12)}${esc(d.vhost_domain)}</span>` : ''}
+            <div class="db-acts">
+                <button class="btn ghost" data-pma="${d.id}">${t('db.pma')}</button>
+                <button class="btn ghost" data-user="${d.id}">${icon('plus')}${t('db.user')}</button>
+                <button class="btn danger" data-del="${d.id}" data-name="${esc(d.name)}">${t('common.delete')}</button>
+            </div>
+        </div>
+        <div class="db-users">
+            ${(d.users && d.users.length) ? d.users.map((u) => `
+                <div class="db-user">
+                    <span class="mono">${esc(u.username)}</span>
+                    <span class="badge ${Number(u.remote_access) ? 'warn' : ''}">${Number(u.remote_access) ? t('db.remote') : t('db.local')}</span>
+                    <div class="spacer"></div>
+                    <button class="btn ghost sm" data-uedit="${u.id}" data-db="${d.id}">${t('common.edit')}</button>
+                    <button class="btn danger sm" data-udel="${u.id}" data-db="${d.id}" data-uname="${esc(u.username)}">${t('common.delete')}</button>
+                </div>`).join('') : `<div class="db-nousers">${t('db.no_users')}</div>`}
+        </div>
+    </div>`).join('') : `<div class="empty">${t('nav.databases')}: 0</div>`;
+
+// veže akcije nad db-itemima; `refresh` se zove nakon mutacije (stranica ili sekcija)
+function bindDbItems(scope, dbs, refresh) {
+    scope.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(`${t('common.confirm_delete')} (${b.dataset.name})`)) return;
-        try { await api(`/databases/${b.dataset.del}`, { method: 'DELETE' }); pageDatabases(); }
+        try { await api(`/databases/${b.dataset.del}`, { method: 'DELETE' }); refresh(); }
         catch (err) { toast(err.message, 'err'); }
     }));
-    list.querySelectorAll('[data-user]').forEach((b) => b.addEventListener('click', () => createDbUserModal(b.dataset.user)));
-    list.querySelectorAll('[data-uedit]').forEach((b) => b.addEventListener('click', () => {
+    scope.querySelectorAll('[data-user]').forEach((b) => b.addEventListener('click', () => createDbUserModal(b.dataset.user, refresh)));
+    scope.querySelectorAll('[data-uedit]').forEach((b) => b.addEventListener('click', () => {
         const d = dbs.find((x) => String(x.id) === b.dataset.db);
-        editDbUserModal(b.dataset.db, d.users.find((x) => String(x.id) === b.dataset.uedit));
+        editDbUserModal(b.dataset.db, d.users.find((x) => String(x.id) === b.dataset.uedit), refresh);
     }));
-    list.querySelectorAll('[data-udel]').forEach((b) => b.addEventListener('click', async () => {
+    scope.querySelectorAll('[data-udel]').forEach((b) => b.addEventListener('click', async () => {
         if (!confirm(`${t('common.confirm_delete')} (${b.dataset.uname})`)) return;
-        try { await api(`/databases/${b.dataset.db}/users/${b.dataset.udel}`, { method: 'DELETE' }); pageDatabases(); }
+        try { await api(`/databases/${b.dataset.db}/users/${b.dataset.udel}`, { method: 'DELETE' }); refresh(); }
         catch (err) { toast(err.message, 'err'); }
     }));
     // phpMyAdmin auto-login: jednokratan signed token → nova kartica
-    list.querySelectorAll('[data-pma]').forEach((b) => b.addEventListener('click', async () => {
+    scope.querySelectorAll('[data-pma]').forEach((b) => b.addEventListener('click', async () => {
         try {
             const r = await api(`/databases/${b.dataset.pma}/pma`, { method: 'POST' });
             window.open(r.url, '_blank', 'noopener');
@@ -2625,27 +2648,47 @@ async function pageDatabases() {
     }));
 }
 
-function createDbModal() {
+// Baze podataka pojedine domene (Plesk-style) — popis + kreiranje vezano na domenu
+async function databasesSection(vhost, container) {
+    container.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+    let dbs = [];
+    try {
+        dbs = await api(`/databases?vhost_id=${vhost.id}`);
+    } catch (err) {
+        container.innerHTML = `<div class="alert err">${esc(err.message)}</div>`;
+        return;
+    }
+    container.innerHTML = dbItemsHtml(dbs);
+    bindDbItems(container, dbs, () => databasesSection(vhost, container));
+}
+
+function createDbModal(opts = {}) {
+    const { vhostId = null, domain = null, onCreated = null } = opts;
+    const suggest = domain ? (domain.split('.')[0].replace(/[^a-z0-9]/g, '') || 'site') + '_db' : 'moja_baza';
     const modal = openModal(`
-        <div class="dialog-head"><h1>${t('db.create')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
+        <div class="dialog-head"><h1>${t('db.create')}${domain ? ` · <span class="mono" style="font-weight:600">${esc(domain)}</span>` : ''}</h1>
+            <button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="df">
             <div class="field"><label>${t('db.name')}</label>
-                <input name="name" required pattern="[a-z][a-z0-9_]{2,63}" class="mono" autocomplete="off">
-                <span class="hint">snake_case, npr. moja_baza</span></div>
+                <input name="name" required pattern="[a-z][a-z0-9_]{2,63}" class="mono" autocomplete="off" placeholder="${esc(suggest)}">
+                <span class="hint">snake_case, npr. ${esc(suggest)}</span></div>
             <div class="dialog-foot"><button type="button" class="btn" data-close>${t('common.cancel')}</button>
                 <button class="btn primary">${t('common.create')}</button></div>
         </form>`);
     modal.querySelector('#df').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const body = Object.fromEntries(new FormData(e.target));
+        if (vhostId) body.vhost_id = vhostId;
         try {
-            await api('/databases', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+            await api('/databases', { method: 'POST', body });
             modal.close();
-            location.hash = '#/databases'; route();
+            if (onCreated) onCreated();
+            else { location.hash = '#/databases'; route(); }
         } catch (err) { toast(err.message, 'err'); }
     });
 }
 
-function createDbUserModal(dbId) {
+function createDbUserModal(dbId, refresh = pageDatabases) {
     const modal = openModal(`
         <div class="dialog-head"><h1>${t('db.user')}</h1><button class="btn ghost icon" data-close>${icon('x')}</button></div>
         <form id="uf">
@@ -2663,12 +2706,12 @@ function createDbUserModal(dbId) {
             await api(`/databases/${dbId}/users`, { method: 'POST', body: {
                 username: f.get('username'), password: f.get('password'), remote_access: f.get('remote_access') === '1',
             } });
-            modal.close(); pageDatabases();
+            modal.close(); refresh();
         } catch (err) { toast(err.message, 'err'); }
     });
 }
 
-function editDbUserModal(dbId, user) {
+function editDbUserModal(dbId, user, refresh = pageDatabases) {
     const modal = openModal(`
         <div class="dialog-head"><h1>${t('db.user_edit')}: <span class="mono">${esc(user.username)}</span></h1>
             <button class="btn ghost icon" data-close>${icon('x')}</button></div>
@@ -2685,7 +2728,7 @@ function editDbUserModal(dbId, user) {
         const f = new FormData(e.target);
         const body = { remote_access: f.get('remote_access') === '1' };
         if (f.get('password')) body.password = f.get('password');
-        try { await api(`/databases/${dbId}/users/${user.id}`, { method: 'PUT', body }); modal.close(); pageDatabases(); }
+        try { await api(`/databases/${dbId}/users/${user.id}`, { method: 'PUT', body }); modal.close(); refresh(); }
         catch (err) { toast(err.message, 'err'); }
     });
 }

@@ -101,6 +101,7 @@
     "vhost.status.suspended": "suspended",
     "vhost.status.error": "error",
     "db.create": "New database",
+    "db.domain": "Domain",
     "db.name": "Database name",
     "db.user": "DB user",
     "ssl.expires": "Valid until",
