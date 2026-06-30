@@ -38,7 +38,7 @@ final class BackupsController extends Controller
     private function create(Request $request): never
     {
         $ctx = $this->ctx($request, 'backup:write');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'backup');
 
         $include_db = (bool) ($request->body['include_databases'] ?? true);
         $keep = max(1, min(365, $request->int('keep', 7) ?? 7));

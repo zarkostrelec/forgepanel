@@ -16,7 +16,14 @@ use ForgePanel\Web\Core\Router;
  */
 final class DelegationController extends Controller
 {
-    public const PERMS = ['files', 'git', 'cron', 'databases', 'ftp', 'mail', 'backup'];
+    /**
+     * Granularno provedive permisije — sve su per-vhost (resurs je vezan na vhost_id),
+     * pa ih AuthContext::vhostOr404($id, $perm) može enforceati. 'databases' i 'mail'
+     * NISU ovdje: db_databases/mail_domains su vezani na subscription_id, ne na vhost,
+     * pa se ne mogu granularno (po domeni) delegirati bez sheme promjene — delegirati
+     * ih značilo bi otključati SVE baze/mailove pretplate, što ruši izolaciju.
+     */
+    public const PERMS = ['files', 'git', 'cron', 'ftp', 'backup'];
 
     public function register(Router $router): void
     {

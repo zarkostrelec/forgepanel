@@ -25,7 +25,7 @@ final class GitController extends Controller
     private function show(Request $request): never
     {
         $ctx = $this->ctx($request, 'vhosts:read');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'git');
         $repo = $this->app->db->one(
             'SELECT id, repo_url, branch, deploy_key, webhook_secret, last_commit, last_deploy_at, post_deploy
              FROM git_repos WHERE vhost_id = ?',
@@ -37,7 +37,7 @@ final class GitController extends Controller
     private function configure(Request $request): never
     {
         $ctx = $this->ctx($request, 'vhosts:write');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'git');
 
         $repo_url = trim($request->str('repo_url') ?? '');
         $branch = trim($request->str('branch') ?? 'main');
@@ -82,7 +82,7 @@ final class GitController extends Controller
     private function deploy(Request $request): never
     {
         $ctx = $this->ctx($request, 'vhosts:write');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'git');
         $task_id = $this->enqueueDeploy((int) $vhost['id'], $ctx->user_id);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'git.deploy', ['domain' => $vhost['domain']], $request->ip);
         Response::ok(['task_id' => $task_id], 202);
@@ -91,7 +91,7 @@ final class GitController extends Controller
     private function remove(Request $request): never
     {
         $ctx = $this->ctx($request, 'vhosts:write');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'git');
         $this->app->db->run('DELETE FROM git_repos WHERE vhost_id = ?', [$vhost['id']]);
         Response::ok();
     }

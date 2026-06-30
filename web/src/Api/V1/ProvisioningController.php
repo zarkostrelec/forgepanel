@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ForgePanel\Web\Api\V1;
 
 use ForgePanel\Web\Core\Auth;
+use ForgePanel\Web\Core\AuthContext;
 use ForgePanel\Web\Core\HttpClient;
 use ForgePanel\Web\Core\HttpException;
 use ForgePanel\Web\Core\Request;
@@ -14,9 +15,15 @@ use ForgePanel\Web\Core\Router;
 /**
  * Provisioning API za billing (WHMCS/Blesta). account.* operacije +
  * webhook eventi. Traži scope `provisioning:write` na API tokenu.
+ *
+ * Vlasništvo + kapacitet (ResellerCapacity) gateaju SVAKU mutaciju: reseller
+ * smije provisionirati samo vlastite planove, ne preko svog pula, i samo nad
+ * vlastitim (i svojih klijenata) pretplatama — inače billing put zaobiđe limite.
  */
 final class ProvisioningController extends Controller
 {
+    use ResellerCapacity;
+
     public function register(Router $router): void
     {
         $router->add('POST', '/api/v1/provisioning/account/create', $this->create(...));
@@ -34,20 +41,25 @@ final class ProvisioningController extends Controller
             throw new HttpException(422, 'invalid_email');
         }
         $plan_id = $request->int('plan_id') ?? throw new HttpException(400, 'plan_required');
-        $plan = $this->app->db->one('SELECT id FROM plans WHERE id = ?', [$plan_id])
-            ?? throw new HttpException(422, 'invalid_plan');
+        // Vlasništvo plana (reseller smije samo globalni ili vlastiti) + kapacitet paketa
+        $this->assertPlanOwnership($ctx, $plan_id);
+        if (!$ctx->isAdmin()) {
+            $this->assertResellerCapacity($ctx->user_id, $plan_id);
+        }
         if ($this->app->db->one('SELECT 1 FROM users WHERE email = ?', [$email]) !== null) {
             throw new HttpException(409, 'email_exists');
         }
 
+        // Reseller-ovi provisionirani računi vežu se na njega (inače izlaze iz njegove kvote)
+        $reseller_id = $ctx->isAdmin() ? $request->int('reseller_id') : $ctx->user_id;
         $password = $request->str('password') ?? bin2hex(random_bytes(12));
         $client_role = $this->app->db->one("SELECT id FROM roles WHERE name = 'client'");
         $this->app->db->run(
-            'INSERT INTO users (email, password_hash, role_id) VALUES (?, ?, ?)',
-            [$email, Auth::hashPassword($password), $client_role['id']]
+            'INSERT INTO users (email, password_hash, role_id, reseller_id) VALUES (?, ?, ?, ?)',
+            [$email, Auth::hashPassword($password), $client_role['id'], $reseller_id]
         );
         $user_id = $this->app->db->lastId();
-        $this->app->db->run('INSERT INTO subscriptions (user_id, plan_id) VALUES (?, ?)', [$user_id, $plan['id']]);
+        $this->app->db->run('INSERT INTO subscriptions (user_id, plan_id) VALUES (?, ?)', [$user_id, $plan_id]);
         $subscription_id = $this->app->db->lastId();
 
         $this->emitWebhook('account.created', ['user_id' => $user_id, 'subscription_id' => $subscription_id, 'email' => $email]);
@@ -68,7 +80,7 @@ final class ProvisioningController extends Controller
     private function changeStatus(Request $request, string $status, string $event): never
     {
         $ctx = $this->prov($request);
-        $sub = $this->subscription($request);
+        $sub = $this->subscription($request, $ctx);
 
         $this->app->db->run('UPDATE subscriptions SET status = ? WHERE id = ?', [$status, $sub['id']]);
         $this->app->db->run('UPDATE users SET status = ? WHERE id = ?', [$status, $sub['user_id']]);
@@ -91,7 +103,7 @@ final class ProvisioningController extends Controller
     private function terminate(Request $request): never
     {
         $ctx = $this->prov($request);
-        $sub = $this->subscription($request);
+        $sub = $this->subscription($request, $ctx);
 
         // Briše sve vhostove (kroz task), pa subscription + usera
         foreach ($this->app->db->all('SELECT * FROM vhosts WHERE subscription_id = ?', [$sub['id']]) as $vhost) {
@@ -110,9 +122,13 @@ final class ProvisioningController extends Controller
     private function changePackage(Request $request): never
     {
         $ctx = $this->prov($request);
-        $sub = $this->subscription($request);
+        $sub = $this->subscription($request, $ctx);
         $plan_id = $request->int('plan_id') ?? throw new HttpException(400, 'plan_required');
-        $this->app->db->one('SELECT 1 FROM plans WHERE id = ?', [$plan_id]) ?? throw new HttpException(422, 'invalid_plan');
+        $this->assertPlanOwnership($ctx, $plan_id);
+        if (!$ctx->isAdmin()) {
+            // Reseller ne smije prebaciti klijenta na paket koji probija njegov pul
+            $this->assertResellerCapacity($ctx->user_id, $plan_id, (int) $sub['user_id']);
+        }
 
         $this->app->db->run('UPDATE subscriptions SET plan_id = ? WHERE id = ?', [$plan_id, $sub['id']]);
         $this->emitWebhook('account.changepackage', ['subscription_id' => $sub['id'], 'plan_id' => $plan_id]);
@@ -121,11 +137,15 @@ final class ProvisioningController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function subscription(Request $request): array
+    private function subscription(Request $request, AuthContext $ctx): array
     {
         $id = $request->int('subscription_id') ?? throw new HttpException(400, 'subscription_required');
-        return $this->app->db->one('SELECT * FROM subscriptions WHERE id = ?', [$id])
+        $sub = $this->app->db->one('SELECT * FROM subscriptions WHERE id = ?', [$id])
             ?? throw new HttpException(404, 'not_found');
+        // Vlasništvo: reseller smije provisionirati SAMO svoje (i svojih klijenata) pretplate;
+        // admin sve. Tuđa pretplata = 404 (ne razlikuje se od nepostojeće).
+        $ctx->requireSubscription((int) $sub['id']);
+        return $sub;
     }
 
     /** @param array<string, mixed> $payload */

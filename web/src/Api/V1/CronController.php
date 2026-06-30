@@ -22,7 +22,7 @@ final class CronController extends Controller
     private function index(Request $request): never
     {
         $ctx = $this->ctx($request, 'cron:read');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'cron');
         Response::ok($this->app->db->all(
             'SELECT id, schedule, command, enabled, last_run_at, last_exit_code FROM cron_jobs WHERE vhost_id = ? ORDER BY id',
             [$vhost['id']]
@@ -32,7 +32,7 @@ final class CronController extends Controller
     private function create(Request $request): never
     {
         $ctx = $this->ctx($request, 'cron:write');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'cron');
 
         $schedule = trim($request->str('schedule') ?? '');
         $command = trim($request->str('command') ?? '');
@@ -62,7 +62,7 @@ final class CronController extends Controller
     private function delete(Request $request): never
     {
         $ctx = $this->ctx($request, 'cron:write');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'cron');
 
         $deleted = $this->app->db->run(
             'DELETE FROM cron_jobs WHERE id = ? AND vhost_id = ?',
@@ -79,7 +79,7 @@ final class CronController extends Controller
     private function toggle(Request $request): never
     {
         $ctx = $this->ctx($request, 'cron:write');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'cron');
 
         $updated = $this->app->db->run(
             'UPDATE cron_jobs SET enabled = 1 - enabled WHERE id = ? AND vhost_id = ?',

@@ -22,6 +22,7 @@ final class AuthController extends Controller
         $router->add('GET', '/api/v1/auth/me', $this->me(...));
         $router->add('POST', '/api/v1/auth/twofa/setup', $this->twofaSetup(...));
         $router->add('POST', '/api/v1/auth/twofa/confirm', $this->twofaConfirm(...));
+        $router->add('POST', '/api/v1/auth/twofa/recovery-codes', $this->recoveryCodes(...));
         $router->add('POST', '/api/v1/auth/webauthn/login/options', $this->webauthnLoginOptions(...));
         $router->add('POST', '/api/v1/auth/webauthn/login', $this->webauthnLogin(...));
         $router->add('POST', '/api/v1/auth/webauthn/register/options', $this->webauthnRegisterOptions(...));
@@ -63,6 +64,8 @@ final class AuthController extends Controller
             'role' => $ctx->role,
             'lang' => $user['lang'] ?? 'hr',
             'twofa_enabled' => (bool) ($user['twofa_enabled'] ?? false),
+            'twofa_enforced' => $this->app->auth->twofaMandatoryForRole($ctx->role),
+            'recovery_codes_remaining' => $this->app->auth->recoveryCodesRemaining($ctx->user_id),
             'webauthn_keys' => (int) ($this->app->db->one(
                 'SELECT COUNT(*) AS n FROM webauthn_credentials WHERE user_id = ?',
                 [$ctx->user_id]
@@ -71,9 +74,20 @@ final class AuthController extends Controller
         ]);
     }
 
+    /**
+     * Auth za 2FA enrollment: puna sesija (dobrovoljno dodavanje 2FA) ILI ograničena
+     * setup-sesija (forsirani enrollment obavezne 2FA, prije nego sesija prođe 2FA).
+     */
+    private function setupCtx(Request $request): \ForgePanel\Web\Core\AuthContext
+    {
+        return $this->app->auth->authenticate($request)
+            ?? $this->app->auth->setupSessionContext($request)
+            ?? throw new HttpException(401, 'unauthenticated');
+    }
+
     private function twofaSetup(Request $request): never
     {
-        $ctx = $this->app->auth->requireAuth($request);
+        $ctx = $this->setupCtx($request);
         $secret = Totp::generateSecret();
         // Secret se sprema tek nakon potvrde ispravnim kodom (twofa/confirm)
         $this->app->db->run(
@@ -88,7 +102,7 @@ final class AuthController extends Controller
 
     private function twofaConfirm(Request $request): never
     {
-        $ctx = $this->app->auth->requireAuth($request);
+        $ctx = $this->setupCtx($request);
         $code = $request->str('code') ?? throw new HttpException(400, 'code_required');
 
         $pending = $this->app->db->one('SELECT value FROM settings WHERE `key` = ?', ['twofa_pending_' . $ctx->user_id]);
@@ -99,8 +113,27 @@ final class AuthController extends Controller
 
         $this->app->db->run('UPDATE users SET twofa_secret = ? WHERE id = ?', [$secret, $ctx->user_id]);
         $this->app->db->run('DELETE FROM settings WHERE `key` = ?', ['twofa_pending_' . $ctx->user_id]);
+        // Recovery kodovi (anti-lockout) — prikazuju se KORISNIKU samo sada
+        $recovery_codes = $this->app->auth->generateRecoveryCodes($ctx->user_id);
+        // Ako je ovo bio forsirani enrollment (setup-sesija), podigni je na punu sesiju
+        if ($request->bearer_token !== null) {
+            $this->app->auth->markSessionTwofaPassed($request->bearer_token);
+        }
         $this->app->audit->log($ctx->user_id, $ctx->email, 'auth.twofa_enabled', null, $request->ip);
-        Response::ok(['twofa_enabled' => true]);
+        Response::ok(['twofa_enabled' => true, 'recovery_codes' => $recovery_codes]);
+    }
+
+    /** Regeneracija recovery kodova (poništava stare). Samo uz već uključenu 2FA. */
+    private function recoveryCodes(Request $request): never
+    {
+        $ctx = $this->app->auth->requireAuth($request);
+        $user = $this->app->db->one('SELECT twofa_secret FROM users WHERE id = ?', [$ctx->user_id]);
+        if ($user === null || $user['twofa_secret'] === null) {
+            throw new HttpException(409, 'twofa_not_enabled');
+        }
+        $codes = $this->app->auth->generateRecoveryCodes($ctx->user_id);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'auth.recovery_regenerated', null, $request->ip);
+        Response::ok(['recovery_codes' => $codes]);
     }
 
     // ------------------------------------------------------------ WebAuthn drugi faktor

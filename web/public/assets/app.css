@@ -1235,3 +1235,20 @@ details[open] > .card-collapse > svg { transform: rotate(90deg); }
     .strip .metric:nth-child(n+3) { border-top: 1px solid var(--line); }
     .strip .m-val { font-size: 32px; }
 }
+
+/* 2FA recovery kodovi */
+.recovery-codes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 14px;
+    margin: 10px 0;
+    padding: 12px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: var(--line-2);
+    letter-spacing: 0.5px;
+}
+.recovery-codes span { user-select: all; }
+.recovery-meta { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.recovery-meta .muted { color: var(--muted, #8a90a2); font-size: var(--fs-sm); }
+@media (max-width: 520px) { .recovery-codes { grid-template-columns: 1fr; } }

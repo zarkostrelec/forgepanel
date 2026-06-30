@@ -22,7 +22,7 @@ final class FtpController extends Controller
     private function index(Request $request): never
     {
         $ctx = $this->ctx($request, 'ftp:read');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'ftp');
         Response::ok($this->app->db->all(
             'SELECT id, username, home_path, status FROM ftp_users WHERE vhost_id = ?',
             [$vhost['id']]
@@ -32,7 +32,7 @@ final class FtpController extends Controller
     private function create(Request $request): never
     {
         $ctx = $this->ctx($request, 'ftp:write');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'ftp');
 
         $username = strtolower(trim($request->str('username') ?? ''));
         if (!preg_match('/^[a-z][a-z0-9_.-]{2,31}$/', $username)) {
@@ -80,7 +80,7 @@ final class FtpController extends Controller
     private function delete(Request $request): never
     {
         $ctx = $this->ctx($request, 'ftp:write');
-        $vhost = $ctx->vhostOr404((int) $request->param('id'));
+        $vhost = $ctx->vhostOr404((int) $request->param('id'), 'ftp');
 
         $deleted = $this->app->db->run(
             'DELETE FROM ftp_users WHERE id = ? AND vhost_id = ?',

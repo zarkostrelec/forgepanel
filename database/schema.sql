@@ -379,6 +379,19 @@ CREATE TABLE webauthn_credentials (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 2FA recovery (backup) kodovi — anti-lockout kad korisnik izgubi TOTP uređaj.
+-- Visoko-entropijski kodovi → sha256 hash dovoljan; jednokratni (used_at).
+CREATE TABLE twofa_recovery_codes (
+    id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    user_id         INT UNSIGNED NOT NULL,
+    code_hash       CHAR(64) NOT NULL,                      -- sha256 normaliziranog koda
+    used_at         DATETIME NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_user_code (user_id, code_hash),
+    INDEX idx_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE settings (
     `key`           VARCHAR(128) PRIMARY KEY,
     value           JSON NOT NULL,

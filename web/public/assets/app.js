@@ -407,6 +407,8 @@ function renderLogin(step = 'login', preToken = null, methods = ['totp']) {
                 const r = await api('/auth/login', { method: 'POST', body: data });
                 state.token = r.token;
                 if (r.status === 'twofa_required') return renderLogin('twofa', r.token, r.methods ?? ['totp']);
+                // Obavezna 2FA, a korisnik je još nema → forsirani enrollment prije ulaska
+                if (r.status === 'twofa_setup_required') return renderTwofaSetup(r.token);
                 localStorage.setItem('fp_token', r.token);
                 await enter();
             } else {
@@ -441,6 +443,77 @@ function renderLogin(step = 'login', preToken = null, methods = ['totp']) {
         document.getElementById('wakey').addEventListener('click', () => webauthnAttempt().catch(showErr));
         if (!hasTotp) webauthnAttempt().catch(showErr); // jedina metoda → odmah traži ključ
     }
+}
+
+// Forsirani 2FA enrollment na prijavi: obavezna 2FA, a korisnik je još nema.
+// Ograničena setup-sesija (twofa_passed=0) smije SAMO postaviti TOTP; backend ju
+// nakon potvrde podiže na punu. Onda prikažemo recovery kodove pa uđemo.
+async function renderTwofaSetup(preToken) {
+    state.token = preToken;
+    const card = (inner) => {
+        $app.innerHTML = `
+        <div class="login-wrap"><div class="card login-card">
+            <div class="login-brand">
+                <div class="mark">${state.branding?.logo_url
+                    ? `<img src="${esc(state.branding.logo_url)}" alt="">`
+                    : icon('zap', 20)}</div>
+                <div class="name">${esc(brandName())}</div>
+            </div>
+            <div class="alert err" hidden></div>
+            ${inner}
+        </div></div>`;
+    };
+    const showErr = (err) => {
+        const a = $app.querySelector('.alert');
+        if (!a) { toast(err.message, 'err'); return; }
+        a.hidden = false;
+        a.textContent = t('auth.' + err.message) !== 'auth.' + err.message ? t('auth.' + err.message) : err.message;
+    };
+    try {
+        const s = await api('/auth/twofa/setup', { method: 'POST' });
+        card(`
+            <h2 style="margin:0 0 6px">${t('auth.twofa_setup_title')}</h2>
+            <p>${t('auth.twofa_setup_required')}</p>
+            <p>${t('profile.totp_scan')}</p>
+            <div class="mono" style="word-break:break-all;margin:8px 0">${esc(s.secret)}</div>
+            <a class="mono" href="${esc(s.otpauth_uri)}">${t('profile.totp_open_app')}</a>
+            <form id="f" style="display:flex;gap:8px;margin-top:12px">
+                <input name="code" inputmode="numeric" pattern="\\d{6}" maxlength="6" required autofocus class="mono" placeholder="000000" style="flex:1">
+                <button class="btn primary">${t('profile.confirm')}</button>
+            </form>`);
+        document.getElementById('f').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const r = await api('/auth/twofa/confirm', { method: 'POST', body: { code: new FormData(e.target).get('code') } });
+                card(`
+                    <h2 style="margin:0 0 6px">${t('profile.recovery_title')}</h2>
+                    <p>${t('profile.recovery_intro')}</p>
+                    ${recoveryCodesHtml(r.recovery_codes || [])}
+                    <button class="btn primary" id="cont" style="width:100%;margin-top:14px">${t('profile.recovery_saved')}</button>`);
+                bindRecoveryCopy($app, r.recovery_codes || []);
+                document.getElementById('cont').addEventListener('click', async () => {
+                    localStorage.setItem('fp_token', preToken);
+                    await enter();
+                });
+            } catch (err) { showErr(err); }
+        });
+    } catch (err) {
+        renderLogin('login');
+        showErr(err);
+    }
+}
+
+// Recovery kodovi: grid + "kopiraj sve" (prikaz dijeljen login-setup i profil stranicom)
+function recoveryCodesHtml(codes) {
+    return `
+    <div class="recovery-codes mono">${codes.map((c) => `<span>${esc(c)}</span>`).join('')}</div>
+    <button class="btn sm" type="button" id="rcopy" style="margin-top:8px">${t('profile.recovery_copy')}</button>`;
+}
+
+function bindRecoveryCopy(root, codes) {
+    root.querySelector('#rcopy')?.addEventListener('click', () => {
+        navigator.clipboard?.writeText(codes.join('\n')).then(() => toast(t('profile.recovery_copied')));
+    });
 }
 
 async function doLogout() {
@@ -4603,7 +4676,11 @@ async function pageProfile() {
     <div class="card">
         <h2>${t('profile.totp')}</h2>
         <div id="totpbox">${state.me.twofa_enabled
-            ? `<span class="badge ok">${t('profile.enabled')}</span>`
+            ? `<span class="badge ok">${t('profile.enabled')}</span>
+               <div class="recovery-meta">
+                   <span class="muted">${t('profile.recovery_remaining')}: <b class="mono">${state.me.recovery_codes_remaining ?? 0}</b></span>
+                   <button class="btn sm" id="recoveryregen">${t('profile.recovery_regenerate')}</button>
+               </div>`
             : `<p>${t('profile.totp_hint')}</p><button class="btn primary" id="totpsetup">${icon('lock')}${t('profile.totp_setup')}</button>`}</div>
     </div>
     <div class="card mt">
@@ -4631,11 +4708,30 @@ async function pageProfile() {
             document.getElementById('totpconfirm').addEventListener('submit', async (e) => {
                 e.preventDefault();
                 try {
-                    await api('/auth/twofa/confirm', { method: 'POST', body: { code: new FormData(e.target).get('code') } });
+                    const r = await api('/auth/twofa/confirm', { method: 'POST', body: { code: new FormData(e.target).get('code') } });
                     toast(t('profile.totp_enabled'));
-                    pageProfile();
+                    box.innerHTML = `
+                        <span class="badge ok">${t('profile.enabled')}</span>
+                        <h3 style="margin:14px 0 4px">${t('profile.recovery_title')}</h3>
+                        <p>${t('profile.recovery_intro')}</p>
+                        ${recoveryCodesHtml(r.recovery_codes || [])}`;
+                    bindRecoveryCopy(box, r.recovery_codes || []);
                 } catch (err) { toast(err.message, 'err'); }
             });
+        } catch (err) { toast(err.message, 'err'); }
+    });
+
+    document.getElementById('recoveryregen')?.addEventListener('click', async () => {
+        if (!confirm(t('profile.recovery_regenerate_confirm'))) return;
+        try {
+            const r = await api('/auth/twofa/recovery-codes', { method: 'POST' });
+            const box = document.getElementById('totpbox');
+            box.innerHTML = `
+                <span class="badge ok">${t('profile.enabled')}</span>
+                <h3 style="margin:14px 0 4px">${t('profile.recovery_title')}</h3>
+                <p>${t('profile.recovery_intro')}</p>
+                ${recoveryCodesHtml(r.recovery_codes || [])}`;
+            bindRecoveryCopy(box, r.recovery_codes || []);
         } catch (err) { toast(err.message, 'err'); }
     });
 

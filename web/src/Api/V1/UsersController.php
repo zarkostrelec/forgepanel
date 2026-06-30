@@ -16,6 +16,8 @@ use ForgePanel\Web\Core\Router;
  */
 final class UsersController extends Controller
 {
+    use ResellerCapacity;
+
     public function register(Router $router): void
     {
         $router->add('GET', '/api/v1/users', $this->index(...));
@@ -92,64 +94,6 @@ final class UsersController extends Controller
             'max_databases' => (int) ($databases['n'] ?? 0),
             'disk_bytes' => (int) ($sites['disk'] ?? 0),
         ];
-    }
-
-    /** Ukupni limit resellera (zbroj njegovih aktivnih pretplata-paketa) ili null ako nema paket. */
-    private function resellerCeiling(int $reseller_id): ?array
-    {
-        $row = $this->app->db->one(
-            "SELECT COALESCE(SUM(p.max_domains),0) AS max_domains, COALESCE(SUM(p.max_mailboxes),0) AS max_mailboxes,
-                    COALESCE(SUM(p.max_databases),0) AS max_databases, COALESCE(SUM(p.disk_bytes),0) AS disk_bytes,
-                    COUNT(*) AS n
-             FROM subscriptions s JOIN plans p ON p.id = s.plan_id
-             WHERE s.user_id = ? AND s.status = 'active'",
-            [$reseller_id]
-        );
-        return ($row === null || (int) $row['n'] === 0) ? null : [
-            'max_domains' => (int) $row['max_domains'], 'max_mailboxes' => (int) $row['max_mailboxes'],
-            'max_databases' => (int) $row['max_databases'], 'disk_bytes' => (int) $row['disk_bytes'],
-        ];
-    }
-
-    /**
-     * Već raspodijeljeno klijentima resellera (zbroj limita planova njihovih aktivnih
-     * pretplata). $exclude_user_id se izostavi (npr. pri izmjeni plana tog klijenta).
-     */
-    private function resellerAllocated(int $reseller_id, int $exclude_user_id = 0): array
-    {
-        $sql = "SELECT COALESCE(SUM(p.max_domains),0) AS max_domains, COALESCE(SUM(p.max_mailboxes),0) AS max_mailboxes,
-                    COALESCE(SUM(p.max_databases),0) AS max_databases, COALESCE(SUM(p.disk_bytes),0) AS disk_bytes
-             FROM subscriptions s JOIN users u ON u.id = s.user_id JOIN plans p ON p.id = s.plan_id
-             WHERE u.reseller_id = ? AND s.status = 'active'";
-        $params = [$reseller_id];
-        if ($exclude_user_id > 0) {
-            $sql .= ' AND u.id <> ?';
-            $params[] = $exclude_user_id;
-        }
-        $row = $this->app->db->one($sql, $params);
-        return [
-            'max_domains' => (int) ($row['max_domains'] ?? 0), 'max_mailboxes' => (int) ($row['max_mailboxes'] ?? 0),
-            'max_databases' => (int) ($row['max_databases'] ?? 0), 'disk_bytes' => (int) ($row['disk_bytes'] ?? 0),
-        ];
-    }
-
-    /** Reseller ne smije prodati više nego što mu paket dopušta. Bez paketa = bez gatea. */
-    private function assertResellerCapacity(int $reseller_id, int $new_plan_id, int $exclude_user_id = 0): void
-    {
-        $ceiling = $this->resellerCeiling($reseller_id);
-        if ($ceiling === null) {
-            return;
-        }
-        $alloc = $this->resellerAllocated($reseller_id, $exclude_user_id);
-        $new = $this->app->db->one(
-            'SELECT max_domains, max_mailboxes, max_databases, disk_bytes FROM plans WHERE id = ?',
-            [$new_plan_id]
-        ) ?? throw new HttpException(422, 'invalid_plan');
-        foreach (['max_domains', 'max_mailboxes', 'max_databases', 'disk_bytes'] as $k) {
-            if ((int) $alloc[$k] + (int) $new[$k] > (int) $ceiling[$k]) {
-                throw new HttpException(422, 'reseller_quota_exceeded');
-            }
-        }
     }
 
     private function index(Request $request): never
@@ -574,16 +518,5 @@ final class UsersController extends Controller
             throw new HttpException(404, 'not_found');
         }
         return $plan;
-    }
-
-    private function assertPlanOwnership(\ForgePanel\Web\Core\AuthContext $ctx, int $plan_id): void
-    {
-        $plan = $this->app->db->one('SELECT owner_user_id FROM plans WHERE id = ?', [$plan_id]);
-        if ($plan === null) {
-            throw new HttpException(422, 'invalid_plan');
-        }
-        if (!$ctx->isAdmin() && $plan['owner_user_id'] !== null && (int) $plan['owner_user_id'] !== $ctx->user_id) {
-            throw new HttpException(403, 'plan_not_yours');
-        }
     }
 }

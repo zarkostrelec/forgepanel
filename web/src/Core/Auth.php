@@ -13,6 +13,7 @@ final class Auth
     private const SESSION_TTL_S = 3600 * 8;
     private const MAX_FAILED = 5;
     private const WEBAUTHN_CHALLENGE_TTL_S = 300;
+    private const RECOVERY_CODE_COUNT = 10;
 
     public function __construct(
         private readonly Db $db,
@@ -52,7 +53,6 @@ final class Auth
 
         $this->db->run('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?', [$user['id']]);
 
-        // 2FA je obavezan za admina: admin bez secreta ulazi, ali UI forsira setup prije svega ostalog
         $methods = [];
         if ($user['twofa_secret'] !== null) {
             $methods[] = 'totp';
@@ -61,17 +61,40 @@ final class Auth
             $methods[] = 'webauthn';
         }
         $twofa_required = $methods !== [];
+        // Obavezna 2FA (admin uvijek; ostale role po politici): korisnik BEZ ijedne metode
+        // ne dobiva punu sesiju — dobiva ograničenu setup-sesiju i MORA postaviti 2FA.
+        // Ovo zatvara obilazak gdje se enforcement radio samo u UI-ju, a /api/v1 je prolazio.
+        $setup_required = !$twofa_required && $this->twofaMandatoryForRole((string) $user['role']);
 
         if ($this->isNewDevice((int) $user['id'], $request)) {
             $this->notifyNewDevice($user, $request);
         }
-        $token = $this->createSession((int) $user['id'], $request, twofa_passed: !$twofa_required);
+        // Sesija je 'prošla 2FA' SAMO ako 2FA niti treba verificirati niti postaviti
+        $passed = !$twofa_required && !$setup_required;
+        $token = $this->createSession((int) $user['id'], $request, twofa_passed: $passed);
         $this->db->run('UPDATE users SET last_login_at = NOW(), last_login_ip = ? WHERE id = ?', [$request->ip, $user['id']]);
-        $this->audit->log((int) $user['id'], $email, 'auth.login', ['twofa_pending' => $twofa_required], $request->ip);
+        $this->audit->log((int) $user['id'], $email, 'auth.login', ['twofa_pending' => $twofa_required, 'twofa_setup' => $setup_required], $request->ip);
 
+        if ($setup_required) {
+            return ['status' => 'twofa_setup_required', 'token' => $token];
+        }
         return $twofa_required
             ? ['status' => 'twofa_required', 'token' => $token, 'methods' => $methods]
             : ['status' => 'ok', 'token' => $token];
+    }
+
+    /** 2FA obavezan: admin UVIJEK; ostale role samo ako ih admin uvrsti u politiku (settings). */
+    public function twofaMandatoryForRole(string $role): bool
+    {
+        if ($role === 'admin') {
+            return true;
+        }
+        $row = $this->db->one("SELECT value FROM settings WHERE `key` = 'twofa_enforce_roles'");
+        if ($row === null) {
+            return false;
+        }
+        $roles = json_decode((string) $row['value'], true);
+        return is_array($roles) && in_array($role, $roles, true);
     }
 
     public function verifyTwofa(string $token, string $code, Request $request): void
@@ -86,18 +109,126 @@ final class Auth
         }
         // Brute-force zaštita i na drugom faktoru: isti lockout kao kod lozinke.
         $this->assertNotLocked($user);
-        if ($user['twofa_secret'] === null || !Totp::verify((string) $user['twofa_secret'], $code)) {
+        // Primarno TOTP; ako padne, prihvati jednokratni recovery kod (anti-lockout kad nema TOTP uređaja).
+        $totp_ok = $user['twofa_secret'] !== null && Totp::verify((string) $user['twofa_secret'], $code);
+        $recovery_used = !$totp_ok && $this->consumeRecoveryCode((int) $user['id'], $code);
+        if (!$totp_ok && !$recovery_used) {
             $this->registerFailure((int) $user['id'], (int) $user['failed_logins']);
             $this->audit->log($session['user_id'] ?? null, (string) ($user['email'] ?? '?'), 'auth.twofa_failed', null, $request->ip);
             throw new HttpException(401, 'invalid_code');
         }
         $this->db->run('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?', [$user['id']]);
         $this->db->run('UPDATE sessions SET twofa_passed = 1 WHERE id = ?', [$session['id']]);
+        if ($recovery_used) {
+            $this->audit->log((int) $user['id'], (string) ($user['email'] ?? '?'), 'auth.twofa_recovery_used',
+                ['remaining' => $this->recoveryCodesRemaining((int) $user['id'])], $request->ip);
+        }
     }
 
     public function userHasWebauthn(int $user_id): bool
     {
         return $this->db->one('SELECT 1 FROM webauthn_credentials WHERE user_id = ? LIMIT 1', [$user_id]) !== null;
+    }
+
+    private function userHasAnyTwofa(int $user_id): bool
+    {
+        $u = $this->db->one('SELECT twofa_secret FROM users WHERE id = ?', [$user_id]);
+        return ($u !== null && $u['twofa_secret'] !== null) || $this->userHasWebauthn($user_id);
+    }
+
+    /**
+     * Kontekst za OGRANIČENU setup-sesiju: prijava lozinkom prošla (twofa_passed=0),
+     * korisnik još NEMA 2FA, a 2FA mu je obavezan → smije SAMO postaviti 2FA
+     * (twofa/setup + twofa/confirm). Korisnik koji već IMA 2FA ovuda ne prolazi —
+     * on mora verificirati postojeći faktor, ne re-enrollati novi.
+     */
+    public function setupSessionContext(Request $request): ?AuthContext
+    {
+        if ($request->bearer_token === null) {
+            return null;
+        }
+        $session = $this->sessionRow((string) $request->bearer_token);
+        if ($session === null || (int) $session['twofa_passed'] === 1) {
+            return null;
+        }
+        // Isti session binding (IP+UA) kao puna sesija
+        if ($session['ip'] !== $request->ip
+            || !hash_equals((string) $session['user_agent_hash'], hash('sha256', $request->user_agent))
+        ) {
+            return null;
+        }
+        $user = $this->db->one(
+            'SELECT u.id, u.status, r.name AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?',
+            [(int) $session['user_id']]
+        );
+        if ($user === null || $user['status'] !== 'active') {
+            return null;
+        }
+        if ($this->userHasAnyTwofa((int) $user['id']) || !$this->twofaMandatoryForRole((string) $user['role'])) {
+            return null;
+        }
+        return $this->context((int) $user['id'], ['*']);
+    }
+
+    /** Podigni trenutnu sesiju na 'prošla 2FA' (nakon uspješnog forsiranog enrollmenta). */
+    public function markSessionTwofaPassed(string $token): void
+    {
+        $this->db->run('UPDATE sessions SET twofa_passed = 1 WHERE id = ?', [hash('sha256', $token)]);
+    }
+
+    /**
+     * Generira N recovery kodova, ZAMJENJUJE postojeće, vraća PLAINTEXT (prikazati jednom).
+     * Visoko-entropijski kodovi → sha256 hash je dovoljan (nisu lozinke). @return list<string>
+     */
+    public function generateRecoveryCodes(int $user_id, int $count = self::RECOVERY_CODE_COUNT): array
+    {
+        $this->db->run('DELETE FROM twofa_recovery_codes WHERE user_id = ?', [$user_id]);
+        $codes = [];
+        for ($i = 0; $i < $count; $i++) {
+            $code = self::formatRecoveryCode(bin2hex(random_bytes(5)));
+            $codes[] = $code;
+            $this->db->run(
+                'INSERT INTO twofa_recovery_codes (user_id, code_hash) VALUES (?, ?)',
+                [$user_id, hash('sha256', self::normalizeRecoveryCode($code))]
+            );
+        }
+        return $codes;
+    }
+
+    public function recoveryCodesRemaining(int $user_id): int
+    {
+        return (int) ($this->db->one(
+            'SELECT COUNT(*) AS n FROM twofa_recovery_codes WHERE user_id = ? AND used_at IS NULL',
+            [$user_id]
+        )['n'] ?? 0);
+    }
+
+    /** Troši (jednokratno) recovery kod ako odgovara nekorištenom hashu. */
+    private function consumeRecoveryCode(int $user_id, string $code): bool
+    {
+        $norm = self::normalizeRecoveryCode($code);
+        if (strlen($norm) < 8) {
+            return false;
+        }
+        $row = $this->db->one(
+            'SELECT id FROM twofa_recovery_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL',
+            [$user_id, hash('sha256', $norm)]
+        );
+        if ($row === null) {
+            return false;
+        }
+        $this->db->run('UPDATE twofa_recovery_codes SET used_at = NOW() WHERE id = ?', [$row['id']]);
+        return true;
+    }
+
+    private static function formatRecoveryCode(string $hex): string
+    {
+        return strtolower(substr($hex, 0, 5) . '-' . substr($hex, 5, 5));
+    }
+
+    private static function normalizeRecoveryCode(string $code): string
+    {
+        return strtolower((string) preg_replace('/[^A-Za-z0-9]/', '', $code));
     }
 
     /**
