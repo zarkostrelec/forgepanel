@@ -63,6 +63,10 @@ Na čistom Ubuntu 26.04 (multipass/LXD), nakon instalacije panela:
 Postojeći vhostovi (stari model, pool u dijeljenom `pool.d`) nastavljaju raditi
 NEPROMIJENJENO nakon deploya. Migriraju se na dedicirani servis kad ih se "dotakne"
 (promjena PHP verzije/postavki — `writePool` tada makne legacy pool i podigne servis).
-Za potpuni backfill (uklj. cgroup limite) postojećih vhostova preporuča se admin
-bulk akcija koja re-applya izolaciju (re-`writePool` + `setLimits` iz plana) — zaseban
-zadatak, izvesti nakon validacije na VM-u.
+
+Za **potpuni backfill** (uklj. cgroup limite + disk kvotu) postojećih vhostova postoji
+admin bulk akcija: **Web stranice → Bulk → "Primijeni izolaciju (FPM/kvote)"** (admin-only).
+Ona po vhostu enqueue-a `vhost.reapply_isolation` (op `VhostReapplyIsolation`):
+`writePool` (migracija na dedicirani servis) + `setLimits` (kvote iz plana) +
+`Fs::setProjectQuota` (disk). Idempotentno; pokrenuti TEK nakon validacije na VM-u.
+API: `POST /api/v1/bulk/vhosts {action:"reapply_isolation", vhost_ids:[…]}` (cap 200/poziv).

@@ -27,8 +27,12 @@ final class BulkController extends Controller
         $ctx = $this->ctx($request, 'vhosts:write');
 
         $action = $request->str('action') ?? '';
-        if (!in_array($action, ['php_set', 'ssl_renew', 'suspend', 'unsuspend', 'malware_scan', 'backup'], true)) {
+        if (!in_array($action, ['php_set', 'ssl_renew', 'suspend', 'unsuspend', 'malware_scan', 'backup', 'reapply_isolation'], true)) {
             throw new HttpException(422, 'invalid_action');
+        }
+        // Backfill izolacije re-provisionira sistemske FPM servise/kvote — isključivo admin.
+        if ($action === 'reapply_isolation') {
+            $ctx->requireRole('admin');
         }
         $ids = $request->body['vhost_ids'] ?? [];
         if (!is_array($ids) || $ids === [] || count($ids) > 200) {
@@ -72,8 +76,37 @@ final class BulkController extends Controller
             'suspend', 'unsuspend' => $this->suspend($vhost, $action, $ctx->user_id),
             'malware_scan' => $this->malwareScan($vhost, $ctx->user_id),
             'backup' => $this->backup($vhost, $ctx->user_id),
+            'reapply_isolation' => $this->reapplyIsolation($vhost, $ctx->user_id),
             default => null,
         };
+    }
+
+    /**
+     * Backfill izolacije na postojeći vhost: dedicirani FPM servis + cgroup kvote
+     * plana + disk project quota (vhost.reapply_isolation). Redirect vhostovi nemaju FPM.
+     * @param array<string, mixed> $vhost
+     */
+    private function reapplyIsolation(array $vhost, int $user_id): ?int
+    {
+        if (($vhost['web_backend'] ?? '') === 'redirect') {
+            return null;
+        }
+        $plan = $this->app->db->one(
+            'SELECT p.cpu_quota_pct, p.memory_max_bytes, p.tasks_max, p.disk_bytes
+             FROM plans p JOIN subscriptions s ON s.plan_id = p.id WHERE s.id = ?',
+            [(int) $vhost['subscription_id']]
+        );
+        $settings = json_decode((string) ($vhost['php_settings'] ?? ''), true) ?: [];
+        return $this->app->tasks->enqueue('vhost.reapply_isolation', [
+            'vhost_id' => (int) $vhost['id'],
+            'domain' => $vhost['domain'],
+            'php_version' => $vhost['php_version'],
+            'settings' => $settings,
+            'cpu_quota_pct' => (int) ($plan['cpu_quota_pct'] ?? 100),
+            'memory_max_bytes' => (int) ($plan['memory_max_bytes'] ?? 536_870_912),
+            'tasks_max' => (int) ($plan['tasks_max'] ?? 128),
+            'disk_bytes' => (int) ($plan['disk_bytes'] ?? 0),
+        ], $user_id);
     }
 
     /** @param array<string, mixed> $vhost */

@@ -396,6 +396,7 @@
     "bulk.backup": "Backup",
     "bulk.suspend": "Suspend",
     "bulk.unsuspend": "Unsuspend",
+    "bulk.reapply_isolation": "Apply isolation (FPM/quotas)",
     "bulk.run": "Run",
     "bulk.none_selected": "No websites selected",
     "bulk.done": "Done",

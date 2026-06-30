@@ -21,6 +21,7 @@ final class OperationRegistry
         'vhost.php_settings' => Operations\VhostPhpSettings::class,
         'vhost.suspend'     => Operations\VhostSuspend::class,
         'vhost.backend_set' => Operations\VhostBackendSet::class,
+        'vhost.reapply_isolation' => Operations\VhostReapplyIsolation::class,
         'dns.install'       => Operations\DnsInstall::class,
         'dns.zone_write'    => Operations\DnsZoneWrite::class,
         'dns.zone_delete'   => Operations\DnsZoneDelete::class,

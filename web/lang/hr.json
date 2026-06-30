@@ -396,6 +396,7 @@
     "bulk.backup": "Backup",
     "bulk.suspend": "Suspendiraj",
     "bulk.unsuspend": "Aktiviraj",
+    "bulk.reapply_isolation": "Primijeni izolaciju (FPM/kvote)",
     "bulk.run": "Pokreni",
     "bulk.none_selected": "Nijedna stranica nije odabrana",
     "bulk.done": "Gotovo",
