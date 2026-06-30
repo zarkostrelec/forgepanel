@@ -259,7 +259,20 @@ final class VhostsController extends Controller
             'redirect_code' => $redirect_code,
         ], $ctx->user_id);
 
-        // Auto-DNS: svaka nova domena odmah dobiva komplet zapisa (A/www/mail/MX/SPF/DMARC/CAA).
+        // Mail: nova domena odmah dobiva i mail domenu (DKIM + zapis u mail_domains) — e-mail
+        // računi se mogu kreirati bez ručnog dodavanja domene na Mail ekranu. Samo ako je mail
+        // (postfix) instaliran i nije redirect. MORA prije provisionDns: tako DKIM TXT uđe u
+        // DNS zonu (lokalnu i CF) u istom prolazu. Best-effort — ne ruši kreiranje web domene.
+        $mail_domain_id = null;
+        if ($web_backend !== 'redirect') {
+            try {
+                $mail_domain_id = \ForgePanel\Web\Core\DomainProvision::mailDomain($this->app, $domain, $subscription_id);
+            } catch (\Throwable $e) {
+                error_log('forgepanel: vhost.create mail provision: ' . $e->getMessage());
+            }
+        }
+
+        // Auto-DNS: svaka nova domena odmah dobiva komplet zapisa (A/www/mail/MX/SPF/DMARC/CAA + DKIM).
         // Ako je u formi odabran Cloudflare račun → zapiši ih u odgovarajuću CF zonu i poveži
         // vhost s tim računom (cloudflare_zones); inače lokalna BIND zona (ako je DNS instaliran).
         // MORA prije ssl.issue: agentov AutoSSL po toj vezi bira DNS-01 umjesto http-01.
@@ -287,7 +300,7 @@ final class VhostsController extends Controller
         );
 
         $this->app->audit->log($ctx->user_id, $ctx->email, 'vhost.create', ['domain' => $domain], $request->ip);
-        Response::ok(['vhost_id' => $vhost_id, 'task_id' => $task_id, 'ssl_task_id' => $ssl_task_id, 'dns' => $dns], 202);
+        Response::ok(['vhost_id' => $vhost_id, 'task_id' => $task_id, 'ssl_task_id' => $ssl_task_id, 'dns' => $dns, 'mail_domain_id' => $mail_domain_id], 202);
     }
 
     /**

@@ -55,6 +55,47 @@ final class DomainProvision
     }
 
     /**
+     * Mail: nova domena odmah dobiva i mail domenu (DKIM ključ + red u mail_domains), da
+     * se e-mail računi mogu kreirati bez ručnog dodavanja domene na Mail ekranu (isto kao
+     * MailController::createDomain, ali kao dio kreiranja web domene).
+     * Preskače ako mail (postfix) nije instaliran ili domena već ima mail (idempotentno).
+     *
+     * Zovi PRIJE localZone()/cloudflare() — tako DKIM TXT zapis uđe u DNS zonu (lokalnu i
+     * CF) u istom prolazu (DnsDefaults čita mail_domains.dkim_txt). DKIM je best-effort: ako
+     * agent padne, domena se svejedno zavede (mailboxi rade preko DB mapa; DKIM se može
+     * naknadno regenerirati), kreiranje web domene se ne ruši.
+     *
+     * @return ?int  id kreirane mail domene, ili null ako je preskočeno
+     */
+    public static function mailDomain(App $app, string $domain, int $subscription_id): ?int
+    {
+        $installed = $app->db->one("SELECT 1 FROM components WHERE name = 'postfix' AND status = 'installed'") !== null;
+        if (!$installed) {
+            return null;
+        }
+        if ($app->db->one('SELECT 1 FROM mail_domains WHERE domain = ?', [$domain]) !== null) {
+            return null;
+        }
+
+        // DKIM ključ per domena (best-effort) — agentova greška ne smije srušiti kreiranje domene
+        $selector = 'forge';
+        $dkim_txt = null;
+        try {
+            $dkim = $app->agent->call('mail.domain_add', ['domain' => $domain], timeout_s: 60);
+            $selector = (string) ($dkim['selector'] ?? 'forge');
+            $dkim_txt = $dkim['dkim_txt'] ?? null;
+        } catch (\Throwable $e) {
+            error_log('forgepanel: vhost.create mail.domain_add (' . $domain . '): ' . $e->getMessage());
+        }
+
+        $app->db->run(
+            'INSERT INTO mail_domains (domain, subscription_id, dkim_selector, dkim_txt) VALUES (?, ?, ?, ?)',
+            [$domain, $subscription_id, $selector, $dkim_txt]
+        );
+        return $app->db->lastId();
+    }
+
+    /**
      * Zapisuje standardni set zapisa u CF zonu koja po imenu odgovara domeni na danom
      * računu, te poveže vhost ↔ CF zona (cloudflare_zones, dns_mode = cloudflare).
      * Zona MORA već postojati na CF računu — token nema ovlast kreiranja zone.
