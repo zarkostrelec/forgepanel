@@ -3432,7 +3432,7 @@ async function pageMail() {
     ${tabsHtml('mail', 'mail')}
     <div class="page-head"><div class="spacer"></div>
         ${wm?.hostname
-            ? `<a class="btn" href="https://${esc(wm.hostname)}" target="_blank" rel="noopener">${icon('mail')}${t('mail.webmail')}</a>`
+            ? `<a class="btn" href="https://${esc(wm.hostname)}" target="_blank" rel="noopener">${icon('mail')}${t('mail.webmail')}</a>${state.me.role === 'admin' ? `<button class="btn" id="wmreconf" title="${t('mail.webmail_reconfigure_hint')}">${icon('refresh')}${t('mail.webmail_reconfigure')}</button>` : ''}`
             : state.me.role === 'admin' ? `<button class="btn" id="wmsetup">${icon('mail')}${t('mail.webmail_install')}</button>` : ''}
         <button class="btn primary" id="newdom">${icon('plus')}${t('mail.new_domain')}</button></div>
     <div class="card" id="domains">${t('common.loading')}</div>
@@ -3443,6 +3443,17 @@ async function pageMail() {
         if (!hostname) return;
         try {
             const r = await api('/mail/webmail', { method: 'POST', body: { hostname } });
+            watchTask(r.task_id, 'mail.webmail_setup');
+            toast(t('mail.webmail_installing'));
+        } catch (err) { toast(err.message, 'err'); }
+    });
+
+    // Rekonfiguriraj webmail — ponovno pokrene (idempotentni) setup i prepiše Roundcube
+    // config (npr. nakon popravka IMAP/SMTP TLS postavki). Zadrži postojeći hostname.
+    document.getElementById('wmreconf')?.addEventListener('click', async () => {
+        if (!await confirmDialog(t('mail.webmail_reconfigure_confirm'))) return;
+        try {
+            const r = await api('/mail/webmail', { method: 'POST', body: { hostname: wm.hostname } });
             watchTask(r.task_id, 'mail.webmail_setup');
             toast(t('mail.webmail_installing'));
         } catch (err) { toast(err.message, 'err'); }

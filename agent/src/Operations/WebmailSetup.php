@@ -83,10 +83,16 @@ final class WebmailSetup extends Operation
         <?php
         /* ForgePanel — Roundcube konfiguracija (NE uređivati ručno, panel je prepisuje) */
         \$config['db_dsnw'] = 'mysql://roundcube:{$rc_pass}@localhost/roundcube';
-        \$config['imap_host'] = 'localhost:143';
-        \$config['smtp_host'] = 'localhost:587';
+        /* IMAP/SMTP preko TLS-a na loopbacku: Dovecot/Postfix ne dopuštaju plaintext
+           auth na NEšifriranoj vezi (disable_plaintext_auth=yes) → prijava bi padala
+           ("Login failed") s ispravnom lozinkom. Cert je izdan za panel FQDN (ne za
+           'localhost'), pa na loopbacku isključujemo provjeru peera. */
+        \$config['imap_host'] = 'ssl://localhost:993';
+        \$config['imap_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]];
+        \$config['smtp_host'] = 'ssl://localhost:465';
         \$config['smtp_user'] = '%u';
         \$config['smtp_pass'] = '%p';
+        \$config['smtp_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]];
         \$config['des_key'] = '{$des_key}';
         \$config['product_name'] = 'Webmail';
         \$config['support_url'] = '';
