@@ -115,21 +115,28 @@ final class Fs
         if ($real !== Validator::VHOST_ROOT && !str_starts_with($real, Validator::VHOST_ROOT . '/')) {
             return false;
         }
-        $fstype = trim(Proc::run(['findmnt', '-no', 'FSTYPE', '--target', $real])->stdout);
-        $mount = trim(Proc::run(['findmnt', '-no', 'TARGET', '--target', $real])->stdout);
-        if ($mount === '') {
+        // Best-effort: na PHP 8.3+ proc_open BACA ako binarni alat (findmnt/chattr/setquota/
+        // xfs_quota) ne postoji. Sve omotamo i tiho vraćamo false — disk kvota NIKAD ne smije
+        // srušiti operaciju (kreiranje/izolaciju) zbog nepostojećih alata ili fs-a bez prjquota.
+        try {
+            $fstype = trim(Proc::run(['findmnt', '-no', 'FSTYPE', '--target', $real])->stdout);
+            $mount = trim(Proc::run(['findmnt', '-no', 'TARGET', '--target', $real])->stdout);
+            if ($mount === '') {
+                return false;
+            }
+            if ($fstype === 'xfs') {
+                $set = Proc::run(['xfs_quota', '-x', '-c', "project -s -p {$real} {$projid}", $mount]);
+                $lim = Proc::run(['xfs_quota', '-x', '-c', "limit -p bhard={$bytes} {$projid}", $mount]);
+                return $set->ok() && $lim->ok();
+            }
+            // ext4 i ostali quota-tools fs: projid + inherit flag (+P), pa hard limit u 1K blokovima
+            $chattr = Proc::run(['chattr', '-R', '-p', (string) $projid, '+P', $real]);
+            $blocks_kb = (int) ceil($bytes / 1024);
+            $setq = Proc::run(['setquota', '-P', (string) $projid, '0', (string) $blocks_kb, '0', '0', $mount]);
+            return $chattr->ok() && $setq->ok();
+        } catch (\Throwable) {
             return false;
         }
-        if ($fstype === 'xfs') {
-            $set = Proc::run(['xfs_quota', '-x', '-c', "project -s -p {$real} {$projid}", $mount]);
-            $lim = Proc::run(['xfs_quota', '-x', '-c', "limit -p bhard={$bytes} {$projid}", $mount]);
-            return $set->ok() && $lim->ok();
-        }
-        // ext4 i ostali quota-tools fs: projid + inherit flag (+P), pa hard limit u 1K blokovima
-        $chattr = Proc::run(['chattr', '-R', '-p', (string) $projid, '+P', $real]);
-        $blocks_kb = (int) ceil($bytes / 1024);
-        $setq = Proc::run(['setquota', '-P', (string) $projid, '0', (string) $blocks_kb, '0', '0', $mount]);
-        return $chattr->ok() && $setq->ok();
     }
 
     private static function rrmdir(string $dir): void
