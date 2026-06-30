@@ -425,7 +425,7 @@
     "bulk.suspend": "Suspendiraj",
     "bulk.unsuspend": "Aktiviraj",
     "bulk.reapply_isolation": "Primijeni izolaciju (FPM/kvote)",
-    "bulk.provision_mail": "Dodaj mail domenu (DKIM)",
+    "bulk.provision_setup": "Dovrši postavljanje (DNS + mail)",
     "bulk.run": "Pokreni",
     "bulk.none_selected": "Nijedna stranica nije odabrana",
     "bulk.done": "Gotovo",

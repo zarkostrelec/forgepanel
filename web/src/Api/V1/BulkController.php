@@ -27,17 +27,12 @@ final class BulkController extends Controller
         $ctx = $this->ctx($request, 'vhosts:write');
 
         $action = $request->str('action') ?? '';
-        if (!in_array($action, ['php_set', 'ssl_renew', 'suspend', 'unsuspend', 'malware_scan', 'backup', 'reapply_isolation', 'provision_mail'], true)) {
+        if (!in_array($action, ['php_set', 'ssl_renew', 'suspend', 'unsuspend', 'malware_scan', 'backup', 'reapply_isolation', 'provision_setup'], true)) {
             throw new HttpException(422, 'invalid_action');
         }
-        // Backfill izolacije/maila dira sistemsku konfiguraciju (FPM, DKIM, DNS) — samo admin.
-        if ($action === 'reapply_isolation' || $action === 'provision_mail') {
+        // Backfill izolacije/postavljanja dira sistemsku konfiguraciju (FPM, DNS, DKIM) — samo admin.
+        if ($action === 'reapply_isolation' || $action === 'provision_setup') {
             $ctx->requireRole('admin');
-        }
-        // Backfill maila nema smisla bez instaliranog mail stacka — jasna greška umjesto tihog no-opa.
-        if ($action === 'provision_mail'
-            && $this->app->db->one("SELECT 1 FROM components WHERE name = 'postfix' AND status = 'installed'") === null) {
-            throw new HttpException(409, 'mail_not_installed');
         }
         $ids = $request->body['vhost_ids'] ?? [];
         if (!is_array($ids) || $ids === [] || count($ids) > 200) {
@@ -82,28 +77,69 @@ final class BulkController extends Controller
             'malware_scan' => $this->malwareScan($vhost, $ctx->user_id),
             'backup' => $this->backup($vhost, $ctx->user_id),
             'reapply_isolation' => $this->reapplyIsolation($vhost, $ctx->user_id),
-            'provision_mail' => $this->provisionMail($vhost),
+            'provision_setup' => $this->provisionSetup($vhost),
             default => null,
         };
     }
 
     /**
-     * Backfill mail domene na postojeći vhost: DKIM + red u mail_domains (+ DKIM TXT u
-     * postojeću DNS zonu, ako je lokalna). Idempotentno; preskače redirect i poddomene
-     * (mail ide na apex domenu) te slučaj kad mail nije instaliran. Sinkrono (bez taska).
+     * Backfill kompletnog postavljanja na postojeći vhost — sve što nova domena dobije
+     * automatski pri kreiranju, ali "od početka do kraja" za već postojeće:
+     *   - apex: lokalna BIND zona sa standardnim zapisima (A/www/mail/MX/SPF/DMARC/CAA) +
+     *     mail domena (DKIM, mail_domains) — DKIM TXT uđe i u zonu,
+     *   - poddomena: A/AAAA zapis u zonu roditelja (osigura zonu roditelja ako fali),
+     *   - redirect: ništa (nema vlastiti DNS/mail).
+     * Sve idempotentno i best-effort (komponenta koja nije instalirana se preskače; greška
+     * jednog koraka ne prekida ostale). Sinkrono — bez taska za pratiti.
      * @param array<string, mixed> $vhost
      */
-    private function provisionMail(array $vhost): ?int
+    private function provisionSetup(array $vhost): ?int
     {
-        if (($vhost['web_backend'] ?? '') === 'redirect' || ($vhost['parent_vhost_id'] ?? null) !== null) {
+        if (($vhost['web_backend'] ?? '') === 'redirect') {
             return null;
         }
-        \ForgePanel\Web\Core\DomainProvision::mailDomain(
-            $this->app,
-            (string) $vhost['domain'],
-            (int) $vhost['subscription_id']
-        );
-        return null; // sinkrono — nema taska za pratiti (mail domena je odmah zavedena)
+        $domain = (string) $vhost['domain'];
+
+        // Poddomena: DNS ide u zonu roditelja. Prvo osiguraj zonu roditelja (idempotentno,
+        // neovisno o redoslijedu selekcije), pa dodaj A/AAAA zapis poddomene.
+        if (($vhost['parent_vhost_id'] ?? null) !== null) {
+            $parent = $this->app->db->one(
+                'SELECT id, domain, subscription_id FROM vhosts WHERE id = ?',
+                [(int) $vhost['parent_vhost_id']]
+            );
+            if ($parent !== null && str_ends_with($domain, '.' . $parent['domain'])) {
+                $this->safe(fn () => \ForgePanel\Web\Core\DomainProvision::localZone(
+                    $this->app,
+                    (string) $parent['domain'],
+                    (int) $parent['subscription_id']
+                ));
+                $label = substr($domain, 0, -strlen('.' . $parent['domain']));
+                $this->safe(fn () => \ForgePanel\Web\Core\DomainProvision::subdomain(
+                    $this->app,
+                    (int) $parent['id'],
+                    (string) $parent['domain'],
+                    $label,
+                    (int) $vhost['id']
+                ));
+            }
+            return null;
+        }
+
+        // Apex: mail PRIJE zone (tako DKIM TXT uđe u zonu) + lokalna DNS zona.
+        $sub = (int) $vhost['subscription_id'];
+        $this->safe(fn () => \ForgePanel\Web\Core\DomainProvision::mailDomain($this->app, $domain, $sub));
+        $this->safe(fn () => \ForgePanel\Web\Core\DomainProvision::localZone($this->app, $domain, $sub));
+        return null;
+    }
+
+    /** Pokreni jedan provisioning korak best-effort — greška ne prekida ostale korake/domene. */
+    private function safe(callable $fn): void
+    {
+        try {
+            $fn();
+        } catch (\Throwable $e) {
+            error_log('forgepanel: bulk provision_setup: ' . $e->getMessage());
+        }
     }
 
     /**

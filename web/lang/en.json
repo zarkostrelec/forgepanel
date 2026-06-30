@@ -425,7 +425,7 @@
     "bulk.suspend": "Suspend",
     "bulk.unsuspend": "Unsuspend",
     "bulk.reapply_isolation": "Apply isolation (FPM/quotas)",
-    "bulk.provision_mail": "Add mail domain (DKIM)",
+    "bulk.provision_setup": "Finish setup (DNS + mail)",
     "bulk.run": "Run",
     "bulk.none_selected": "No websites selected",
     "bulk.done": "Done",
