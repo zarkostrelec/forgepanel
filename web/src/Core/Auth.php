@@ -83,12 +83,14 @@ final class Auth
             : ['status' => 'ok', 'token' => $token];
     }
 
-    /** 2FA obavezan: admin UVIJEK; ostale role samo ako ih admin uvrsti u politiku (settings). */
+    /**
+     * 2FA obavezan? Enforcement je OPT-IN preko settings 'twofa_enforce_roles'
+     * (JSON lista rola, npr. ["admin"] ili ["admin","reseller"]). Default (nema
+     * postavke) = nitko se ne forsira — dobrovoljni 2FA i recovery kodovi i dalje rade.
+     * Za spec ponašanje (admin obavezno) postaviti ["admin"] u settings.
+     */
     public function twofaMandatoryForRole(string $role): bool
     {
-        if ($role === 'admin') {
-            return true;
-        }
         $row = $this->db->one("SELECT value FROM settings WHERE `key` = 'twofa_enforce_roles'");
         if ($row === null) {
             return false;
