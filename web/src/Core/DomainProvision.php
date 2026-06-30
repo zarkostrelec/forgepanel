@@ -214,6 +214,16 @@ final class DomainProvision
             [$parent_domain]
         );
         if ($acct === null) {
+            // Dijagnostika: zona JE vezana na CF račun, ali račun nije aktivan (token
+            // opozvan/nevažeći) → poddomena tiho pada na http-01; ostavi trag u logu.
+            $inactive = $app->db->one(
+                'SELECT 1 FROM dns_zones z JOIN cloudflare_accounts a ON a.id = z.cf_account_id
+                 WHERE z.domain = ? AND a.status <> \'active\' LIMIT 1',
+                [$parent_domain]
+            );
+            if ($inactive !== null) {
+                error_log("forgepanel: subdomain CF: matična zona $parent_domain ima neaktivan CF račun — DNS-01 preskočen, provjeri token");
+            }
             return null;
         }
         try {

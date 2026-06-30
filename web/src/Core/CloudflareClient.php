@@ -20,14 +20,27 @@ final class CloudflareClient
         return ['ok' => ($res['success'] ?? false) === true];
     }
 
-    /** @return list<array{id: string, name: string}> */
+    /**
+     * Sve zone računa (paginirano). Bez paginacije bi se vidjelo samo prvih 50 — račun
+     * resellera/agencije lako ima više, pa bi lookup zone po imenu (npr. za poddomenin
+     * DNS-01) tiho promašio. Tvrdi limit (40 str. = 2000 zona) kao osigurač.
+     * @return list<array{id: string, name: string}>
+     */
     public function zones(): array
     {
-        $res = $this->request('GET', '/zones?per_page=50');
-        return array_map(
-            static fn (array $z) => ['id' => $z['id'], 'name' => $z['name']],
-            $res['result'] ?? []
-        );
+        $out = [];
+        $page = 1;
+        do {
+            $res = $this->request('GET', "/zones?per_page=50&page=$page");
+            foreach ($res['result'] ?? [] as $z) {
+                if (isset($z['id'], $z['name'])) {
+                    $out[] = ['id' => (string) $z['id'], 'name' => (string) $z['name']];
+                }
+            }
+            $total_pages = (int) ($res['result_info']['total_pages'] ?? 1);
+            $page++;
+        } while ($page <= $total_pages && $page <= 40);
+        return $out;
     }
 
     /** @return list<array<string, mixed>> */
