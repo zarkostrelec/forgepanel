@@ -531,16 +531,16 @@ function toggleTheme() {
 // rail: grupe modula; grupe s više stranica dobivaju tab strip (tabsHtml)
 const RAIL = [
     { id: 'dashboard', icon: 'grid', label: 'nav.dashboard', key: 'd', pages: ['dashboard'] },
-    { id: 'websites', icon: 'globe', label: 'nav.websites', key: 's', pages: ['websites'] },
-    { id: 'files', icon: 'folder', label: 'nav.files', key: 'f', pages: ['files'] },
-    { id: 'databases', icon: 'db', label: 'nav.databases', key: 'b', pages: ['databases'] },
-    { id: 'mail', icon: 'mail', label: 'nav.mail', key: 'e', pages: ['mail', 'deliverability'] },
-    { id: 'docker', icon: 'box', label: 'nav.docker', key: 'k', pages: ['docker'] },
-    { id: 'backups', icon: 'download', label: 'nav.backups', key: 'a', pages: ['backups'] },
-    { id: 'monitoring', icon: 'pulse', label: 'nav.monitoring', key: 'm', pages: ['monitoring', 'tasks'] },
+    { id: 'websites', icon: 'globe', label: 'nav.websites', key: 's', pages: ['websites'], section: 'nav.sec_web', count: 'vhosts' },
     { id: 'protect', icon: 'shield', label: 'nav.protect', key: 'p', pages: ['ssl', 'dns', 'cloudflare', 'security', 'firewall'] },
+    { id: 'files', icon: 'folder', label: 'nav.files', key: 'f', pages: ['files'] },
+    { id: 'databases', icon: 'db', label: 'nav.databases', key: 'b', pages: ['databases'], section: 'nav.sec_data', count: 'databases' },
+    { id: 'mail', icon: 'mail', label: 'nav.mail', key: 'e', pages: ['mail', 'deliverability'], count: 'mail' },
+    { id: 'backups', icon: 'download', label: 'nav.backups', key: 'a', pages: ['backups'] },
+    { id: 'monitoring', icon: 'pulse', label: 'nav.monitoring', key: 'm', pages: ['monitoring', 'tasks'], section: 'nav.sec_system' },
+    { id: 'docker', icon: 'box', label: 'nav.docker', key: 'k', pages: ['docker'] },
     { id: 'server', icon: 'server', label: 'nav.server', key: 'u', roles: ['admin'], pages: ['updates', 'config', 'system', 'migrator', 'distribution', 'licensing'] },
-    { id: 'users', icon: 'users', label: 'nav.users', key: 'o', roles: ['admin', 'reseller'], pages: ['users'] },
+    { id: 'users', icon: 'users', label: 'nav.users', key: 'o', roles: ['admin', 'reseller'], pages: ['users'], count: 'users' },
 ];
 const railVisible = (r) => !r.roles || r.roles.includes(state.me?.role);
 
@@ -560,46 +560,87 @@ function tabsHtml(groupId, activePage) {
         `<a href="#/${page}" class="${page === activePage ? 'active' : ''}">${icon(ic)}${t(key)}</a>`).join('')}</nav>`;
 }
 
+// "+ Novo" / brze akcije — dijele ih topbar izbornik i kartica na ploči
+const newActions = () => [
+    { icon: 'globe', tile: 'tile-accent', label: 'qa.new_domain', go: '#/websites' },
+    { icon: 'mail', tile: 'tile-accent', label: 'qa.new_mailbox', go: '#/mail' },
+    { icon: 'db', tile: 'tile-ok', label: 'qa.new_database', go: '#/databases' },
+    { icon: 'play', tile: 'tile-warn', label: 'qa.run_backup', go: '#/backups' },
+    ...(state.me.role !== 'client' ? [{ icon: 'users', tile: 'tile-grape', label: 'qa.invite_user', go: '#/users' }] : []),
+];
+
+// generički popover izbornik usidren ispod gumba
+function openMenu(anchor, html, align = 'left') {
+    document.querySelectorAll('.menu-pop').forEach((p) => p.remove());
+    const pop = document.createElement('div');
+    pop.className = 'menu-pop';
+    pop.innerHTML = html;
+    document.body.append(pop);
+    const r = anchor.getBoundingClientRect();
+    const pw = pop.offsetWidth || 214;
+    let left = align === 'right' ? r.right - pw : r.left;
+    left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
+    pop.style.top = `${Math.round(r.bottom + 6)}px`;
+    pop.style.left = `${Math.round(left)}px`;
+    setTimeout(() => document.addEventListener('click', function h(e) {
+        if (!pop.contains(e.target) && e.target !== anchor) { pop.remove(); document.removeEventListener('click', h); }
+    }), 0);
+    return pop;
+}
+
 function renderShell() {
     const initials = state.me.email.slice(0, 2).toUpperCase();
     const isAdmin = state.me.role === 'admin';
+    const hostShort = (location.hostname || brandName()).split('.')[0] || brandName();
+    let curSection = '';
+    const navHtml = RAIL.filter(railVisible).map((r) => {
+        let sec = '';
+        if (r.section && r.section !== curSection) { curSection = r.section; sec = `<div class="rail-section">${t(r.section)}</div>`; }
+        const countSpan = r.count ? `<span class="rail-count" data-count="${r.count}"></span>` : '';
+        return `${sec}
+            <div class="rail-item">
+                <button class="rail-btn" data-rail="${r.id}" data-go="#/${r.pages[0]}" aria-label="${t(r.label)}">${icon(r.icon)}<span class="rail-label">${t(r.label)}</span>${countSpan}</button>
+                <span class="rail-tip">${t(r.label)} <span class="kbd-hint">G ${r.key.toUpperCase()}</span></span>
+            </div>`;
+    }).join('');
+
     $app.innerHTML = `
     <div class="shell">
         <nav class="rail${state.railExpanded ? ' expanded' : ''}" aria-label="Glavna navigacija">
             <button class="rail-collapse" id="railtoggle" aria-label="${t('nav.toggle')}" title="${t('nav.toggle')}">${icon('chevR')}</button>
             <div class="rail-logo" title="${esc(brandName())}">${state.branding?.logo_url
                 ? `<img src="${esc(state.branding.logo_url)}" alt="${esc(brandName())}">`
-                : icon('zap')}<span class="rail-label">${brandName() === 'ForgePanel' ? 'Forge<b>Panel</b>' : esc(brandName())}</span><span class="rail-ver">v3</span></div>
-            ${RAIL.filter(railVisible).map((r) => `
-            <div class="rail-item">
-                <button class="rail-btn" data-rail="${r.id}" data-go="#/${r.pages[0]}" aria-label="${t(r.label)}">${icon(r.icon)}<span class="rail-label">${t(r.label)}</span></button>
-                <span class="rail-tip">${t(r.label)} <span class="kbd-hint">G ${r.key.toUpperCase()}</span></span>
-            </div>`).join('')}
+                : icon('zap')}<span class="rail-label">${brandName() === 'ForgePanel' ? 'Forge<b>Panel</b>' : esc(brandName())}</span></div>
+            <button class="rail-server" id="srvcard" title="${esc(location.hostname || brandName())}">
+                <span class="rs-ic">${icon('server')}</span>
+                <span class="rs-meta"><span class="rs-name">${esc(hostShort)}</span><span class="rs-sub" id="srvsub">Ubuntu 26.04 LTS</span></span>
+                ${icon('chevD')}
+            </button>
+            ${navHtml}
             <div class="rail-spacer"></div>
-            <div class="rail-sep"></div>
             <div class="rail-item">
                 <button class="rail-btn" data-go="#/about" data-rail="about" aria-label="${t('nav.about')}">${icon('info')}<span class="rail-label">${t('nav.about')}</span></button>
                 <span class="rail-tip">${t('nav.about')}</span>
             </div>
-            <div class="rail-item">
-                <button class="rail-btn" data-go="#/profile" data-rail="profile" aria-label="${t('profile.title')}">${icon('key')}<span class="rail-label">${t('profile.title')}</span></button>
-                <span class="rail-tip">${t('profile.title')}</span>
+            <div class="rail-storage" id="railstorage" hidden>
+                <div class="rst-row"><span class="rst-k">${t('nav.storage')}</span><span class="rst-v" id="rst-v">—</span></div>
+                <div class="bar"><i id="rst-bar" style="width:0%"></i></div>
+                <button class="rst-up" data-go="${isAdmin ? '#/system' : '#/profile'}">${t('nav.upgrade_plan')} ${icon('arrowUR')}</button>
             </div>
-            <button class="rail-user" aria-label="${esc(state.me.email)}">
-                <span class="av">${esc(initials)}</span>
-                <span class="who">${esc(state.me.email.split('@')[0])}<small>${esc(state.me.role)} · root</small></span>
-            </button>
         </nav>
         <div class="main">
             <header class="topbar">
-                <div class="topbar-host">${dot('ok', true)}<span class="host-name">${esc(location.hostname || brandName())}</span></div>
-                <div class="crumbs-bar" id="crumbs"></div>
                 <button class="search-btn">${icon('search')}
                     <span class="search-label">${t('palette.placeholder')}</span>
                     <span class="keys"><span class="kbd">Ctrl</span><span class="kbd">K</span></span></button>
                 ${isAdmin ? `<button class="ai-btn" id="aibtn" title="Forge AI (Ctrl+J)">${icon('sparkle')}<span class="ai-label">Forge AI</span></button>` : ''}
-                <button class="icon-btn tray-btn" aria-label="${t('nav.tasks')}">${icon('activity')}<span class="dot"></span></button>
                 <button class="icon-btn theme-btn" aria-label="Tema">${icon(state.theme === 'dark' ? 'sun' : 'moon')}</button>
+                <button class="icon-btn tray-btn" aria-label="${t('nav.tasks')}">${icon('bell')}<span class="dot"></span></button>
+                <button class="new-btn" id="newbtn">${icon('plus')}<span>${t('nav.new')}</span>${icon('chevD', 13)}</button>
+                <button class="topbar-user" aria-label="${esc(state.me.email)}">
+                    <span class="tu-meta"><span class="tu-name">${esc(state.me.email.split('@')[0])}</span><span class="tu-role">${esc(state.me.role)}</span></span>
+                    <span class="av">${esc(initials)}</span>
+                </button>
             </header>
             <div class="body-row">
                 <main class="content"></main>
@@ -614,26 +655,27 @@ function renderShell() {
         localStorage.setItem('fp_rail', state.railExpanded ? '1' : '0');
         $app.querySelector('.rail').classList.toggle('expanded', state.railExpanded);
     });
+    $app.querySelector('#srvcard').addEventListener('click', () => { location.hash = isAdmin ? '#/monitoring' : '#/dashboard'; });
     $app.querySelector('.search-btn').addEventListener('click', () => palette.open());
     $app.querySelector('#aibtn')?.addEventListener('click', () => toggleAiDrawer());
     $app.querySelector('.theme-btn').addEventListener('click', (e) => {
         toggleTheme();
         e.currentTarget.innerHTML = icon(state.theme === 'dark' ? 'sun' : 'moon');
     });
-    $app.querySelector('.rail-user').addEventListener('click', (e) => {
+    $app.querySelector('#newbtn').addEventListener('click', (e) => {
         e.stopPropagation();
-        const existing = document.querySelector('.user-pop');
-        if (existing) return existing.remove();
-        const pop = document.createElement('div');
-        pop.className = 'user-pop';
-        pop.innerHTML = `
-            <div class="who"><div class="em">${esc(state.me.email)}</div><div class="ro">${esc(state.me.role)}</div></div>
+        const pop = openMenu(e.currentTarget, `<div class="menu-head">${t('nav.new')}</div>` + newActions().map((a) =>
+            `<button data-go="${a.go}"><span class="menu-tile ${a.tile}">${icon(a.icon)}</span>${t(a.label)}</button>`).join(''));
+        pop.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { pop.remove(); location.hash = b.dataset.go; }));
+    });
+    $app.querySelector('.topbar-user').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const pop = openMenu(e.currentTarget, `
+            <div class="menu-who"><div class="em">${esc(state.me.email)}</div><div class="ro">${esc(state.me.role)}</div></div>
             <button data-act="profile">${icon('user')}${t('profile.title')}</button>
-            <button data-act="logout">${icon('logout')}${t('auth.logout')}</button>`;
-        document.body.append(pop);
+            <button data-act="logout">${icon('logout')}${t('auth.logout')}</button>`, 'right');
         pop.querySelector('[data-act="profile"]').addEventListener('click', () => { pop.remove(); location.hash = '#/profile'; });
         pop.querySelector('[data-act="logout"]').addEventListener('click', () => { pop.remove(); doLogout(); });
-        setTimeout(() => document.addEventListener('click', () => pop.remove(), { once: true }));
     });
     $app.querySelector('.tray-btn').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -646,7 +688,44 @@ function renderShell() {
         setTimeout(() => document.addEventListener('click', () => pop.remove(), { once: true }));
     });
     renderTray();
+    populateShellMeta();
     if (state.aiOpen) renderAiDrawer();
+}
+
+// Brojači u sidebaru + pokazatelj pohrane — best-effort, ne blokiraju render
+async function populateShellMeta() {
+    const setCount = (key, n) => $app.querySelectorAll(`.rail-count[data-count="${key}"]`).forEach((el) => { el.textContent = n; });
+    api('/vhosts').then((v) => { if (Array.isArray(v)) setCount('vhosts', v.length); }).catch(() => {});
+    api('/databases').then((d) => { const a = Array.isArray(d) ? d : (d?.databases || []); setCount('databases', a.length); }).catch(() => {});
+    if (state.me.role !== 'client') api('/mail/domains').then((m) => {
+        const a = Array.isArray(m) ? m : (m?.domains || []);
+        const n = a.reduce((s, x) => s + (Number(x.mailbox_count ?? x.mailboxes ?? 0) || 0), 0) || a.length;
+        setCount('mail', n);
+    }).catch(() => {});
+    if (state.me.role !== 'client') api('/users').then((u) => { const a = Array.isArray(u) ? u : (u?.users || []); setCount('users', a.length); }).catch(() => {});
+
+    // pohrana: admin → disk servera; ostali → kvota plana
+    const box = $app.querySelector('#railstorage');
+    const setStore = (used, total, sub) => {
+        if (!box || !total) return;
+        const pct = Math.min(100, Math.round(used / total * 100));
+        box.hidden = false;
+        const bar = box.querySelector('#rst-bar');
+        bar.style.width = `${pct}%`;
+        bar.className = pct >= 90 ? 'err' : pct >= 75 ? 'warn' : '';
+        box.querySelector('#rst-v').textContent = `${fmtBytes(used)} / ${fmtBytes(total)}`;
+        if (sub) { const sb = $app.querySelector('#srvsub'); if (sb) sb.textContent = sub; }
+    };
+    if (state.me.role === 'admin') {
+        api('/monitoring/now').then((m) => {
+            if (!m) return;
+            setStore(m.disk_total_bytes - m.disk_free_bytes, m.disk_total_bytes, `${fmtBytes(m.mem_total_bytes)} RAM`);
+        }).catch(() => {});
+    } else {
+        api('/dashboard/usage').then((u) => {
+            if (u?.disk?.limit) setStore(u.disk.used, u.disk.limit);
+        }).catch(() => {});
+    }
 }
 
 const main = () => $app.querySelector('.content');
@@ -881,15 +960,6 @@ function spark(values, { w = 84, h = 30, color = 'var(--accent)' } = {}) {
         <circle cx="${last[0]}" cy="${last[1]}" r="2.4" fill="${color}"/></svg>`;
 }
 
-const metricCard = ({ label, value, unit = '', sub = '', sparkHtml = '' }) => `
-    <div class="card metric">
-        <div class="label">${label}</div>
-        <div class="row"><div>
-            <span class="value num">${value}</span>${unit ? `<span class="unit num">${unit}</span>` : ''}
-            <div class="sub num">${sub}</div>
-        </div>${sparkHtml}</div>
-    </div>`;
-
 // uptime servisa iz ActiveEnterTimestamp ("Day YYYY-MM-DD HH:MM:SS TZ")
 function svcUptime(props) {
     const ts = props.ActiveEnterTimestamp;
@@ -931,86 +1001,128 @@ document.addEventListener('click', (e) => {
     if (b) doServiceAction(b.dataset.svc, b.dataset.svcAction, b);
 });
 
-// ---- NOVA HUD viz primitivi (instrument strip, kružni gaugeovi, topologija) ----
-// Široka sparkline koja se rasteže na container (viewBox + non-scaling-stroke)
-function stripSpark(values, color = 'var(--accent)') {
-    const v = (values || []).filter((x) => Number.isFinite(x));
-    if (v.length < 2) return '';
-    const W = 300, H = 42, max = Math.max(...v) * 1.15 || 1, step = W / (v.length - 1);
-    const pts = v.map((x, i) => `${(i * step).toFixed(1)},${(H - 3 - (x / max) * (H - 8)).toFixed(1)}`);
-    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="100%">
-        <polygon points="0,${H} ${pts.join(' ')} ${W},${H}" fill="${color}" opacity="0.13"/>
-        <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
-}
-
-// Animirana topologija servera (čvorovi s ikonom/ulogom + tekući paketi po vezama)
-function topologyViz(services, cfConnected) {
-    const up = (re) => Object.entries(services).some(([n, p]) => re.test(n) && p.ActiveState === 'active');
-    const phpKey = Object.keys(services).find((n) => /php.*fpm/i.test(n));
-    const chain = [{ label: 'Internet', role: 'mreža', ic: 'globe', ok: true }];
-    if (cfConnected) chain.push({ label: 'Cloudflare', role: 'proxy · CDN', ic: 'cloud', ok: true });
-    chain.push({ label: 'nginx', role: 'reverse proxy', ic: 'server', ok: up(/^nginx/) });
-    chain.push({ label: phpKey ? phpKey.replace('-fpm', '') : 'php-fpm', role: 'runtime', ic: 'terminal', ok: phpKey ? services[phpKey].ActiveState === 'active' : false });
-    const dbs = Object.entries(services).filter(([n]) => /maria|mysql|redis/i.test(n))
-        .map(([n, p]) => ({ label: n, role: /redis/i.test(n) ? 'cache' : 'baza', ic: 'db', ok: p.ActiveState === 'active' }));
-    if (!dbs.length) dbs.push({ label: 'db', role: 'baza', ic: 'db', ok: false });
-
-    const W = 1000, H = 152, NW = 144, NH = 54;
-    const x0 = 78, x1 = 640, step = chain.length > 1 ? (x1 - x0) / (chain.length - 1) : 0;
-    const cy = 82;
-    const pos = chain.map((nd, i) => ({ ...nd, x: x0 + step * i, y: cy }));
-    const dbX = 866;
-    const dbPos = dbs.map((d, i) => ({ ...d, x: dbX, y: dbs.length === 1 ? cy : 48 + i * 68 }));
-    const last = pos[pos.length - 1];
-
-    const node = (nd, i) => {
-        const col = nd.ok ? 'var(--ok)' : 'var(--danger)';
-        const iconCol = nd.ok ? 'var(--ink-2)' : 'var(--danger)';
-        return `<g transform="translate(${(nd.x - NW / 2).toFixed(0)} ${(nd.y - NH / 2).toFixed(0)})" class="topo-node-g" style="--i:${i}">
-        <rect x="0.5" y="0.5" width="${NW - 1}" height="${NH - 1}" rx="13" fill="var(--surface)" stroke="var(--line-strong)"/>
-        <rect x="0.5" y="0.5" width="3.5" height="${NH - 1}" rx="2" fill="${col}" opacity="0.85"/>
-        <g transform="translate(16 ${(NH / 2 - 9).toFixed(0)}) scale(0.72)" fill="none" stroke="${iconCol}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONS[nd.ic] || ICONS.server}</g>
-        <text x="44" y="${NH / 2 - 3}" class="topo-name" font-size="12">${esc(nd.label)}</text>
-        <text x="44" y="${NH / 2 + 12}" class="topo-role" font-size="8.5">${esc(nd.role)}</text>
-        <circle cx="${NW - 16}" cy="16" r="7" fill="${col}" opacity="0.16"/>
-        <circle cx="${NW - 16}" cy="16" r="3.2" fill="${col}"/></g>`;
-    };
-
-    const linkPaths = [];
-    for (let i = 1; i < pos.length; i++) linkPaths.push([pos[i - 1], pos[i]]);
-    dbPos.forEach((d) => linkPaths.push([last, d]));
-
-    const links = linkPaths.map(([A, B], i) => {
-        const ax = A.x + NW / 2, bx = B.x - NW / 2, mx = (ax + bx) / 2;
-        const d = `M ${ax.toFixed(0)} ${A.y} C ${mx.toFixed(0)} ${A.y}, ${mx.toFixed(0)} ${B.y}, ${bx.toFixed(0)} ${B.y}`;
-        // Samo CSS animacija (stroke-dashoffset) — bez SMIL paketa koji bi se na refreshu
-        // nakratko iscrtali u ishodištu (0,0) i "razbacali" po boxu.
-        return `<path d="${d}" fill="none" stroke="var(--line-strong)" stroke-width="2"/>
-            <path d="${d}" fill="none" stroke="url(#topoGrad)" stroke-width="2" stroke-dasharray="3 9" stroke-linecap="round" class="topo-flow"/>`;
-    }).join('');
-
-    return `<div class="topo-viz"><svg viewBox="0 0 ${W} ${H}" class="topo-svg" preserveAspectRatio="xMidYMid meet">
-        <defs>
-            <linearGradient id="topoGrad" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--info)"/></linearGradient>
-        </defs>
-        ${links}
-        ${pos.map(node).join('')}
-        ${dbPos.map((d, i) => node(d, pos.length + i)).join('')}
-    </svg></div>`;
-}
-
-const stripMetric = ({ label, tag = '', val, sub, spark = '', end = false }) => `
-    <div class="metric${end ? ' metric-end' : ''}">
-        <div class="m-head"><span class="m-label">${label}</span>${tag ? `<span class="m-tag">${tag}</span>` : ''}</div>
-        <div class="m-val tnum">${val}</div>
-        <div class="m-sub">${sub}</div>
-        ${spark ? `<div class="m-spark">${spark}</div>` : ''}
+// ── Cloud ploča: stat kartice, bar-chart, brze akcije, aktivnost, domene ──
+const statCard = ({ ic, tile = 'tile-accent', label, value, unit = '', sub = '', pct = null, barTone = '', trend = null }) => `
+    <div class="card stat">
+        <div class="stat-top">
+            <span class="stat-ic ${tile}">${icon(ic)}</span>
+            <span class="stat-label">${label}</span>
+            ${trend ? `<span class="stat-trend ${trend.tone || ''}">${trend.dir === 'down' ? '↓' : '↑'} ${trend.val}</span>` : ''}
+        </div>
+        <div class="stat-val tnum">${value}${unit ? `<span class="u">${unit}</span>` : ''}</div>
+        ${pct != null ? `<div class="bar"><i class="${barTone}" style="width:${Math.min(100, Math.max(2, pct))}%"></i></div>` : '<div style="height:21px"></div>'}
+        <div class="stat-sub">${sub}</div>
     </div>`;
+
+// trend % iz povijesti (goodDown: pad je dobar → zeleno; inače akcent)
+const dashTrend = (hist, goodDown = true) => {
+    const v = (hist || []).map((p) => Number(p.value)).filter(Number.isFinite);
+    if (v.length < 3) return null;
+    const a = v[0], b = v[v.length - 1];
+    if (!a) return null;
+    const d = Math.round((b - a) / a * 100);
+    if (!Number.isFinite(d) || Math.abs(d) < 1 || Math.abs(d) > 999) return null;
+    return { dir: d < 0 ? 'down' : 'up', val: `${Math.abs(d)}%`, tone: goodDown ? (d <= 0 ? 'ok' : 'warn') : 'accent' };
+};
+
+// "6.2 GB" → "6.2<span class="u">GB…</span>"
+const splitUnit = (bytes, suffix = '') => {
+    const s = fmtBytes(bytes); const i = s.indexOf(' ');
+    return i < 0 ? esc(s) : `${s.slice(0, i)}<span class="u">${s.slice(i + 1)}${suffix}</span>`;
+};
+
+const dashStats = (metrics, cpuHist, memHist, netRx) => {
+    if (!metrics) return Array.from({ length: 4 }, () => statCard({ ic: 'pulse', label: '—', value: '—' })).join('');
+    const cpuPct = Math.round(metrics.cpu_pct ?? Math.min(100, metrics.load[0] / metrics.cpu_count * 100));
+    const ramUsed = metrics.mem_total_bytes - metrics.mem_available_bytes;
+    const ramPct = Math.round((1 - metrics.mem_available_bytes / metrics.mem_total_bytes) * 100);
+    const diskUsed = metrics.disk_total_bytes - metrics.disk_free_bytes;
+    const diskPct = Math.round(diskUsed / metrics.disk_total_bytes * 100);
+    const netNow = lastVal(netRx);
+    const netMax = Math.max(1, ...(netRx || []).map((p) => Number(p.value)).filter(Number.isFinite));
+    return [
+        statCard({ ic: 'pulse', label: 'Procesor', value: cpuPct, unit: '%', pct: cpuPct,
+            barTone: cpuPct >= 90 ? 'err' : cpuPct >= 70 ? 'warn' : '', trend: dashTrend(cpuHist, true),
+            sub: `${metrics.cpu_count} ${t('dash.cores')} · load ${(metrics.load?.[0] ?? 0).toFixed(2)}` }),
+        statCard({ ic: 'server', label: 'Memorija', value: `${splitUnit(ramUsed)}<span class="u">/ ${fmtBytes(metrics.mem_total_bytes)}</span>`,
+            pct: ramPct, barTone: ramPct >= 90 ? 'err' : ramPct >= 75 ? 'warn' : '', trend: dashTrend(memHist, true),
+            sub: `${ramPct}% ${t('dash.used')}` }),
+        statCard({ ic: 'db', label: 'Disk', value: `${splitUnit(diskUsed)}<span class="u">/ ${fmtBytes(metrics.disk_total_bytes)}</span>`,
+            pct: diskPct, barTone: diskPct >= 90 ? 'err' : diskPct >= 75 ? 'warn' : '',
+            sub: `${fmtBytes(metrics.disk_free_bytes)} ${t('dash.free')}` }),
+        statCard({ ic: 'arrowUR', label: 'Promet', value: netNow != null ? splitUnit(netNow, '/s') : '—',
+            pct: netNow != null ? Math.round(netNow / netMax * 100) : null, trend: dashTrend(netRx, false),
+            sub: t('dash.inbound') }),
+    ].join('');
+};
+
+// server-load bar chart iz CPU povijesti
+const dashChart = (hist) => {
+    const pts = (hist || []).filter((p) => Number.isFinite(Number(p.value)));
+    const v = pts.map((p) => Number(p.value));
+    if (v.length < 2) return { bars: '<div class="empty" style="height:188px;display:grid;place-items:center">—</div>', peak: 0, avg: 0, peakLabel: '' };
+    const N = 36, bucket = Math.ceil(v.length / N), buckets = [];
+    for (let i = 0; i < v.length; i += bucket) { const seg = v.slice(i, i + bucket); buckets.push(seg.reduce((s, x) => s + x, 0) / seg.length); }
+    const max = Math.max(...buckets, 1);
+    const avg = Math.round(v.reduce((s, x) => s + x, 0) / v.length);
+    let peakI = 0; v.forEach((x, i) => { if (x > v[peakI]) peakI = i; });
+    return {
+        bars: buckets.map((b) => `<div class="bc" style="height:${Math.max(3, Math.round(b / max * 100))}%"></div>`).join(''),
+        peak: Math.round(v[peakI]), avg, peakLabel: pts[peakI]?.ts ? fmtTime(pts[peakI].ts) : '',
+    };
+};
+
+const dashQuickActions = () => `<div class="qa-list">${newActions().map((a) =>
+    `<button class="qa" data-go="${a.go}"><span class="qa-ic ${a.tile}">${icon(a.icon)}</span><span class="qa-label">${t(a.label)}</span>${icon('chevR', 17)}</button>`).join('')}</div>`;
+
+const dashActivity = (feed) => {
+    const items = [];
+    (feed.events || []).forEach((e) => items.push({ ts: e.ts, sev: e.severity, ic: feedIcon(e.kind, e.severity), text: esc(e.text) }));
+    (feed.deploys || []).forEach((d) => items.push({ ts: d.last_deploy_at, sev: 'ok', ic: 'branch', text: `${t('dash.deploy_published')} <b>${esc(d.domain)}</b>` }));
+    if (!items.length) return `<div class="empty">${t('dash.no_activity')}</div>`;
+    items.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    const tile = { ok: 'tile-ok', err: 'tile-danger', warn: 'tile-warn', info: 'tile-info' };
+    return items.slice(0, 7).map((it) => `
+        <div class="act">
+            <span class="act-ic ${tile[it.sev] || 'tile-muted'}">${icon(it.ic)}</span>
+            <div class="act-body"><div class="act-text">${it.text}</div><div class="act-time">${timeAgo(it.ts)}</div></div>
+        </div>`).join('');
+};
+
+const domSsl = (days) => days == null ? '<span class="mono" style="color:var(--ink-3)">—</span>'
+    : days < 21 ? `<span class="badge warn">${days} ${t('dash.days')}</span>`
+    : `<span class="badge ok"><span class="dot ok"></span>${t('dash.ssl_valid')}</span>`;
+
+const dashDomains = (vhosts) => vhosts.length ? `
+    <table class="data"><thead><tr>
+        <th>${t('vhost.domain')}</th><th>SSL</th><th>PHP</th><th class="num">Disk</th>
+    </tr></thead><tbody>
+    ${vhosts.slice(0, 6).map((v) => `
+        <tr class="row-link" data-vhost="${v.id}">
+            <td><div class="dom-cell"><span class="dom-ic">${icon('globe', 15)}</span>
+                <div><div class="dom-name">${esc(v.domain)}</div>${appLabel(v.app_type) ? `<div class="dom-sub">${appLabel(v.app_type)}</div>` : ''}</div></div></td>
+            <td>${domSsl(v.ssl_days)}</td>
+            <td class="mono">${esc(v.php_version || '—')}</td>
+            <td class="num mono">${v.disk_bytes != null ? fmtBytes(Number(v.disk_bytes)) : '—'}</td>
+        </tr>`).join('')}
+    </tbody></table>` : `<div class="empty">${t('nav.websites')}: 0</div>`;
+
+const dashNotice = (vhosts) => {
+    const exp = vhosts.filter((v) => v.ssl_days != null && v.ssl_days <= 14).sort((a, b) => a.ssl_days - b.ssl_days)[0];
+    if (!exp) return '';
+    return `<div class="notice">
+        <span class="notice-ic">${icon('shield')}</span>
+        <div class="notice-body"><div class="notice-title">${t('dash.ssl_expiring_title')}</div>
+            <div class="notice-sub"><span class="mono">${esc(exp.domain)}</span> · ${t('dash.expires_in')} ${exp.ssl_days} ${t('dash.days')}</div></div>
+        <a class="btn primary" href="#/websites/${exp.id}">${t('dash.renew_now')}</a>
+        <button class="notice-x" data-dismiss>${icon('x')}</button>
+    </div>`;
+};
 
 async function refreshDashboard(cfConnected) {
     const body = document.getElementById('dashbody');
     if (!body) return;
+    const range = state.dashRange || '24h';
     const [vhosts, metrics, services, feed, insights] = await Promise.all([
         api('/vhosts').catch(() => []),
         api('/monitoring/now').catch(() => null),
@@ -1018,38 +1130,24 @@ async function refreshDashboard(cfConnected) {
         api('/dashboard/feed').catch(() => ({ events: [], deploys: [] })),
         api('/dashboard/insights').catch(() => ({ items: [] })),
     ]);
-    const [cpuHist, memHist, netRx] = await Promise.all([
+    const [cpuHist, memHist, netRx, cpuChartHist] = await Promise.all([
         api('/monitoring/history?metric=cpu_pct&range=1h').catch(() => []),
         api('/monitoring/history?metric=mem_used_bytes&range=1h').catch(() => []),
         api('/monitoring/history?metric=net_rx_bps&range=1h').catch(() => []),
+        api(`/monitoring/history?metric=cpu_pct&range=${range}`).catch(() => []),
     ]);
 
     const upCount = vhosts.filter((v) => v.status === 'active').length;
+    const problems = vhosts.filter((v) => v.status === 'error' || v.status === 'suspended').length;
     const sv = Object.entries(services);
     const healthy = sv.filter(([, p]) => p.ActiveState === 'active').length;
-
-    // ── instrument strip (5 metrika, otvoreni hairline raspored) ──
     const uptimeTxt = metrics ? `${Math.floor(metrics.uptime_s / 86400)}d ${Math.floor((metrics.uptime_s % 86400) / 3600)}h` : '—';
-    const problems = vhosts.filter((v) => v.status === 'error' || v.status === 'suspended').length;
-    let stripHtml = '';
-    if (metrics) {
-        const cpuPct = metrics.cpu_pct ?? Math.min(100, metrics.load[0] / metrics.cpu_count * 100);
-        const ramUsed = metrics.mem_total_bytes - metrics.mem_available_bytes;
-        const ramPct = Math.round((1 - metrics.mem_available_bytes / metrics.mem_total_bytes) * 100);
-        const diskUsed = metrics.disk_total_bytes - metrics.disk_free_bytes;
-        const netNow = lastVal(netRx);
-        const valUnit = (bytes, suffix = '') => `${fmtBytes(bytes).replace(/ .*/, '')}<span class="u">${fmtBytes(bytes).replace(/^[\d.,]+ /, '')}${suffix}</span>`;
-        stripHtml =
-            stripMetric({ label: 'CPU', tag: `${metrics.cpu_count} vCPU`, val: `${Math.round(cpuPct)}<span class="u">%</span>`, sub: `load ${metrics.load.map((l) => l.toFixed(2)).join(' · ')}`, spark: stripSpark(cpuHist.slice(-48).map((p) => Number(p.value)), 'var(--accent)') }) +
-            stripMetric({ label: 'RAM', tag: fmtBytes(metrics.mem_total_bytes), val: valUnit(ramUsed), sub: `${ramPct}% iskorišteno`, spark: stripSpark(memHist.slice(-48).map((p) => Number(p.value)), 'var(--info)') }) +
-            stripMetric({ label: 'Disk', tag: fmtBytes(metrics.disk_total_bytes), val: valUnit(diskUsed), sub: `${fmtBytes(metrics.disk_free_bytes)} slobodno` }) +
-            stripMetric({ label: 'Mreža', tag: '↓ in', val: netNow != null ? valUnit(netNow, '/s') : '—', sub: 'dolazni promet', spark: stripSpark(netRx.slice(-48).map((p) => Number(p.value)), 'var(--accent)') }) +
-            stripMetric({ label: t('nav.websites'), val: String(vhosts.length), sub: `<span class="dot-good"></span>${upCount} aktivnih · ${problems} problema`, end: true });
-    } else {
-        stripHtml = stripMetric({ label: t('nav.websites'), val: String(vhosts.length), sub: `${upCount} aktivnih`, end: true });
-    }
 
-    // ── dinamički fragmenti (osvježavaju se svakih 10 s) ──
+    const statsHtml = dashStats(metrics, cpuHist, memHist, netRx);
+    const chart = dashChart(cpuChartHist);
+    const noticeHtml = dashNotice(vhosts);
+    const activityHtml = dashActivity(feed);
+    const domainsHtml = dashDomains(vhosts);
     const insightsBlock = insights.items.length ? `
         <div class="ai-box dash-ai">
             <span class="mark">${icon('sparkle')}</span>
@@ -1066,67 +1164,87 @@ async function refreshDashboard(cfConnected) {
         <td class="mono num">${p.mem_bytes != null ? fmtBytes(p.mem_bytes) : '—'}</td>
         <td class="mono num hide-sm">${svcUptime(p)}</td>
         <td class="svc-actions-cell">${svcActionsHtml(name)}</td></tr>`).join('');
-    const eventsHtml = feed.events.length ? feed.events.map((e) => `
-        <div class="feed-row">
-            <span class="feed-time mono">${fmtTime(e.ts)}</span>
-            <span class="feed-ico" style="color:${SEV[e.severity] || 'var(--ink-3)'}">${icon(feedIcon(e.kind, e.severity))}</span>
-            <span class="feed-text">${esc(e.text)}</span>
-        </div>`).join('') : `<div class="empty">Nema događaja u zadnja 24 h</div>`;
-    const deploysHtml = feed.deploys.length ? feed.deploys.map((d) => `
-        <div class="feed-row">
-            <span class="feed-ico" style="color:var(--ok)">${icon('check')}</span>
-            <span class="mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(d.domain)}</span>
-            <span class="mono hide-sm" style="color:var(--ink-3);font-size:var(--fs-xs)">${esc(d.branch || '')} ${d.last_commit ? esc(String(d.last_commit).slice(0, 7)) : ''}</span>
-            <span style="margin-left:auto;color:var(--ink-3);font-size:var(--fs-xs);white-space:nowrap">${timeAgo(d.last_deploy_at)}</span>
-        </div>`).join('') : `<div class="empty">${t('dash.no_deploys') !== 'dash.no_deploys' ? t('dash.no_deploys') : 'Nema deploya'}</div>`;
     const healthCls = healthy === sv.length ? 'ok' : 'warn';
     const healthTxt = `${healthy}/${sv.length} ${t('dash.healthy')}`;
-    // potpis zdravlja servisa — topologija se NE pregraduje osim kad se ovo promijeni
-    const healthSig = sv.map(([n, p]) => `${n}:${p.ActiveState === 'active' ? 1 : 0}`).join('|') + `|cf${cfConnected ? 1 : 0}`;
     body._aiPrompt = insights.items.find((i) => i.ai_prompt)?.ai_prompt || null;
 
     const setHtml = (id, html) => { const el = document.getElementById(id); if (el && el.innerHTML !== html) el.innerHTML = html; };
+    const hostShort = (location.hostname || brandName()).split('.')[0] || brandName();
+    const pills = ['24h', '7d', '30d'].map((r) => `<button class="pill${r === range ? ' active' : ''}" data-range="${r}">${r}</button>`).join('');
 
     if (body.dataset.built !== '1') {
-        // ── prvi render: cijela kostura (topologija se gradi samo ovdje + na promjeni zdravlja) ──
         body.innerHTML = `
-        <div class="strip" id="dash-strip">${stripHtml}</div>
+        <div class="page-head">
+            <div class="page-titles"><h1>${t('nav.dashboard')}</h1>
+                <div class="page-sub">${dot('ok', true)}<span class="mono">${esc(hostShort)}</span> · uptime <b id="dash-uptime">${uptimeTxt}</b> · Ubuntu 26.04 LTS</div></div>
+            <span class="spacer"></span>
+            <div class="pillbar" id="dash-range">${pills}</div>
+            <a class="btn" href="#/monitoring">${icon('download')}${t('dash.report')}</a>
+        </div>
+        <div id="dash-notice">${noticeHtml}</div>
         <div id="dash-insights"${insightsBlock ? ' style="margin-bottom:var(--gap)"' : ''}>${insightsBlock}</div>
-        <div class="dash-grid">
+        <div class="grid cols-4" id="dash-stats">${statsHtml}</div>
+        <div class="dash-grid" style="margin-top:var(--gap)">
             <div class="dash-left">
-                <section class="card flush hud topo-card">
-                    <div class="card-head"><h2>${t('dash.topology')}</h2>
-                        <span class="badge ${healthCls}" id="dash-health">${healthTxt}</span>
-                        <span class="spacer"></span>
-                        <span class="topo-meta mono hide-sm">uptime <b id="dash-uptime">${uptimeTxt}</b> · Ubuntu <b>26.04 LTS</b></span></div>
-                    <div id="dash-topo">${topologyViz(services, cfConnected)}</div>
-                </section>
                 <section class="card flush">
-                    <div class="card-head"><h2>${t('dash.services')}</h2><span class="count" id="dash-svccount">${sv.length} procesa</span><span class="spacer"></span>
-                        <button class="btn small ghost" id="chkupd">${icon('refresh')}${t('dash.check_updates')}</button>
-                        <a class="btn small" href="#/monitoring">${t('dash.all')} ${icon('chevR')}</a></div>
-                    <table class="data svc-table"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th><th></th></tr></thead>
-                    <tbody id="dash-svc">${svcRows}</tbody></table>
+                    <div class="card-head">
+                        <div style="min-width:0"><h2 style="margin:0">${t('dash.server_load')}</h2>
+                            <div class="hint" style="margin-top:2px">${t('dash.server_load_sub')}</div></div>
+                        <span class="spacer"></span>
+                        <div><div class="chart-card-val" id="dash-peak">${chart.peak}%</div>
+                            <div class="chart-card-cap">${t('dash.peak_at')} <span id="dash-peaklbl">${chart.peakLabel || '—'}</span></div></div>
+                    </div>
+                    <div class="pad">
+                        <div class="loadchart" id="dash-chart">${chart.bars}</div>
+                        <div class="loadchart-x"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>sad</span></div>
+                    </div>
                 </section>
             </div>
             <div class="dash-right">
                 <section class="card flush">
-                    <div class="card-head"><h2>${t('dash.live_events')}</h2><span class="spacer"></span>
-                        <span class="live-dot">${dot('ok', true)} live</span></div>
-                    <div class="feed" id="dash-events">${eventsHtml}</div>
-                </section>
-                <section class="card flush">
-                    <div class="card-head"><h2>${t('dash.recent_deploys')}</h2></div>
-                    <div id="dash-deploys">${deploysHtml}</div>
+                    <div class="card-head"><h2>${t('dash.quick_actions')}</h2></div>
+                    <div id="dash-qa" style="padding:4px 10px 8px">${dashQuickActions()}</div>
                 </section>
             </div>
-        </div>`;
+        </div>
+        <div class="dash-grid" style="margin-top:var(--gap)">
+            <div class="dash-left">
+                <section class="card flush">
+                    <div class="card-head"><h2>${t('nav.websites')}</h2><span class="count">${vhosts.length}</span><span class="spacer"></span>
+                        <a class="btn small ghost" href="#/websites">${t('dash.all_domains')} ${icon('arrowUR')}</a></div>
+                    <div id="dash-domains">${domainsHtml}</div>
+                </section>
+            </div>
+            <div class="dash-right">
+                <section class="card flush">
+                    <div class="card-head"><h2>${t('dash.recent_activity')}</h2><span class="spacer"></span>
+                        <span class="live-dot">${dot('ok', true)} live</span></div>
+                    <div class="pad" id="dash-activity" style="padding-top:6px;padding-bottom:10px">${activityHtml}</div>
+                </section>
+            </div>
+        </div>
+        <section class="card flush" style="margin-top:var(--gap)">
+            <div class="card-head"><h2>${t('dash.services')}</h2><span class="count" id="dash-svccount">${sv.length} procesa</span>
+                <span class="badge ${healthCls}" id="dash-health">${healthTxt}</span><span class="spacer"></span>
+                <button class="btn small ghost" id="chkupd">${icon('refresh')}${t('dash.check_updates')}</button>
+                <a class="btn small" href="#/monitoring">${t('dash.all')} ${icon('chevR')}</a></div>
+            <table class="data svc-table"><thead><tr><th>${t('mon.service')}</th><th>${t('mon.state')}</th><th class="num">CPU</th><th class="num">RAM</th><th class="num hide-sm">Uptime</th><th></th></tr></thead>
+            <tbody id="dash-svc">${svcRows}</tbody></table>
+        </section>`;
         body.dataset.built = '1';
-        body.dataset.health = healthSig;
 
-        // delegirani klik (preživi osvježavanja insights/topologije)
+        // delegirani klikovi (preživljavaju osvježavanja)
         body.addEventListener('click', (e) => {
-            if (e.target.closest('#dashai')) { state.aiPending = body._aiPrompt; toggleAiDrawer(true); }
+            if (e.target.closest('#dashai')) { state.aiPending = body._aiPrompt; toggleAiDrawer(true); return; }
+            if (e.target.closest('[data-dismiss]')) { document.getElementById('dash-notice').innerHTML = ''; return; }
+            const pill = e.target.closest('[data-range]');
+            if (pill) {
+                state.dashRange = pill.dataset.range;
+                document.querySelectorAll('#dash-range .pill').forEach((p) => p.classList.toggle('active', p === pill));
+                refreshDashboard(cfConnected); return;
+            }
+            const go = e.target.closest('.qa[data-go]'); if (go) { location.hash = go.dataset.go; return; }
+            const vt = e.target.closest('[data-vhost]'); if (vt) { location.hash = `#/websites/${vt.dataset.vhost}`; }
         });
         const chk = document.getElementById('chkupd');
         if (chk) chk.addEventListener('click', async () => {
@@ -1146,30 +1264,27 @@ async function refreshDashboard(cfConnected) {
             finally { chk.disabled = false; chk.innerHTML = orig; }
         });
     } else {
-        // ── osvježavanje: samo dinamični dijelovi; topologija ostaje netaknuta ──
-        // Prolazni pad API-ja (npr. restart MariaDB = panelova baza nakratko dolje) NE smije
-        // iscrtati "sve je mrtvo" — zadrži zadnje dobro stanje za sekciju kojoj nedostaju podaci.
+        // ── osvježavanje: samo dinamični dijelovi ──
         const apiDown = !metrics && sv.length === 0;
         if (apiDown) return;
 
         if (metrics) {
-            setHtml('dash-strip', stripHtml);
+            setHtml('dash-stats', statsHtml);
             const up = document.getElementById('dash-uptime'); if (up) up.textContent = uptimeTxt;
+            setHtml('dash-chart', chart.bars);
+            const pk = document.getElementById('dash-peak'); if (pk) pk.textContent = `${chart.peak}%`;
+            const pl = document.getElementById('dash-peaklbl'); if (pl) pl.textContent = chart.peakLabel || '—';
         }
+        setHtml('dash-notice', noticeHtml);
         setHtml('dash-insights', insightsBlock);
         document.getElementById('dash-insights')?.style.setProperty('margin-bottom', insightsBlock ? 'var(--gap)' : '0');
-        setHtml('dash-events', eventsHtml);
-        setHtml('dash-deploys', deploysHtml);
+        setHtml('dash-activity', activityHtml);
+        setHtml('dash-domains', domainsHtml);
 
         if (sv.length > 0) {
             setHtml('dash-svc', svcRows);
             setHtml('dash-svccount', `${sv.length} procesa`);
             const hb = document.getElementById('dash-health'); if (hb) { hb.className = `badge ${healthCls}`; hb.textContent = healthTxt; }
-            // topologiju pregradi SAMO ako se promijenio set/zdravlje servisa
-            if (body.dataset.health !== healthSig) {
-                setHtml('dash-topo', topologyViz(services, cfConnected));
-                body.dataset.health = healthSig;
-            }
         }
     }
 }
@@ -1188,7 +1303,7 @@ async function pageDashboard() {
     state.pageRefresh = () => refreshDashboard(cf.connected);
     // live auto-refresh feeda + KPI svakih 10 s (čisti se u route() pri navigaciji)
     state.monTimer = setInterval(() => refreshDashboard(cf.connected), 10000);
-    bindVhostRows();
+    // klik na red domene ide kroz delegirani handler u refreshDashboard
 }
 
 // klijentski dashboard — potrošnja plana, SSL istek, statusi, status stranica
@@ -1214,12 +1329,17 @@ async function pageDashboardClient() {
             <div class="meter"><span class="${tone}" style="width:${pct}%"></span></div></div>`;
     };
 
+    const pctOf = (u) => u?.limit ? Math.min(100, Math.round(u.used / u.limit * 100)) : null;
     main().innerHTML = `
+    <div class="page-head">
+        <div class="page-titles"><h1>${t('nav.dashboard')}</h1>
+            <div class="page-sub">${dot('ok', true)}${upCount} ${t('dash.active')} · ${vhosts.length} ${t('nav.websites').toLowerCase()}</div></div>
+    </div>
     <div class="grid cols-4" style="margin-bottom:var(--gap)">
-        ${metricCard({ label: t('nav.websites'), value: vhosts.length, sub: `${upCount} ${t('dash.active')}` })}
-        ${metricCard({ label: t('nav.ssl'), value: certs.length, sub: expiring.length ? `${expiring.length} ${t('dash.expiring')}` : '' })}
-        ${metricCard({ label: t('dash.mailboxes'), value: usage.mailboxes?.used ?? 0, sub: usage.mailboxes?.limit ? `/ ${usage.mailboxes.limit}` : '' })}
-        ${metricCard({ label: t('nav.databases'), value: usage.databases?.used ?? 0, sub: usage.databases?.limit ? `/ ${usage.databases.limit}` : '' })}
+        ${statCard({ ic: 'globe', label: t('nav.websites'), value: vhosts.length, sub: `${upCount} ${t('dash.active')}`, pct: pctOf(usage.domains) })}
+        ${statCard({ ic: 'lock', label: t('nav.ssl'), value: certs.length, sub: expiring.length ? `${expiring.length} ${t('dash.expiring')}` : t('dash.ssl_valid') })}
+        ${statCard({ ic: 'mail', label: t('dash.mailboxes'), value: usage.mailboxes?.used ?? 0, sub: usage.mailboxes?.limit ? `/ ${usage.mailboxes.limit}` : '', pct: pctOf(usage.mailboxes) })}
+        ${statCard({ ic: 'db', label: t('nav.databases'), value: usage.databases?.used ?? 0, sub: usage.databases?.limit ? `/ ${usage.databases.limit}` : '', pct: pctOf(usage.databases) })}
     </div>
     <div class="grid cols-2">
         <div class="card">
