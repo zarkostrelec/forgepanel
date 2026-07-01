@@ -7,10 +7,13 @@ namespace ForgePanel\Agent\System;
 final class Apt
 {
     private const ENV_ARGS = ['env', 'DEBIAN_FRONTEND=noninteractive'];
+    // Ne čekaj beskonačno na dpkg/apt lock (npr. unattended-upgrades u pozadini) —
+    // padni s jasnom greškom nakon 5 min umjesto višeminutnog "visenja" taska.
+    private const LOCK_ARGS = ['-o', 'DPkg::Lock::Timeout=300'];
 
     public static function update(?\Closure $on_line = null): void
     {
-        Proc::mustRun([...self::ENV_ARGS, 'apt-get', 'update', '-q'], timeout_s: 600, on_line: $on_line);
+        Proc::mustRun([...self::ENV_ARGS, 'apt-get', ...self::LOCK_ARGS, 'update', '-q'], timeout_s: 600, on_line: $on_line);
     }
 
     /** @param list<string> $packages */
@@ -18,7 +21,7 @@ final class Apt
     {
         self::assertPackages($packages);
         Proc::mustRun(
-            [...self::ENV_ARGS, 'apt-get', 'install', '-y', '-q', '--no-install-recommends', ...$packages],
+            [...self::ENV_ARGS, 'apt-get', ...self::LOCK_ARGS, 'install', '-y', '-q', '--no-install-recommends', ...$packages],
             timeout_s: 1800,
             on_line: $on_line
         );
@@ -29,7 +32,7 @@ final class Apt
     {
         self::assertPackages($packages);
         Proc::mustRun(
-            [...self::ENV_ARGS, 'apt-get', 'install', '-y', '-q', '--only-upgrade', ...$packages],
+            [...self::ENV_ARGS, 'apt-get', ...self::LOCK_ARGS, 'install', '-y', '-q', '--only-upgrade', ...$packages],
             timeout_s: 1800,
             on_line: $on_line
         );

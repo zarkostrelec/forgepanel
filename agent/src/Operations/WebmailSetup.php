@@ -39,20 +39,28 @@ final class WebmailSetup extends Operation
     public function execute(array $params, TaskContext $context): array
     {
         $hostname = Validator::fqdn($params['hostname'], 'hostname');
+        // Rekonfiguracija: samo prepiši config (IMAP/SMTP TLS i sl.) — bez apta/instalacije.
+        // Puni setup zna visiti na apt/dpkg locku; rekonfiguracija mora biti brza i sigurna.
+        $config_only = !empty($params['config_only']);
 
-        $context->output("Instaliram Roundcube pakete (universe)\n");
-        $context->progress(10);
-        // dbconfig preskačemo — bazu i config pišemo sami, deterministički
-        Proc::mustRun(
-            ['debconf-set-selections'],
-            stdin: "roundcube-core roundcube/dbconfig-install boolean false\n"
-        );
-        Apt::install(['roundcube-core', 'roundcube-mysql', 'php' . self::PANEL_PHP . '-fpm'], $context->output(...));
+        if ($config_only) {
+            $context->output("Rekonfiguracija Roundcubea (bez apt-a)\n");
+            $context->progress(30);
+        } else {
+            $context->output("Instaliram Roundcube pakete (universe)\n");
+            $context->progress(10);
+            // dbconfig preskačemo — bazu i config pišemo sami, deterministički
+            Proc::mustRun(
+                ['debconf-set-selections'],
+                stdin: "roundcube-core roundcube/dbconfig-install boolean false\n"
+            );
+            Apt::install(['roundcube-core', 'roundcube-mysql', 'php' . self::PANEL_PHP . '-fpm'], $context->output(...));
 
-        // PHP 8.5 je uveo native array_first(); pakirani Roundcube (26.04 universe)
-        // ga redeklarira bez zaštite → "Cannot redeclare function array_first" (HTTP 500).
-        // Zamotaj deklaraciju u function_exists guard (idempotentno).
-        $this->patchRoundcubePhp85($context);
+            // PHP 8.5 je uveo native array_first(); pakirani Roundcube (26.04 universe)
+            // ga redeklarira bez zaštite → "Cannot redeclare function array_first" (HTTP 500).
+            // Zamotaj deklaraciju u function_exists guard (idempotentno).
+            $this->patchRoundcubePhp85($context);
+        }
 
         $context->output("Roundcube baza + DB user\n");
         $context->progress(40);

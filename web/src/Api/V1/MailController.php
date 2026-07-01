@@ -71,13 +71,19 @@ final class MailController extends Controller
             throw new HttpException(422, 'invalid_hostname');
         }
 
-        $task_id = $this->app->tasks->enqueue('mail.webmail_setup', ['hostname' => $hostname], $ctx->user_id);
-        $ssl_task_id = $this->app->tasks->enqueue('ssl.issue', [
-            'hostnames' => [$hostname],
-            'contact_email' => $this->setting('acme_email', $ctx->email),
-        ], $ctx->user_id);
-        $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.webmail_setup', ['hostname' => $hostname], $request->ip);
-        Response::ok(['task_id' => $task_id, 'ssl_task_id' => $ssl_task_id, 'hostname' => $hostname], 202);
+        // Rekonfiguracija (config_only): samo prepiši Roundcube config, bez apta i bez
+        // ponovnog izdavanja certifikata (cert i vhost već postoje).
+        $config_only = (bool) ($request->body['config_only'] ?? false);
+        $task_id = $this->app->tasks->enqueue('mail.webmail_setup', ['hostname' => $hostname, 'config_only' => $config_only], $ctx->user_id);
+        $resp = ['task_id' => $task_id, 'hostname' => $hostname];
+        if (!$config_only) {
+            $resp['ssl_task_id'] = $this->app->tasks->enqueue('ssl.issue', [
+                'hostnames' => [$hostname],
+                'contact_email' => $this->setting('acme_email', $ctx->email),
+            ], $ctx->user_id);
+        }
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.webmail_setup', ['hostname' => $hostname, 'config_only' => $config_only], $request->ip);
+        Response::ok($resp, 202);
     }
 
     private function domains(Request $request): never

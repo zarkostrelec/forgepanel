@@ -3453,7 +3453,7 @@ async function pageMail() {
     document.getElementById('wmreconf')?.addEventListener('click', async () => {
         if (!await confirmDialog(t('mail.webmail_reconfigure_confirm'))) return;
         try {
-            const r = await api('/mail/webmail', { method: 'POST', body: { hostname: wm.hostname } });
+            const r = await api('/mail/webmail', { method: 'POST', body: { hostname: wm.hostname, config_only: true } });
             watchTask(r.task_id, 'mail.webmail_setup');
             toast(t('mail.webmail_installing'));
         } catch (err) { toast(err.message, 'err'); }
