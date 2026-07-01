@@ -3431,12 +3431,24 @@ async function pageMail() {
     main().innerHTML = `
     ${tabsHtml('mail', 'mail')}
     <div class="page-head"><div class="spacer"></div>
+        ${state.me.role === 'admin' ? `<button class="btn" id="mailreconf" title="${t('mail.reconfigure_hint')}">${icon('refresh')}${t('mail.reconfigure')}</button>` : ''}
         ${wm?.hostname
             ? `<a class="btn" href="https://${esc(wm.hostname)}" target="_blank" rel="noopener">${icon('mail')}${t('mail.webmail')}</a>${state.me.role === 'admin' ? `<button class="btn" id="wmreconf" title="${t('mail.webmail_reconfigure_hint')}">${icon('refresh')}${t('mail.webmail_reconfigure')}</button>` : ''}`
             : state.me.role === 'admin' ? `<button class="btn" id="wmsetup">${icon('mail')}${t('mail.webmail_install')}</button>` : ''}
         <button class="btn primary" id="newdom">${icon('plus')}${t('mail.new_domain')}</button></div>
     <div class="card" id="domains">${t('common.loading')}</div>
     <div id="detail"></div>`;
+
+    // Rekonfiguriraj mail stack — prepiše Postfix/Dovecot/Rspamd config iz baze i restarta
+    // servise (bez apta). Popravlja auth drift (npr. default PAM koji zasjeni SQL passdb).
+    document.getElementById('mailreconf')?.addEventListener('click', async () => {
+        if (!await confirmDialog(t('mail.reconfigure_confirm'))) return;
+        try {
+            const r = await api('/mail/reconfigure', { method: 'POST' });
+            watchTask(r.task_id, 'mail.reconfigure');
+            toast(t('mail.reconfiguring'));
+        } catch (err) { toast(err.message, 'err'); }
+    });
 
     document.getElementById('wmsetup')?.addEventListener('click', async () => {
         const hostname = await promptDialog(t('mail.webmail_hostname'), { defaultValue: `webmail.${location.hostname}`, mono: true });

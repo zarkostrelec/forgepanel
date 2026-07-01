@@ -57,22 +57,7 @@ final class MailConf
             Proc::mustRun(['chown', "$owner:$owner", $dir]);
         }
 
-        $log("Read-only DB user za mail servise\n");
-        $mail_db_pass = bin2hex(random_bytes(24));
-        $quoted = $this->db->pdo()->quote($mail_db_pass);
-        foreach (['localhost', '127.0.0.1'] as $host) {
-            $this->db->pdo()->exec("CREATE USER IF NOT EXISTS 'forgepanel_mail'@'$host' IDENTIFIED BY $quoted");
-            $this->db->pdo()->exec("ALTER USER 'forgepanel_mail'@'$host' IDENTIFIED BY $quoted");
-            foreach (['mail_domains', 'mailboxes', 'mail_aliases'] as $table) {
-                $this->db->pdo()->exec("GRANT SELECT ON forgepanel.$table TO 'forgepanel_mail'@'$host'");
-            }
-        }
-        $this->db->pdo()->exec('FLUSH PRIVILEGES');
-
-        $this->writePostfixMaps($mail_db_pass);
-        $this->configurePostfix($fqdn, $log);
-        $this->configureDovecot($mail_db_pass, $log);
-        $this->configureRspamd($log);
+        $this->applyConfig($fqdn, $log);
 
         $log("Pokrećem servise\n");
         foreach (['postfix', 'dovecot', 'rspamd'] as $service) {
@@ -90,6 +75,53 @@ final class MailConf
                 [$name, $packages]
             );
         }
+    }
+
+    /**
+     * Rekonfiguracija već instaliranog mail stacka — bez apta/instalacije.
+     * Prepiše sve config datoteke (Postfix mape, Dovecot SQL auth, Rspamd) iz
+     * panel baze kao izvora istine i restarta servise. Koristi se kad se popravi
+     * ili promijeni predložak configa (npr. Dovecot auth), a stack je već gore.
+     */
+    public function reconfigure(?\Closure $log = null): void
+    {
+        $log ??= static fn (string $s) => null;
+        if (!is_dir(self::DKIM_DIR) || !Proc::run(['id', 'vmail'])->ok()) {
+            throw new ValidationException('Mail stack nije instaliran (mail.setup)');
+        }
+        $fqdn = $this->config->get('panel_fqdn', (string) gethostname());
+        $log("Rekonfiguracija mail stacka (bez instalacije)\n");
+        $this->applyConfig($fqdn, $log);
+
+        $log("Restart servisa (Postfix, Dovecot, Rspamd)\n");
+        foreach (['postfix', 'dovecot', 'rspamd'] as $service) {
+            Systemd::restart($service);
+        }
+    }
+
+    /**
+     * Deterministički (re)zapis cijele mail konfiguracije iz panel baze.
+     * Read-only DB user dobiva svjež password (Postfix i Dovecot ga dijele),
+     * pa su mape i SQL auth uvijek u sinkronizaciji. Idempotentno.
+     */
+    private function applyConfig(string $fqdn, \Closure $log): void
+    {
+        $log("Read-only DB user za mail servise\n");
+        $mail_db_pass = bin2hex(random_bytes(24));
+        $quoted = $this->db->pdo()->quote($mail_db_pass);
+        foreach (['localhost', '127.0.0.1'] as $host) {
+            $this->db->pdo()->exec("CREATE USER IF NOT EXISTS 'forgepanel_mail'@'$host' IDENTIFIED BY $quoted");
+            $this->db->pdo()->exec("ALTER USER 'forgepanel_mail'@'$host' IDENTIFIED BY $quoted");
+            foreach (['mail_domains', 'mailboxes', 'mail_aliases'] as $table) {
+                $this->db->pdo()->exec("GRANT SELECT ON forgepanel.$table TO 'forgepanel_mail'@'$host'");
+            }
+        }
+        $this->db->pdo()->exec('FLUSH PRIVILEGES');
+
+        $this->writePostfixMaps($mail_db_pass);
+        $this->configurePostfix($fqdn, $log);
+        $this->configureDovecot($mail_db_pass, $log);
+        $this->configureRspamd($log);
     }
 
     private function writePostfixMaps(string $mail_db_pass): void
@@ -174,6 +206,12 @@ final class MailConf
         // Stari 2.3 SQL fajl ukloni ako je zaostao (2.4 ga ne koristi)
         @unlink('/etc/dovecot/dovecot-sql.conf.ext');
 
+        // KLJUČNO: distro default (conf.d/10-auth.conf → auth-system.conf.ext) definira
+        // passdb pam + userdb passwd. Ti se učitavaju PRIJE našeg 99-forgepanel.conf i
+        // zasjenjuju SQL auth → Dovecot ide na PAM ("check pass; user unknown") i prijava
+        // pada iako je hash u bazi ispravan. Neutraliziraj default auth da ostane SAMO SQL.
+        $this->neutralizeDefaultDovecotAuth($log);
+
         $has_v6 = is_readable('/proc/net/if_inet6') && trim((string) file_get_contents('/proc/net/if_inet6')) !== '';
         $listen = $has_v6 ? '*, ::' : '*';
 
@@ -237,6 +275,51 @@ final class MailConf
         $check = Proc::run(['doveconf', '-n']);
         if (!$check->ok()) {
             throw new \RuntimeException('doveconf pao: ' . trim($check->stderr));
+        }
+
+        // Sigurnosna provjera: passdb/userdb u efektivnom configu MORAJU biti isključivo sql.
+        // Ako je zaostao pam/passwd (netipičan raspored defaulta), upozori u task logu —
+        // to je uzrok "check pass; user unknown". Ne rušimo task (fix je i dalje primijenjen).
+        $effective = strtolower($check->stdout);
+        if (str_contains($effective, 'passdb pam') || str_contains($effective, 'userdb passwd')
+            || str_contains($effective, 'driver = pam') || str_contains($effective, 'driver = passwd')) {
+            $log("UPOZORENJE: Dovecot još ima PAM/system passdb/userdb — SQL auth je možda "
+                . "zasjenjen. Provjeri /etc/dovecot/conf.d/10-auth.conf i auth-*.conf.ext.\n");
+        }
+    }
+
+    /**
+     * Onemogući distro-default Dovecot autentikaciju (PAM passdb + system userdb).
+     * Na Ubuntu/Debianu dolazi kroz conf.d/10-auth.conf koji uključuje
+     * auth-system.conf.ext. Zakomentiramo svaki aktivni "!include auth-*.conf.ext"
+     * i ispraznimo same auth-*.conf.ext datoteke (ako ih uključuje neki drugi fajl).
+     * Naš SQL passdb/userdb (99-forgepanel.conf) ostaje jedini. Idempotentno.
+     */
+    private function neutralizeDefaultDovecotAuth(\Closure $log): void
+    {
+        $auth_conf = '/etc/dovecot/conf.d/10-auth.conf';
+        if (is_file($auth_conf)) {
+            $src = (string) file_get_contents($auth_conf);
+            // Zakomentiraj SAMO aktivne include-ove default auth backendova
+            // (linije koje već počinju s '#' regex ne dira → idempotentno).
+            $patched = preg_replace(
+                '/^(\s*)(!include(?:_try)?\s+auth-\S+\.conf\.ext.*)$/m',
+                '$1# ForgePanel onemogućio: $2',
+                $src
+            );
+            if (is_string($patched) && $patched !== $src) {
+                file_put_contents($auth_conf, $patched);
+                $log("Dovecot: default auth include zakomentiran (10-auth.conf)\n");
+            }
+        }
+
+        // Isprazni default auth backend datoteke (passdb pam/passwd, sql, ldap, static...).
+        // Naš SQL auth živi u 99-forgepanel.conf, ne u ovim .ext datotekama.
+        $marker = "# ForgePanel: default auth backend onemogućen (SQL auth u 99-forgepanel.conf)\n";
+        foreach (glob('/etc/dovecot/conf.d/auth-*.conf.ext') ?: [] as $ext) {
+            if (@file_get_contents($ext) !== $marker) {
+                file_put_contents($ext, $marker);
+            }
         }
     }
 

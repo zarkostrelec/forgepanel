@@ -17,6 +17,7 @@ final class MailController extends Controller
     {
         $router->add('GET', '/api/v1/mail/status', $this->status(...));
         $router->add('POST', '/api/v1/mail/setup', $this->setup(...));
+        $router->add('POST', '/api/v1/mail/reconfigure', $this->reconfigure(...));
         $router->add('POST', '/api/v1/mail/webmail', $this->webmailSetup(...));
         $router->add('GET', '/api/v1/mail/domains', $this->domains(...));
         $router->add('POST', '/api/v1/mail/domains', $this->createDomain(...));
@@ -53,6 +54,30 @@ final class MailController extends Controller
         }
         $task_id = $this->app->tasks->enqueue('mail.setup', [], $ctx->user_id);
         $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.setup', null, $request->ip);
+        Response::ok(['task_id' => $task_id], 202);
+    }
+
+    /**
+     * Rekonfiguracija već instaliranog mail stacka (bez apta) — admin, task.
+     * Prepiše Postfix/Dovecot/Rspamd config iz baze i restarta servise; koristi se
+     * nakon promjene predloška configa (npr. Dovecot SQL auth vs. default PAM).
+     */
+    private function reconfigure(Request $request): never
+    {
+        $ctx = $this->ctx($request, 'mail:write');
+        $ctx->requireRole('admin');
+        if (!$this->mailInstalled()) {
+            throw new HttpException(409, 'mail_not_installed');
+        }
+        // Ne gomilaj duplikate na višestruki klik.
+        $existing = $this->app->db->one(
+            "SELECT id FROM tasks WHERE op = 'mail.reconfigure' AND status IN ('pending', 'running') ORDER BY id DESC LIMIT 1"
+        );
+        if ($existing !== null) {
+            Response::ok(['task_id' => (int) $existing['id'], 'already_running' => true], 202);
+        }
+        $task_id = $this->app->tasks->enqueue('mail.reconfigure', [], $ctx->user_id);
+        $this->app->audit->log($ctx->user_id, $ctx->email, 'mail.reconfigure', null, $request->ip);
         Response::ok(['task_id' => $task_id], 202);
     }
 
