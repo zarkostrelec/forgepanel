@@ -87,6 +87,18 @@ final class WebmailSetup extends Operation
         $context->output("Roundcube konfiguracija (IMAP/SMTP localhost)\n");
         $context->progress(60);
         $des_key = bin2hex(random_bytes(12)); // točno 24 znaka
+
+        // Uključi SAMO plugine koji stvarno postoje na disku → nema "Failed to load plugin
+        // file" spama u logu ni polufunkcionalnih gumba. managesieve namjerno izostavljen
+        // dok se ne postavi sieve server (dovecot-managesieved:4190) — inače baca grešku pri
+        // otvaranju filtera. archive/zipdownload su core i nemaju serverskih ovisnosti.
+        $plugins_dir = is_dir('/var/lib/roundcube/plugins') ? '/var/lib/roundcube/plugins' : '/usr/share/roundcube/plugins';
+        $available_plugins = array_values(array_filter(
+            ['archive', 'zipdownload'],
+            static fn (string $p): bool => is_file("$plugins_dir/$p/$p.php")
+        ));
+        $plugins_json = json_encode($available_plugins, JSON_UNESCAPED_SLASHES);
+
         $config = <<<PHP
         <?php
         /* ForgePanel — Roundcube konfiguracija (NE uređivati ručno, panel je prepisuje) */
@@ -104,8 +116,7 @@ final class WebmailSetup extends Operation
         \$config['des_key'] = '{$des_key}';
         \$config['product_name'] = 'Webmail';
         \$config['support_url'] = '';
-        \$config['plugins'] = ['archive', 'zipdownload', 'managesieve'];
-        \$config['managesieve_host'] = 'localhost:4190';
+        \$config['plugins'] = {$plugins_json};
         \$config['enable_installer'] = false;
         \$config['language'] = 'hr_HR';
         PHP;
@@ -133,8 +144,10 @@ final class WebmailSetup extends Operation
         ; /usr/share/php je OBAVEZAN: Roundcube (Debian/Ubuntu paket) učitava biblioteke
         ; odande preko include_patha — Net_SMTP (slanje), Mail_mime, Net_Sieve, Auth_SASL...
         ; Bez njega slanje pada s "Nemoguće doći do poslužitelja" (SMTP klasa se ne učita),
-        ; iako je socket do Postfixa otvoren.
-        php_admin_value[open_basedir] = /var/lib/roundcube:/usr/share/roundcube:/usr/share/php:/etc/roundcube:/var/log/roundcube:/tmp
+        ; iako je socket do Postfixa otvoren. /usr/share/javascript + /usr/share/nodejs su
+        ; asseti elastic skina (jQuery/jQuery-UI, Bootstrap) na koje Roundcube simlinka —
+        ; bez njih skin baca open_basedir upozorenja i dijelovi UI-ja ne renderiraju.
+        php_admin_value[open_basedir] = /var/lib/roundcube:/usr/share/roundcube:/usr/share/php:/usr/share/javascript:/usr/share/nodejs:/etc/roundcube:/var/log/roundcube:/tmp
         php_admin_value[upload_max_filesize] = 25M
         php_admin_value[post_max_size] = 26M
         php_admin_flag[expose_php] = off
