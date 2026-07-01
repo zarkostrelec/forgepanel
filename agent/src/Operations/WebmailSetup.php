@@ -130,7 +130,11 @@ final class WebmailSetup extends Operation
         pm = ondemand
         pm.max_children = 8
         pm.process_idle_timeout = 30s
-        php_admin_value[open_basedir] = /var/lib/roundcube:/usr/share/roundcube:/etc/roundcube:/var/log/roundcube:/tmp
+        ; /usr/share/php je OBAVEZAN: Roundcube (Debian/Ubuntu paket) učitava biblioteke
+        ; odande preko include_patha — Net_SMTP (slanje), Mail_mime, Net_Sieve, Auth_SASL...
+        ; Bez njega slanje pada s "Nemoguće doći do poslužitelja" (SMTP klasa se ne učita),
+        ; iako je socket do Postfixa otvoren.
+        php_admin_value[open_basedir] = /var/lib/roundcube:/usr/share/roundcube:/usr/share/php:/etc/roundcube:/var/log/roundcube:/tmp
         php_admin_value[upload_max_filesize] = 25M
         php_admin_value[post_max_size] = 26M
         php_admin_flag[expose_php] = off
