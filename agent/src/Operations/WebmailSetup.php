@@ -86,7 +86,11 @@ final class WebmailSetup extends Operation
 
         $context->output("Roundcube konfiguracija (IMAP/SMTP localhost)\n");
         $context->progress(60);
-        $des_key = bin2hex(random_bytes(12)); // točno 24 znaka
+        // des_key MORA biti stabilan preko rekonfiguracija — njime se šifrira korisnička
+        // IMAP lozinka u sesiji/cookieju. Ako se promijeni, sve aktivne sesije dobiju
+        // "Empty password" (dešifriranje padne) i IMAP veza puca. Zadrži postojeći iz
+        // trenutnog configa; generiraj novi (24 znaka) samo pri prvom setupu.
+        $des_key = $this->existingDesKey() ?? bin2hex(random_bytes(12));
 
         // Uključi SAMO plugine koji stvarno postoje na disku → nema "Failed to load plugin
         // file" spama u logu ni polufunkcionalnih gumba. managesieve namjerno izostavljen
@@ -183,6 +187,23 @@ final class WebmailSetup extends Operation
         $context->progress(100);
         $context->output("Webmail spreman: https://$hostname (cert izdaje AutoSSL task)\n");
         return ['hostname' => $hostname];
+    }
+
+    /**
+     * Postojeći des_key iz /etc/roundcube/config.inc.php (radi stabilnosti sesija
+     * preko rekonfiguracija). null ako config ne postoji ili nema ključa.
+     */
+    private function existingDesKey(): ?string
+    {
+        $file = '/etc/roundcube/config.inc.php';
+        if (!is_file($file)) {
+            return null;
+        }
+        $src = (string) file_get_contents($file);
+        if (preg_match("/\\\$config\\['des_key'\\]\\s*=\\s*'([^']+)'/", $src, $m)) {
+            return $m[1];
+        }
+        return null;
     }
 
     /**
