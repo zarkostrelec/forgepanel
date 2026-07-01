@@ -71,6 +71,15 @@ final class MailController extends Controller
             throw new HttpException(422, 'invalid_hostname');
         }
 
+        // Ne gomilaj duplikate — ako već postoji pending/running webmail setup task, vrati
+        // njega umjesto novog (spriječi hrpu zaglavljenih taskova na višestruki klik).
+        $existing = $this->app->db->one(
+            "SELECT id FROM tasks WHERE op = 'mail.webmail_setup' AND status IN ('pending', 'running') ORDER BY id DESC LIMIT 1"
+        );
+        if ($existing !== null) {
+            Response::ok(['task_id' => (int) $existing['id'], 'hostname' => $hostname, 'already_running' => true], 202);
+        }
+
         // Rekonfiguracija (config_only): samo prepiši Roundcube config, bez apta i bez
         // ponovnog izdavanja certifikata (cert i vhost već postoje).
         $config_only = (bool) ($request->body['config_only'] ?? false);
