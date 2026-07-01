@@ -229,6 +229,12 @@ final class MailConf
         mail_home = /var/vmail/%{user | domain}/%{user | username}
         mail_driver = maildir
         mail_path = ~/Maildir
+        # KLJUČNO: distro default (10-mail.conf) postavlja mail_inbox_path = /var/mail/%{user}
+        # (klasična Unix mbox spool lokacija). Za virtualne Maildir korisnike to gura INBOX
+        # na /var/mail/<user> gdje vmail (uid<1000) ne smije pisati → "mkdir_parents ...
+        # Permission denied" → [SERVERBUG] na INBOX STATUS/SELECT (webmail "Internal error").
+        # Prazna vrijednost vraća INBOX u Maildir root (~/Maildir), gdje su cur/new/tmp.
+        mail_inbox_path =
 
         ssl = yes
         ssl_server_cert_file = /etc/forgepanel/ssl/panel/fullchain.pem
